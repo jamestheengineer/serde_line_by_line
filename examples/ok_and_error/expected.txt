@@ -1,0 +1,15 @@
+AsText     -> type Ok = String
+ByteCount  -> type Ok = usize
+
+value                    AsText  bytes
+true                     "true"      4
+-42i32                    "-42"      3
+7u8                         "7"      1
+1.5f64                    "1.5"      3
+'R'                         "R"      1
+"serde"                 "serde"      5
+Option::<u8>::None       "null"      4
+Some(9u8)                   "9"      1
+
+The values never learn which format they were given to.
+compound types are refused: this format supports scalars only

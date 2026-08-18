@@ -1,0 +1,6 @@
+# Regenerate with `cargo xtask pin`.
+# src_tree_sha256 protects annotation line ranges: if it moves, the
+# coverage gate fails until the change is an explicit migration.
+version = "1.0.229"
+crate_sha256 = "67dca2c9c51e58a4791a4b1ed58308b39c64224d349a935ab5039aa360942a48"
+src_tree_sha256 = "b8633d743b82269f6b6909909f39fb6a645db2c090b9a0aefab010ecc38e89e9"

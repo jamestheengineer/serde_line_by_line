@@ -20,7 +20,7 @@ Pinned, vendored, and checksum-verified against crates.io:
 | sha256 | `67dca2c9c51e58a4791a4b1ed58308b39c64224d349a935ab5039aa360942a48` |
 | license | MIT OR Apache-2.0 (both texts retained in `vendor/`) |
 | upstream | https://github.com/serde-rs/serde |
-| size | 19 source files, 12,056 lines, 7,209 code / 3,546 doc / 1,142 blank |
+| size | 19 source files, **12,037 lines**, 3,546 of them doc comments (29%) |
 | dependencies | **none** |
 
 `serde_core` was chosen over `serde` deliberately. It is the crate that actually
@@ -38,22 +38,26 @@ This drove the whole plan, so it is recorded here rather than in a commit messag
 
 | file | lines | doc | code | items | macro defs | macro uses | est. units | profile |
 |---|---:|---:|---:|---:|---:|---:|---:|---|
-| `de/impls.rs` | 3,174 | 52 | 2,666 | 322 | 20 | 106 | 408 | macro-driven |
-| `de/mod.rs` | 2,393 | 1,396 | 831 | 147 | 1 | 8 | 147 | doc-heavy |
-| `ser/mod.rs` | 2,011 | 1,616 | 304 | 93 | 1 | 5 | 111 | doc-heavy |
-| `de/value.rs` | 1,896 | 72 | 1,551 | 235 | 2 | 43 | 251 | macro-driven |
-| `ser/impls.rs` | 1,046 | 51 | 889 | 86 | 10 | 59 | 130 | macro-driven |
-| `de/ignored_any.rs` | 239 | 103 | 113 | 19 | 0 | 1 | 19 | doc-heavy |
-| `macros.rs` | 231 | 105 | 119 | 4 | 3 | 30 | 12 | doc-heavy |
-| `ser/impossible.rs` | 217 | 51 | 139 | 31 | 0 | 0 | 31 | logic |
-| `crate_root.rs` | 172 | 3 | 136 | 10 | 2 | 1 | 10 | logic |
-| `ser/fmt.rs` | 171 | 18 | 133 | 28 | 1 | 1 | 28 | logic |
-| `private/doc.rs` | 166 | 0 | 154 | 21 | 4 | 33 | 21 | logic |
-| `lib.rs` | 122 | 35 | 60 | 3 | 1 | 1 | 6 | logic |
-| `std_error.rs` | 49 | 41 | 6 | 2 | 0 | 0 | 2 | doc-heavy |
-| `private/*` (5 files) | 138 | 3 | 98 | 15 | 0 | 0 | 16 | logic |
-| `format.rs` | 31 | 0 | 26 | 3 | 0 | 0 | 3 | logic |
-| **total** | **12,056** | **3,546** | | | **45** | **288** | **~1,195** | |
+| `de/impls.rs` | 3,173 | 52 | 2,655 | 322 | 20 | 106 | 408 | macro-driven |
+| `de/mod.rs` | 2,392 | 1,396 | 831 | 147 | 1 | 8 | 147 | doc-heavy |
+| `ser/mod.rs` | 2,010 | 1,616 | 304 | 93 | 1 | 5 | 111 | doc-heavy |
+| `de/value.rs` | 1,895 | 72 | 1,551 | 235 | 2 | 43 | 251 | macro-driven |
+| `ser/impls.rs` | 1,045 | 51 | 889 | 86 | 10 | 59 | 130 | macro-driven |
+| `de/ignored_any.rs` | 238 | 103 | 113 | 19 | 0 | 1 | 19 | doc-heavy |
+| `macros.rs` | 230 | 105 | 119 | 4 | 3 | 30 | 12 | doc-heavy |
+| `ser/impossible.rs` | 216 | 51 | 139 | 31 | 0 | 0 | 31 | logic |
+| `crate_root.rs` | 171 | 3 | 136 | 10 | 2 | 1 | 10 | logic |
+| `ser/fmt.rs` | 170 | 18 | 133 | 28 | 1 | 1 | 28 | logic |
+| `private/doc.rs` | 165 | 0 | 154 | 21 | 4 | 33 | 21 | logic |
+| `lib.rs` | 121 | 35 | 59 | 3 | 1 | 1 | 6 | logic |
+| `std_error.rs` | 48 | 41 | 6 | 2 | 0 | 0 | 2 | doc-heavy |
+| `private/content.rs` | 39 | 0 | 26 | 1 | 0 | 0 | 2 | logic |
+| `format.rs` | 30 | 0 | 26 | 3 | 0 | 0 | 3 | logic |
+| `private/size_hint.rs` | 30 | 0 | 26 | 4 | 0 | 0 | 4 | logic |
+| `private/string.rs` | 23 | 0 | 11 | 2 | 0 | 0 | 2 | logic |
+| `private/mod.rs` | 21 | 0 | 16 | 5 | 0 | 0 | 5 | logic |
+| `private/seed.rs` | 20 | 3 | 15 | 3 | 0 | 0 | 3 | logic |
+| **total** | **12,037** | **3,546** | | | **45** | **288** | **~1,195** | |
 
 Three facts that make "every line" tractable:
 
@@ -62,10 +66,10 @@ Three facts that make "every line" tractable:
    the job is *annotating and contextualizing existing prose*, not writing from
    scratch.
 2. **45 `macro_rules!` definitions generate 288 invocations.** `de/impls.rs` is
-   3,174 lines but has only ~20 unique macro bodies. Explain a macro once, then
+   3,173 lines but has only ~20 unique macro bodies. Explain a macro once, then
    each of its 106 invocations costs a line of reference, not a paragraph.
 3. The real unit of work is **~1,195 annotations averaging ~10 lines each**, not
-   12,056 individual line comments.
+   12,037 individual line comments.
 
 ---
 
@@ -280,7 +284,7 @@ serde_line_by_line/
 
 | phase | scope | units | exit criteria |
 |---|---|---:|---|
-| **0 — Foundation** | Schema, `xtask coverage`, vendor pin check, CI, example harness | 0 | `cargo xtask coverage` reports 0/12,056 without error; CI green |
+| **0 — Foundation** | Schema, `xtask coverage`, vendor pin check, CI, example harness | 0 | `cargo xtask coverage` reports 0/12,037 without error; CI green |
 | **1 — Vertical slice** | `ser/mod.rs` fully annotated + three-pane app MVP | 111 | One file at 100%, readable end-to-end in the browser, 5 examples running as WASM |
 | **2 — Rest of `ser/`** | `impls.rs`, `impossible.rs`, `fmt.rs` | 189 | `ser/` at 100%; macro-def/macro-use rendering proven on `impls.rs` |
 | **3 — `de/` contracts** | `de/mod.rs`, `de/ignored_any.rs` | 166 | The `'de` lifetime story is fully told |

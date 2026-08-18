@@ -1,0 +1,7 @@
+# Per-file completion status.
+#
+# A file listed under `complete` turns coverage gaps from a warning into a hard
+# CI failure. Add a file here only when every one of its lines is claimed.
+source = "serde_core-1.0.229"
+
+complete = []

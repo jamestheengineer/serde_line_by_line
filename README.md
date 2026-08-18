@@ -8,8 +8,13 @@ Along the way it teaches Rust: lifetimes, trait design, associated types,
 generic bounds, `macro_rules!`, and `no_std` engineering, using one of the most
 carefully written crates in the ecosystem as the worked example.
 
-> **Status: planning.** No application code yet. See **[PLAN.md](PLAN.md)** for
-> the full design, effort model, and roadmap.
+> **Status: phase 0 complete.** The content pipeline is built and enforced; the
+> reader app is not. See **[PLAN.md](PLAN.md)** for the full design and roadmap.
+>
+> ```
+> $ cargo xtask coverage
+> TOTAL                        12037       29       2   0.2%
+> ```
 
 ---
 
@@ -18,7 +23,7 @@ carefully written crates in the ecosystem as the worked example.
 `serde` itself is a 5-file facade — 94% of its compiled code is derive-support
 plumbing. **`serde_core`** is where the real content lives:
 
-- 19 files, 12,056 lines, **zero dependencies**
+- 19 files, 12,037 lines, **zero dependencies**
 - 29% of it is already doc comments written by dtolnay
 - 45 `macro_rules!` definitions driving 288 invocations
 
@@ -32,7 +37,7 @@ source file is claimed by exactly one annotation, and CI fails on regressions
 once a file is marked complete.
 
 The work is roughly **1,195 annotation units** averaging ~10 lines each — not
-12,056 individual comments, because doc-comment blocks and repeated macro
+12,037 individual comments, because doc-comment blocks and repeated macro
 invocations compress heavily.
 
 ## Shape of the app

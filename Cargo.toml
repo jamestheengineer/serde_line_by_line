@@ -1,0 +1,8 @@
+[workspace]
+resolver = "2"
+members = ["xtask", "examples/*"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/jamestheengineer/serde_line_by_line"

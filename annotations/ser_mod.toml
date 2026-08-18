@@ -1,0 +1,57 @@
+schema = 1
+source = "serde_core-1.0.229"
+
+[[annotation]]
+id    = "ser-mod-0001"
+file  = "src/ser/mod.rs"
+lines = "1-9"
+title = "Two traits, two roles: data structures and data formats"
+kind  = "doc-contract"
+tracks = ["reference", "course"]
+course_unit = "01-why-a-data-model"
+rust_features = ["traits"]
+examples = ["ok_and_error"]
+body = """
+The module opens by stating Serde's central organizing idea, and it is worth
+reading slowly because everything else follows from it.
+
+There are two roles, and they are held by different people:
+
+- **`Serialize` is implemented by a data structure.** You write it (or derive
+  it) for `struct User`. It says: *here is how to describe myself.*
+- **`Serializer` is implemented by a data format.** `serde_json` writes it. It
+  says: *here is how to write down anything that describes itself.*
+
+Neither one knows about the other. `User` has never heard of JSON;
+`serde_json` has never heard of `User`. They meet only through the trait pair.
+
+That is what makes the ecosystem N+M instead of N×M: adding a new format does
+not require touching any data structure, and adding a new data structure does
+not require touching any format.
+"""
+
+[[annotation]]
+id    = "ser-mod-0002"
+file  = "src/ser/mod.rs"
+lines = "10-29"
+title = "Where Serialize implementations come from"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["traits", "proc-macro-boundary"]
+prereqs = ["ser-mod-0001"]
+body = """
+Four sources of `Serialize` impls, in rough order of how often you will meet
+them:
+
+1. **Built in.** serde_core ships impls for primitives and std types. Those live
+   in `src/ser/impls.rs`, and they are the bulk of that 1,046-line file.
+2. **Derived.** `#[derive(Serialize)]` from `serde_derive`. Note the boundary:
+   the derive macro is *not* in this crate. serde_core deliberately contains no
+   proc-macro dependency, which is why it can compile before `syn` has finished.
+3. **Hand-written.** For the rare type whose representation you want to control.
+4. **Third-party.** A crate can implement `Serialize` for its own types.
+
+Point 2 is the one to hold on to. The split between `serde`, `serde_core`, and
+`serde_derive` exists precisely so that this file — the trait definitions —
+does not have to wait on a proc-macro toolchain to compile.
+"""
