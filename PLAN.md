@@ -106,7 +106,7 @@ than discovered in month three.
 
 | decision | choice | why |
 |---|---|---|
-| App form | **Web app, custom reader** (Axum + Askama) | Full control over the three-pane layout and narrative flow; deployable so others can read it; matches the existing Rust web stack. |
+| App form | **Web app, custom reader** — static site generator, Askama templates, Axum dev server ([D3](docs/decisions.md)) | Full control over the three-pane layout and narrative flow; deployable so others can read it; matches the existing Rust web stack. |
 | Example execution | **Both** — WASM for deploy, local cargo for development | Real computed output in the browser with no backend; real rustc errors and debugger stepping locally. |
 | Content sequencing | **Two tracks in parallel** | Reference track guarantees 100% coverage; course track serves the teaching objective. One annotation store, two orderings. |
 | Source handling | **Vendored + checksum-pinned** | Annotations are line-range keyed. Upstream drift must be an explicit migration, never a silent break. |
@@ -314,15 +314,21 @@ compression proven in phase 2.
 | **Course track over-claims.** Pretending serde_core teaches all of Rust would be dishonest. | §2 is committed to the repo. Supplementary units are labeled as such in the UI. |
 | **Scope creep to `serde` / `serde_derive`.** | Out of scope for v1. Revisit only after the reference track hits 100%. |
 
-**Open questions to resolve in phase 0:**
+**Resolved in phase 0** — see [`docs/decisions.md`](docs/decisions.md) for the
+measurements behind each:
 
-1. WASM strategy — `wasm-bindgen` vs raw `wasm32-unknown-unknown` with a thin
-   JS shim. Leaning `wasm-bindgen` for ergonomics; revisit if payload size bites.
-2. Syntax highlighting — server-side `syntect` (Rust-native, no JS, but couples
-   rendering to the backend) vs client-side. Leaning `syntect`.
-3. Whether the app should be a static-site generator with an optional Axum dev
-   server, rather than a live server. Static deploys are cheaper and the content
-   is read-only; the WASM decision makes a live backend unnecessary. **Likely
-   yes** — decide in phase 0.
-4. Scroll-sync UX between source pane and explanation pane: anchored jumps vs
-   continuous sync.
+1. **D1 — WASM via `wasm-bindgen`**, one shared playground module, version
+   pinned. The raw `wasm32-unknown-unknown` ABI saved only 4.6 KB gzipped and
+   required hand-rolled unsafe to pass a `String` across the boundary.
+2. **D2 — syntect at build time, class-based, per-annotation-span granularity.**
+   A ten-line span renders to 3.8 KB (0.5 KB gzipped). Whole-file rendering was
+   the wrong question, and a per-file generator produces spans that cross line
+   boundaries, which line-keyed annotations cannot use.
+3. **D3 — static site generator** with Askama templates plus an Axum dev server.
+   Nothing needs a backend at request time once examples run as WASM and
+   highlighting is precomputed.
+
+**Still open:**
+
+4. Scroll-sync UX between source and explanation panes: anchored jumps vs
+   continuous sync. Deferred to phase 1, to be tried against real content.
