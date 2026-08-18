@@ -20,7 +20,7 @@ pub struct AnnotationFile {
     pub annotations: Vec<Annotation>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Annotation {
     pub id: String,
@@ -92,7 +92,9 @@ impl LineRange {
         Ok(LineRange { start, end })
     }
 
-    pub fn len(&self) -> u32 {
+    /// Number of lines the range covers. Always at least 1 — a range is
+    /// non-empty by construction, which is why this is not `len`/`is_empty`.
+    pub fn line_count(&self) -> u32 {
         self.end - self.start + 1
     }
 

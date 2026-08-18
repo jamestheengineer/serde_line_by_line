@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}serde line by line{% endblock %}</title>
+<link rel="stylesheet" href="{{ root }}static/syntax.css">
+<link rel="stylesheet" href="{{ root }}static/app.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="{{ root }}index.html">serde&nbsp;line&nbsp;by&nbsp;line</a>
+  <span class="src-id">{{ source_id }}</span>
+  <button id="theme" class="theme" type="button" aria-label="Toggle colour theme">◐</button>
+</header>
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-head">source files</div>
+    <ul>
+    {% for f in nav %}
+      <li{% if f.path == current %} class="here"{% endif %}>
+        <a href="{{ root }}file/{{ f.href }}">
+          <span class="fname">{{ f.short }}</span>
+          <span class="fmeta">{{ f.lines }}</span>
+        </a>
+        <div class="minibar"><i style="width:{{ f.percent }}%"></i></div>
+      </li>
+    {% endfor %}
+    </ul>
+  </aside>
+  <main>
+{% block content %}{% endblock %}
+  </main>
+</div>
+<script src="{{ root }}static/app.js"></script>
+</body>
+</html>

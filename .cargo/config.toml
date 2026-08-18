@@ -1,2 +1,4 @@
 [alias]
 xtask = "run --quiet --package xtask --"
+site  = "run --quiet --package app --bin build-site --"
+dev   = "run --quiet --package app --features dev --bin dev --"

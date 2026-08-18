@@ -8,8 +8,15 @@ Along the way it teaches Rust: lifetimes, trait design, associated types,
 generic bounds, `macro_rules!`, and `no_std` engineering, using one of the most
 carefully written crates in the ecosystem as the worked example.
 
-> **Status: phase 0 complete.** The content pipeline is built and enforced; the
-> reader app is not. See **[PLAN.md](PLAN.md)** for the full design and roadmap.
+> **Status: phase 1 in progress.** The pipeline and the reader both build; the
+> annotations are barely started. See **[PLAN.md](PLAN.md)** for the roadmap and
+> **[docs/decisions.md](docs/decisions.md)** for the architecture calls.
+>
+> ```
+> cargo site     # generate site/
+> cargo dev      # serve it at http://127.0.0.1:8080
+> cargo xtask coverage
+> ```
 >
 > ```
 > $ cargo xtask coverage

@@ -3,8 +3,8 @@
 //! The effort model in PLAN.md came from this analysis. Keeping it as a command
 //! means the numbers are reproducible rather than a one-off measurement.
 
-use crate::vendor;
 use anyhow::Result;
+use slbl_core::vendor;
 use std::path::Path;
 
 struct FileStats {

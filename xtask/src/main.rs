@@ -6,11 +6,10 @@
 //!   cargo xtask stats               structural inventory of the pinned source
 
 mod coverage;
-mod schema;
 mod stats;
-mod vendor;
 
 use anyhow::{bail, Result};
+use slbl_core::vendor;
 use std::path::{Path, PathBuf};
 
 fn main() -> Result<()> {

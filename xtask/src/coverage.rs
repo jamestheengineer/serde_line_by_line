@@ -4,10 +4,10 @@
 //! slogan. It proves that every line of every pinned source file is claimed by
 //! exactly one annotation, and that every cross-reference resolves.
 
-use crate::schema::{Annotation, AnnotationFile, Kind, LineRange, Manifest, Track, SCHEMA_VERSION};
-use crate::vendor::{self, SOURCE_ID};
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
+use slbl_core::schema::{Annotation, Kind, LineRange, Manifest, Track};
+use slbl_core::vendor::{self, SOURCE_ID};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
@@ -81,7 +81,7 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
 
     let features = load_feature_vocabulary(repo)?;
     let examples = load_example_names(repo)?;
-    let annotations = load_annotations(repo, &mut diag)?;
+    let annotations = slbl_core::read_annotations(repo)?;
 
     // 2. Identity and cross-reference integrity.
     let mut by_id: HashMap<&str, &Annotation> = HashMap::new();
@@ -191,7 +191,9 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
                 if r.start > cursor {
                     gaps.push(fmt_gap(cursor, r.start - 1));
                 }
-                claimed += r.len().min(n.saturating_sub(r.start).saturating_add(1));
+                claimed += r
+                    .line_count()
+                    .min(n.saturating_sub(r.start).saturating_add(1));
                 cursor = cursor.max(r.end + 1);
             }
             if cursor <= n {
@@ -263,44 +265,6 @@ fn summarize(gaps: &[String]) -> String {
     } else {
         format!("{}, +{} more", gaps[..MAX].join(", "), gaps.len() - MAX)
     }
-}
-
-fn load_annotations(repo: &Path, diag: &mut Diagnostics) -> Result<Vec<Annotation>> {
-    let dir = repo.join("annotations");
-    let mut out = Vec::new();
-    let mut entries: Vec<_> = std::fs::read_dir(&dir)
-        .with_context(|| format!("reading {}", dir.display()))?
-        .collect::<std::io::Result<Vec<_>>>()?;
-    entries.sort_by_key(|e| e.path());
-
-    for entry in entries {
-        let path = entry.path();
-        if path.extension().is_none_or(|e| e != "toml") {
-            continue;
-        }
-        if path.file_name().is_some_and(|n| n == "manifest.toml") {
-            continue;
-        }
-        let text = std::fs::read_to_string(&path)?;
-        let parsed: AnnotationFile =
-            toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
-        if parsed.schema != SCHEMA_VERSION {
-            diag.error(format!(
-                "{}: schema {} but this tool understands {SCHEMA_VERSION}",
-                path.display(),
-                parsed.schema
-            ));
-        }
-        if parsed.source != SOURCE_ID {
-            diag.error(format!(
-                "{}: source {:?} does not match pinned {SOURCE_ID:?}",
-                path.display(),
-                parsed.source
-            ));
-        }
-        out.extend(parsed.annotations);
-    }
-    Ok(out)
 }
 
 /// The controlled vocabulary lives in `docs/rust-features.md` as list items of

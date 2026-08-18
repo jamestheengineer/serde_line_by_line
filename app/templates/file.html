@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ file }} — serde line by line{% endblock %}
+{% block content %}
+<div class="filehead">
+  <h1>{{ file }}</h1>
+  <div class="filestats">
+    <span>{{ lines }} lines</span>
+    <span>{{ percent_label }}% annotated</span>
+  </div>
+  <div class="bar thin"><i style="width:{{ percent }}%"></i></div>
+</div>
+
+{% for b in blocks %}
+<section class="block{% if !b.annotated %} gap{% endif %}" id="{{ b.id }}">
+  <div class="code">
+    <div class="codehead"><span class="range">{{ b.range_label }}</span></div>
+    <div class="src">
+    {%- for line in b.code %}
+      <div class="ln" id="{{ b.id }}-L{{ line.number }}"><span class="num">{{ line.number }}</span><code>{{ line.html|safe }}</code></div>
+    {%- endfor %}
+    {%- if b.hidden_lines > 0 %}
+      <div class="elided">&hellip; {{ b.hidden_lines }} more lines</div>
+    {%- endif %}
+    </div>
+  </div>
+  <div class="note">
+    {% if b.annotated %}
+      <div class="kind">{{ b.kind }}</div>
+      <h2>{{ b.title }}</h2>
+      <div class="prose">{{ b.body_html|safe }}</div>
+      {% if !b.features.is_empty() %}
+      <ul class="tags">{% for f in b.features %}<li>{{ f }}</li>{% endfor %}</ul>
+      {% endif %}
+      {% if !b.examples.is_empty() %}
+      <div class="examples">
+        {% for e in b.examples %}<button class="run" data-example="{{ e }}">Run {{ e }}</button>{% endfor %}
+        <pre class="output" hidden></pre>
+      </div>
+      {% endif %}
+    {% else %}
+      <div class="kind">gap</div>
+      <p class="pending">{{ b.title }}</p>
+    {% endif %}
+  </div>
+</section>
+{% endfor %}
+{% endblock %}

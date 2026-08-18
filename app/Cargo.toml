@@ -1,0 +1,31 @@
+[package]
+name = "app"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "build-site"
+path = "src/main.rs"
+
+# Dev-only. Kept behind a feature so the default build (and CI) stays lean.
+[[bin]]
+name = "dev"
+path = "src/bin/dev.rs"
+required-features = ["dev"]
+
+[features]
+dev = ["dep:axum", "dep:tokio", "dep:tower-http"]
+
+[dependencies]
+anyhow = "1"
+askama = "0.16"
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+slbl_core = { path = "../core" }
+# default-features = false avoids the `onig` C dependency; fancy-regex is pure Rust.
+syntect = { version = "5", default-features = false, features = ["default-fancy"] }
+
+axum = { version = "0.8", optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"], optional = true }
+tower-http = { version = "0.6", features = ["fs"], optional = true }

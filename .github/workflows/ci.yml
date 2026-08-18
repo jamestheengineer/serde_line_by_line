@@ -35,6 +35,10 @@ jobs:
       - name: Coverage
         run: cargo xtask coverage --json
 
+      # The site must build from the annotation store on every commit.
+      - name: Build site
+        run: cargo site
+
       - uses: actions/upload-artifact@v4
         with:
           name: coverage

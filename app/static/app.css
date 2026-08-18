@@ -1,0 +1,335 @@
+/* serde_line_by_line — reader styles.
+   Light palette at :root; dark redefines only the tokens, so an explicit
+   toggle wins in both directions and the system default still applies with no
+   attribute set. */
+
+:root {
+  --bg: #ffffff;
+  --bg-sunk: #f6f7f9;
+  --bg-code: #fbfbfd;
+  --fg: #1c1e21;
+  --fg-muted: #6b7280;
+  --fg-faint: #9aa1ab;
+  --line: #e3e6ea;
+  --line-strong: #cdd2d9;
+  --accent: #b7410e; /* rust */
+  --accent-soft: #f3e3dc;
+  --ok: #2f7d43;
+  --doc: #4a6fa5;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14171a;
+    --bg-sunk: #1a1e22;
+    --bg-code: #191d21;
+    --fg: #e6e8ea;
+    --fg-muted: #9aa4af;
+    --fg-faint: #6d7681;
+    --line: #262c32;
+    --line-strong: #364049;
+    --accent: #ff8a5c;
+    --accent-soft: #33231c;
+    --ok: #5ec27a;
+    --doc: #7ea6d8;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #14171a;
+  --bg-sunk: #1a1e22;
+  --bg-code: #191d21;
+  --fg: #e6e8ea;
+  --fg-muted: #9aa4af;
+  --fg-faint: #6d7681;
+  --line: #262c32;
+  --line-strong: #364049;
+  --accent: #ff8a5c;
+  --accent-soft: #33231c;
+  --ok: #5ec27a;
+  --doc: #7ea6d8;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+a { color: var(--accent); }
+
+/* ---------- header ---------- */
+
+.top {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 18px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.brand {
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  color: var(--fg);
+}
+
+.src-id {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+
+.theme {
+  margin-left: auto;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-sunk);
+  color: var(--fg-muted);
+  border-radius: 6px;
+  width: 30px;
+  height: 26px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+/* ---------- shell ---------- */
+
+.shell {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  align-items: start;
+}
+
+.nav {
+  position: sticky;
+  top: 47px;
+  max-height: calc(100vh - 47px);
+  overflow-y: auto;
+  padding: 14px 10px 40px;
+  border-right: 1px solid var(--line);
+  background: var(--bg-sunk);
+}
+
+.nav-head {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-faint);
+  padding: 0 8px 8px;
+}
+
+.nav ul { list-style: none; margin: 0; padding: 0; }
+.nav li { padding: 1px 8px 4px; border-radius: 6px; }
+.nav li.here { background: var(--accent-soft); }
+
+.nav a {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  text-decoration: none;
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 2px 0;
+}
+
+.nav a:hover { color: var(--accent); }
+.fmeta { color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+
+.minibar {
+  height: 3px;
+  background: var(--line);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.minibar i { display: block; height: 100%; background: var(--ok); }
+
+main { padding: 0 0 80px; min-width: 0; }
+
+/* ---------- index ---------- */
+
+.hero { padding: 34px 32px 8px; max-width: 760px; }
+.hero h1 { font-size: 30px; margin: 0 0 8px; letter-spacing: -0.02em; }
+.lede { color: var(--fg-muted); margin: 0 0 22px; }
+
+.bar {
+  height: 8px;
+  background: var(--line);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.bar.thin { height: 4px; }
+.bar i { display: block; height: 100%; background: var(--ok); }
+
+.figures {
+  display: flex;
+  gap: 20px;
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+.figures b { color: var(--fg); }
+
+.filelist { padding: 26px 32px; max-width: 760px; }
+.filelist h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-faint); }
+.filelist table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.filelist th { text-align: left; font-weight: 500; color: var(--fg-faint); border-bottom: 1px solid var(--line); padding: 6px 8px; }
+.filelist td { padding: 5px 8px; border-bottom: 1px solid var(--line); }
+.filelist td a { font-family: var(--mono); text-decoration: none; }
+.filelist .n { text-align: right; font-variant-numeric: tabular-nums; color: var(--fg-muted); }
+.filelist .barcell { width: 90px; }
+
+/* ---------- file page ---------- */
+
+.filehead { padding: 24px 32px 14px; border-bottom: 1px solid var(--line); }
+.filehead h1 { margin: 0; font-family: var(--mono); font-size: 18px; font-weight: 600; }
+.filestats { display: flex; gap: 16px; font-size: 12px; color: var(--fg-muted); margin: 6px 0 10px; }
+
+/* Code and prose sit in one grid row, so they are aligned by construction —
+   no scroll-syncing required. */
+.block {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  gap: 0;
+  border-bottom: 1px solid var(--line);
+  align-items: stretch;
+}
+
+.code {
+  background: var(--bg-code);
+  border-right: 1px solid var(--line);
+  padding: 10px 14px 12px 0;
+  min-width: 0;
+}
+
+.codehead { padding: 0 16px 6px; }
+.range {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+
+.src { font-family: var(--mono); font-size: 12.5px; line-height: 1.55; }
+
+/* Doc comments are 29% of this crate and run long, so lines wrap inside the
+   pane rather than disappearing behind a horizontal scrollbar. The number
+   column stays fixed, so a wrapped line still reads as one line. */
+.ln { display: flex; align-items: flex-start; }
+.ln:target { background: var(--accent-soft); }
+
+.num {
+  flex: 0 0 auto;
+  width: 52px;
+  padding-right: 14px;
+  text-align: right;
+  color: var(--fg-faint);
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.ln code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.note { padding: 14px 32px 20px 24px; min-width: 0; }
+
+.kind {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--fg-faint);
+}
+
+.note h2 { font-size: 16px; margin: 4px 0 10px; letter-spacing: -0.01em; }
+
+.prose { font-size: 14.5px; }
+.prose p { margin: 0 0 12px; }
+.prose code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  background: var(--bg-sunk);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.5px 4px;
+}
+.prose ul, .prose ol { margin: 0 0 12px; padding-left: 20px; }
+.prose li { margin-bottom: 4px; }
+
+.tags { list-style: none; display: flex; flex-wrap: wrap; gap: 5px; padding: 0; margin: 12px 0 0; }
+.tags li {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-muted);
+  background: var(--bg-sunk);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.examples { margin-top: 14px; }
+.run {
+  font: inherit;
+  font-size: 12.5px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-sunk);
+  color: var(--fg);
+  border-radius: 6px;
+  padding: 4px 11px;
+  cursor: pointer;
+}
+.run:hover { border-color: var(--accent); color: var(--accent); }
+
+.output {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--bg-sunk);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-top: 10px;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* Unannotated runs are shown, not hidden — the gaps are the work remaining. */
+.block.gap .code { opacity: 0.5; }
+.block.gap .note { display: flex; align-items: center; }
+.pending { color: var(--fg-faint); font-size: 13px; font-style: italic; margin: 0; }
+
+@media (max-width: 1100px) {
+  .block { grid-template-columns: minmax(0, 1fr); }
+  .code { border-right: none; border-bottom: 1px solid var(--line); }
+  .note { padding-left: 32px; }
+}
+
+@media (max-width: 720px) {
+  .shell { grid-template-columns: minmax(0, 1fr); }
+  .nav { position: static; max-height: none; border-right: none; border-bottom: 1px solid var(--line); }
+}
+
+.elided {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--fg-faint);
+  padding: 6px 0 2px 52px;
+}
+
+/* Doc comments are 29% of serde_core and are what most annotations discuss, so
+   they get their own colour rather than sharing one with ordinary comments.
+   Two classes beats syntect's single `.comment`, so order does not matter. */
+.comment.documentation { color: var(--doc); }

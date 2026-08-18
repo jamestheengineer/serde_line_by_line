@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}serde line by line{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>Every line of <code>serde_core</code></h1>
+  <p class="lede">
+    A guided walkthrough of the crate that holds Serde&rsquo;s trait definitions,
+    with explanations beside the source and runnable micro-examples.
+  </p>
+
+  <div class="progress">
+    <div class="bar"><i style="width:{{ percent }}%"></i></div>
+    <div class="figures">
+      <span><b>{{ percent_label }}%</b> annotated</span>
+      <span>{{ claimed_lines }} / {{ total_lines }} lines</span>
+      <span>{{ annotations }} annotations</span>
+    </div>
+  </div>
+</section>
+
+<section class="filelist">
+  <h2>Files</h2>
+  <table>
+    <thead><tr><th>file</th><th class="n">lines</th><th class="n">annotated</th><th></th></tr></thead>
+    <tbody>
+    {% for f in nav %}
+      <tr>
+        <td><a href="{{ root }}file/{{ f.href }}">{{ f.short }}</a></td>
+        <td class="n">{{ f.lines }}</td>
+        <td class="n">{{ f.percent_label }}%</td>
+        <td class="barcell"><div class="minibar"><i style="width:{{ f.percent }}%"></i></div></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

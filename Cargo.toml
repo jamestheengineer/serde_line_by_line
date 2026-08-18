@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["xtask", "examples/*"]
+members = ["core", "xtask", "app", "examples/*"]
 
 [workspace.package]
 edition = "2021"
