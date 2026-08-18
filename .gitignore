@@ -1,0 +1,7 @@
+/target
+**/target
+Cargo.lock
+/app/static/wasm/
+/coverage.json
+*.wasm
+.DS_Store
