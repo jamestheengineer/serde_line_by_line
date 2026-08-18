@@ -52,6 +52,20 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+
+      # Must match the exact pin in playground/Cargo.toml. If it drifts,
+      # `cargo xtask wasm` fails up front naming both versions.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.127
+
       # Every example must also build for the browser.
       - name: Build examples for wasm32
         run: cargo build --target wasm32-unknown-unknown $(printf -- '-p %s ' $(ls examples))
+
+      # Builds the playground and runs wasm-bindgen over it.
+      - name: Build playground
+        run: cargo xtask wasm
+
+      - name: Site with playground
+        run: cargo site

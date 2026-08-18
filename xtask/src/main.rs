@@ -4,9 +4,11 @@
 //!   cargo xtask coverage [--json]   verify annotations against the pinned source
 //!   cargo xtask pin                 recompute vendor/pin.toml from the vendored tree
 //!   cargo xtask stats               structural inventory of the pinned source
+//!   cargo xtask wasm                build the example playground for the browser
 
 mod coverage;
 mod stats;
+mod wasm;
 
 use anyhow::{bail, Result};
 use slbl_core::vendor;
@@ -23,6 +25,7 @@ fn main() -> Result<()> {
             coverage::run(&repo, json)?;
         }
         "pin" => pin(&repo)?,
+        "wasm" => wasm::run(&repo)?,
         "stats" => stats::run(&repo)?,
         "-h" | "--help" | "help" => print_help(),
         other => {
@@ -38,7 +41,8 @@ fn print_help() {
         "serde_line_by_line xtask\n\n\
          cargo xtask coverage [--json]   verify annotations against the pinned source\n\
          cargo xtask pin                 recompute vendor/pin.toml\n\
-         cargo xtask stats               structural inventory of the pinned source"
+         cargo xtask stats               structural inventory of the pinned source\n\
+         cargo xtask wasm                build the example playground for the browser"
     );
 }
 

@@ -126,13 +126,12 @@ fn main() -> Result<()> {
         write(&out.join("file").join(page_name(file)), &page.render()?)?;
     }
 
-    write(
-        &out.join("static").join("app.css"),
-        include_str!("../static/app.css"),
-    )?;
-    write(
-        &out.join("static").join("app.js"),
-        include_str!("../static/app.js"),
+    // Copied rather than embedded: the playground is a binary artefact, and it
+    // may legitimately be absent — the site must build without a wasm
+    // toolchain (see `cargo xtask wasm`).
+    copy_dir(
+        &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("static"),
+        &out.join("static"),
     )?;
     write(&out.join("static").join("syntax.css"), &syntax_css(&hl)?)?;
 
@@ -287,6 +286,26 @@ fn syntax_css(hl: &Highlighter) -> Result<String> {
          @media (prefers-color-scheme: dark) {{\n  :root:not([data-theme=\"light\"]) {{\n{dark}\n  }}\n}}\n\
          :root[data-theme=\"dark\"] {{\n{dark}\n}}\n"
     ))
+}
+
+/// Recursively copies `from` into `to`, creating directories as needed.
+fn copy_dir(from: &Path, to: &Path) -> Result<()> {
+    if !from.is_dir() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let src = entry.path();
+        let dst = to.join(entry.file_name());
+        if src.is_dir() {
+            copy_dir(&src, &dst)?;
+        } else {
+            std::fs::copy(&src, &dst)
+                .with_context(|| format!("copying {} to {}", src.display(), dst.display()))?;
+        }
+    }
+    Ok(())
 }
 
 fn write(path: &Path, contents: &str) -> Result<()> {

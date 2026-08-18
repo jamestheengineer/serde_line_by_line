@@ -1,8 +1,19 @@
 [workspace]
 resolver = "2"
-members = ["core", "xtask", "app", "examples/*"]
+members = ["core", "xtask", "app", "playground", "examples/*"]
 
 [workspace.package]
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/jamestheengineer/serde_line_by_line"
+
+# Profiles must live at the workspace root; a member's [profile] is ignored.
+# These matter for the browser playground (decision D1) and are harmless
+# elsewhere, since nothing else is built in release regularly.
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1
+
+[profile.release.package.playground]
+opt-level = "z"

@@ -13,8 +13,9 @@ carefully written crates in the ecosystem as the worked example.
 > **[docs/decisions.md](docs/decisions.md)** for the architecture calls.
 >
 > ```
-> cargo site     # generate site/
-> cargo dev      # serve it at http://127.0.0.1:8080
+> cargo xtask wasm   # build the example playground (needs wasm-bindgen-cli)
+> cargo site         # generate site/
+> cargo dev          # serve it at http://127.0.0.1:8080
 > cargo xtask coverage
 > ```
 >
