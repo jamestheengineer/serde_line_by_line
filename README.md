@@ -8,8 +8,8 @@ Along the way it teaches Rust: lifetimes, trait design, associated types,
 generic bounds, `macro_rules!`, and `no_std` engineering, using one of the most
 carefully written crates in the ecosystem as the worked example.
 
-> **Status: phase 1 in progress.** The pipeline and the reader both build; the
-> annotations are barely started. See **[PLAN.md](PLAN.md)** for the roadmap and
+> **Status: `ser/mod.rs` complete** — all 2,010 lines annotated, and the coverage
+> gate now hard-fails on any regression in that file. See **[PLAN.md](PLAN.md)** for the roadmap and
 > **[docs/decisions.md](docs/decisions.md)** for the architecture calls.
 >
 > ```

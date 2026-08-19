@@ -4,4 +4,4 @@
 # CI failure. Add a file here only when every one of its lines is claimed.
 source = "serde_core-1.0.229"
 
-complete = []
+complete = ["src/ser/mod.rs"]
