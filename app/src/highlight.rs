@@ -19,7 +19,17 @@ use syntect::html::{css_for_theme_with_class_style, line_tokens_to_classed_spans
 use syntect::parsing::{ParseState, ScopeStack, SyntaxReference, SyntaxSet};
 use syntect::util::LinesWithEndings;
 
-const CLASS_STYLE: ClassStyle = ClassStyle::Spaced;
+/// Syntax classes are namespaced with `s-`.
+///
+/// syntect derives class names from scope atoms, which include generic words
+/// like `block`, `line`, and `type`. Unprefixed, those collide with layout
+/// classes: `.block` matched 10,250 elements on the ser/mod.rs page — 48 real
+/// blocks and ~10,200 `meta.block` spans inside the code, every one of them
+/// picking up `display: grid` and a bottom border.
+///
+/// Prefixing makes the boundary explicit and closes the whole class of bug
+/// rather than the one instance of it.
+const CLASS_STYLE: ClassStyle = ClassStyle::SpacedPrefixed { prefix: "s-" };
 
 /// One source line, highlighted and self-contained.
 #[derive(Debug, Clone)]
