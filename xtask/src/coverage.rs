@@ -123,12 +123,25 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
         }
         // A macro-use annotation is only cheap because it links back to the
         // macro-def that explains it. Without that link it is just an
-        // unexplained span.
-        if a.kind == Kind::MacroUse && a.prereqs.is_empty() {
-            diag.warn(format!(
-                "{}: kind = macro-use but no prereq pointing at its macro-def",
+        // unexplained span, and the renderer has nothing to collapse it
+        // against — so this is an error, not a style note.
+        match (a.kind, a.macro_def.as_deref()) {
+            (Kind::MacroUse, None) => {
+                diag.error(format!("{}: kind = macro-use but no macro_def", a.id));
+            }
+            (Kind::MacroUse, Some(target)) => match by_id.get(target) {
+                None => diag.error(format!("{}: unknown macro_def {target:?}", a.id)),
+                Some(def) if def.kind != Kind::MacroDef => diag.error(format!(
+                    "{}: macro_def {target:?} has kind {:?}, expected macro-def",
+                    a.id, def.kind
+                )),
+                Some(_) => {}
+            },
+            (kind, Some(target)) => diag.error(format!(
+                "{}: macro_def {target:?} on kind {kind:?}; only macro-use may set it",
                 a.id
-            ));
+            )),
+            (_, None) => {}
         }
     }
 
@@ -328,7 +341,9 @@ fn find_cycle(by_id: &HashMap<&str, &Annotation>) -> Option<Vec<String>> {
         marks.insert(id.to_string(), Mark::Open);
         stack.push(id.to_string());
         if let Some(a) = by_id.get(id) {
-            for p in &a.prereqs {
+            // `macro_def` is a dependency edge just as much as a prereq is: the
+            // use cannot be read before the def. Both must stay acyclic.
+            for p in a.prereqs.iter().chain(a.macro_def.iter()) {
                 if let Some(c) = visit(p, by_id, marks, stack) {
                     return Some(c);
                 }

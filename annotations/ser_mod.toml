@@ -250,7 +250,7 @@ title = "The two invocations: std and no_std"
 kind  = "macro-use"
 tracks = ["reference"]
 rust_features = ["cfg", "no-std", "supertraits"]
-prereqs = ["ser-mod-0008"]
+macro_def = "ser-mod-0008"
 body = """
 The payoff. Two mutually exclusive calls, each expanding to the full trait from
 the previous annotation with a different supertrait list:

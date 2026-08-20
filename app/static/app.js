@@ -23,6 +23,31 @@
     });
   }
 
+  // ---- macro-use rows -----------------------------------------------------
+  // A macro-use group shows one row per invocation against a shared code pane,
+  // so a row is the only prose in the reader not sitting opposite its own
+  // lines. Hovering one marks exactly the lines it claims. CSS cannot express
+  // "the lines whose number falls in this row's range", so this much is script.
+  document.querySelectorAll(".block.macro").forEach(function (block) {
+    var lines = Array.prototype.slice.call(block.querySelectorAll(".ln"));
+    block.querySelectorAll(".use").forEach(function (row) {
+      var start = Number(row.dataset.start);
+      var end = Number(row.dataset.end);
+      var claimed = lines.filter(function (ln) {
+        var n = Number(ln.dataset.n);
+        return n >= start && n <= end;
+      });
+      function mark(on) {
+        claimed.forEach(function (ln) { ln.classList.toggle("lit", on); });
+      }
+      row.addEventListener("mouseenter", function () { mark(true); });
+      row.addEventListener("mouseleave", function () { mark(false); });
+      // Keyboard parity: the rows are tabbable, so focus gets the same cue.
+      row.addEventListener("focus", function () { mark(true); });
+      row.addEventListener("blur", function () { mark(false); });
+    });
+  });
+
   // ---- example playground (decision D1) -----------------------------------
   // Loaded lazily on first use, so a reader who never runs an example never
   // downloads the module.

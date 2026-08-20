@@ -1,0 +1,211 @@
+schema = 1
+source = "serde_core-1.0.229"
+
+[[annotation]]
+id    = "ser-impls-0001"
+file  = "src/ser/impls.rs"
+lines = "1-4"
+title = "Two imports for a thousand lines of impls"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["modules", "cfg", "no-std", "traits"]
+prereqs = ["ser-mod-0010"]
+body = """
+`crate::lib` is not a standard module. It is the facade that the `crate_root!`
+macro generates in `src/crate_root.rs`: one place that re-exports `String`,
+`Vec`, `Box`, `Cow`, `PhantomData` and the rest from `core`, `alloc`, or `std`
+depending on which features are enabled. Every module glob-imports it, so the
+`#[cfg]` wrangling happens once instead of nineteen times. That is why you will
+not find a single `#[cfg(feature = "alloc")] use alloc::...` below, in a file
+that implements `Serialize` for types drawn from all three crates.
+
+The second line imports four names, and two of them are here only so that method
+calls resolve. `Error` is a trait, and calls like `S::Error::custom("lock poison
+error while serializing")` further down need it in scope. `SerializeTuple` is the
+same: the array and tuple impls call `seq.serialize_element(...)`, which is one
+of its methods. Neither is named in a type position anywhere in this
+file — they are imported for their methods alone, which is a thing Rust makes you do and
+never tells you about until an error message does.
+"""
+
+[[annotation]]
+id    = "ser-impls-0002"
+file  = "src/ser/impls.rs"
+lines = "5-20"
+title = "primitive_impl! — sixteen impls from thirteen lines"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "macro-repetition", "traits", "inlining", "monomorphization"]
+examples = ["primitive_dispatch"]
+prereqs = ["ser-mod-0012", "ser-mod-0019"]
+body = """
+Thirteen lines that become sixteen `Serialize` implementations. The matcher is
+where the design is:
+
+```rust
+($ty:ident, $method:ident $($cast:tt)*)
+```
+
+The first two fragments are unremarkable — a type name and a method name, pasted
+into the body. The third is the interesting one.
+
+**Why `$($cast:tt)*`.** It is a repetition with no separator, so it matches
+either nothing at all or a run of arbitrary tokens. Fifteen invocations pass
+nothing. One passes `as i64` and one passes `as u64`, and those two tokens get
+spliced directly into `serializer.$method(*self $($cast)*)` to produce
+`*self as i64`.
+
+`tt` is the only fragment specifier that could work here. `as i64` is not an
+expression, not a type, and not any other nameable fragment — it is a piece of
+one. It also has to stay *transparent*: once `macro_rules!` matches something as
+`expr` or `ty`, the result is a single opaque AST node that cannot be pasted next
+to neighbouring tokens to build a larger expression. `tt` keeps tokens as tokens.
+This is the most common thing to get stuck on when writing a declarative macro
+for the first time, and this macro is a five-line demonstration of the fix.
+
+**What the body assumes.** `*self` is a copy, so every type passed in must be
+`Copy` — which is also why `str` and `String`, immediately below, are written
+out longhand instead. There is no `where` clause and no bound on `$ty`: these
+are sixteen concrete types, so there is nothing to constrain.
+
+**`$ty:ident`, not `$ty:ty`.** All sixteen arguments happen to be single
+identifiers, so the narrower specifier is enough. It also documents the
+restriction: you cannot invoke this with `Vec<u8>`.
+
+**Definition order matters.** Unlike an `fn` or a `struct`, a `macro_rules!`
+macro is only in scope *after* its definition, textually. That is why the
+definition sits directly above its uses here and in every other macro-driven
+file in this crate — not style, but the only arrangement that compiles.
+"""
+
+[[annotation]]
+id    = "ser-impls-0003"
+file  = "src/ser/impls.rs"
+lines = "21"
+title = "bool → serialize_bool"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition"]
+macro_def = "ser-impls-0002"
+body = """
+The plain shape, with an empty `$($cast)*`. `Serializer::serialize_bool` is a
+required method, so this impl reaches something every format in existence has
+had to write.
+"""
+
+[[annotation]]
+id    = "ser-impls-0004"
+file  = "src/ser/impls.rs"
+lines = "22"
+title = "isize → serialize_i64, widened"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition"]
+macro_def = "ser-impls-0002"
+body = """
+There is no `serialize_isize` on `Serializer`, and this line is why the macro
+accepts a trailing token sequence at all.
+
+`isize` is 64 bits on a typical host and 32 bits under `wasm32`. Putting a
+platform-dependent width into the data model would make the same program emit
+values of different types on different targets, so serde widens first and formats
+only ever see `i64`. Run the example: the method name in the trace is
+`serialize_i64` no matter where it runs.
+"""
+
+[[annotation]]
+id    = "ser-impls-0005"
+file  = "src/ser/impls.rs"
+lines = "23-27"
+title = "i8 … i128 → one method each"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["default-methods"]
+macro_def = "ser-impls-0002"
+prereqs = ["ser-mod-0021"]
+body = """
+Five exact-width types, five dedicated methods, no casts. A format that treats
+all signed integers alike can funnel them into one place — `Serializer`'s own
+docs suggest it — but that collapse is the format's decision, taken after the
+model has said precisely which type it had.
+
+`i128` is the exception in the group: its `Serializer` method is one of only two
+of these sixteen with a default body, and that body returns
+`Err(Error::custom("i128 is not supported"))`. Nothing here knows that. This impl
+forwards exactly like its neighbours, and a format that never opted in fails at
+run time rather than at compile time.
+"""
+
+[[annotation]]
+id    = "ser-impls-0006"
+file  = "src/ser/impls.rs"
+lines = "28"
+title = "usize → serialize_u64, widened"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition"]
+macro_def = "ser-impls-0002"
+body = """
+The same widening as `isize`, six lines and one signedness apart. This is the one
+of the pair you are most likely to meet, because `usize` is what Rust hands you
+for every length and index: a struct field holding a `Vec::len()` result goes out
+as a `u64`.
+"""
+
+[[annotation]]
+id    = "ser-impls-0007"
+file  = "src/ser/impls.rs"
+lines = "29-33"
+title = "u8 … u128 → the unsigned mirror"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["collections"]
+macro_def = "ser-impls-0002"
+prereqs = ["ser-mod-0027"]
+body = """
+Line-for-line the signed block, with `u128` carrying the same erroring default as
+`i128`.
+
+`u8` is the one worth pausing on, because of where it *does not* apply. A
+`Vec<u8>` never reaches this impl — it goes through the blanket slice impl below
+and comes out as a sequence of numbers, one `serialize_u8` call per byte, not as
+a byte string. That is the surprise behind `serde_bytes` existing at all.
+"""
+
+[[annotation]]
+id    = "ser-impls-0008"
+file  = "src/ser/impls.rs"
+lines = "34-35"
+title = "f32, f64 → straight through"
+kind  = "macro-use"
+tracks = ["reference"]
+macro_def = "ser-impls-0002"
+prereqs = ["ser-mod-0024"]
+body = """
+Two required methods, two plain forwards, no casts. Everything difficult about
+floats — shortest round-tripping decimal strings, `NaN`, the infinities — happens
+on the format's side of this call, which is exactly why the invocation is one
+line long.
+"""
+
+[[annotation]]
+id    = "ser-impls-0009"
+file  = "src/ser/impls.rs"
+lines = "36"
+title = "char → serialize_char, and the end of the macro"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["sized-bound", "strings"]
+macro_def = "ser-impls-0002"
+prereqs = ["ser-mod-0025"]
+body = """
+The sixteenth and last invocation, and the end of the generated stretch.
+
+Look at what follows: `str` and `String` get impls written out longhand, in
+blocks nearly identical to what the macro would have produced. The reason is one
+character in the transcriber. `*self` copies, and `str` is not `Sized` — there
+is nothing to copy. Both impls pass `self` by reference instead, so the body
+differs, so no macro. That is the whole boundary between the generated half of
+this file and the hand-written half.
+"""

@@ -12,7 +12,9 @@ mod markdown;
 use anyhow::{Context, Result};
 use askama::Template;
 use highlight::{Highlighter, Line};
+use slbl_core::schema::Kind;
 use slbl_core::{vendor, Store, Unit};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// A contiguous run of source lines shown as one row: code on the left,
@@ -31,6 +33,27 @@ struct Block {
     code: Vec<Line>,
     features: Vec<String>,
     examples: Vec<String>,
+    /// Set on macro-use blocks: the macro's name and a link to the annotation
+    /// that explains it. Empty strings mean "not a macro use" — the template
+    /// tests them rather than carrying an `Option`.
+    expands_name: String,
+    expands_href: String,
+    /// One row per invocation in a macro-use group. Empty for every other kind.
+    uses: Vec<Use>,
+}
+
+/// One invocation inside a macro-use group.
+///
+/// This is the compression the plan turns on: a run of invocations sharing a
+/// definition renders as rows under one heading rather than as one full-height
+/// block each. `de/impls.rs` has 106 of them.
+struct Use {
+    id: String,
+    label: String,
+    range_label: String,
+    body_html: String,
+    start: u32,
+    end: u32,
 }
 
 struct NavFile {
@@ -103,6 +126,7 @@ fn main() -> Result<()> {
     };
     write(&out.join("index.html"), &index.render()?)?;
 
+    let defs = macro_defs(&store);
     let root = vendor::vendor_root(&repo);
     for (file, lines) in &store.files {
         let text =
@@ -118,7 +142,7 @@ fn main() -> Result<()> {
             percent: percent_of(units, *lines),
             percent_label: format!("{:.1}", percent_of(units, *lines)),
             lines: *lines,
-            blocks: blocks_for(units, &highlighted),
+            blocks: blocks_for(units, &highlighted, &defs, file),
             source_id: vendor::SOURCE_ID.to_string(),
             root: "../".to_string(),
             current: file.clone(),
@@ -149,35 +173,192 @@ fn index_count(store: &Store) -> usize {
     store.by_file.values().map(Vec::len).sum()
 }
 
+/// Every `macro-def` annotation, by id, as `(file, macro name)`.
+///
+/// Built once for the whole store rather than per file, because a definition
+/// and its uses need not live in the same file — `macros.rs` defines three that
+/// are invoked thirty times elsewhere.
+fn macro_defs(store: &Store) -> BTreeMap<String, (String, String)> {
+    store
+        .by_file
+        .values()
+        .flatten()
+        .filter(|u| u.annotation.kind == Kind::MacroDef)
+        .map(|u| {
+            let a = &u.annotation;
+            (a.id.clone(), (a.file.clone(), macro_name(&a.title)))
+        })
+        .collect()
+}
+
+/// `primitive_impl! — one impl, sixteen times` -> `primitive_impl!`
+///
+/// Macro-definition titles lead with the macro's name by convention
+/// (`docs/annotation-style.md`). A title that does not follow the convention
+/// falls back to itself, which reads oddly but never renders as nothing.
+fn macro_name(title: &str) -> String {
+    match title.split_whitespace().next() {
+        Some(first) if first.ends_with('!') => first.to_string(),
+        _ => title.to_string(),
+    }
+}
+
 /// Splits a file into alternating annotated and unannotated blocks.
-fn blocks_for(units: &[Unit], highlighted: &[Line]) -> Vec<Block> {
+///
+/// Adjacent `macro-use` annotations sharing one definition are merged into a
+/// single block whose rows are the individual invocations. Without that, the
+/// sixteen `primitive_impl!` calls would be sixteen full-height blocks saying
+/// almost the same thing, and `de/impls.rs` would be 106 of them.
+fn blocks_for(
+    units: &[Unit],
+    highlighted: &[Line],
+    defs: &BTreeMap<String, (String, String)>,
+    file: &str,
+) -> Vec<Block> {
     let total = highlighted.len() as u32;
     let mut blocks = Vec::new();
     let mut cursor = 1u32;
+    let mut i = 0;
 
-    for unit in units {
+    while i < units.len() {
+        let unit = &units[i];
         if unit.range.start > cursor {
             blocks.push(gap(cursor, unit.range.start - 1, highlighted));
         }
-        let a = &unit.annotation;
-        blocks.push(Block {
-            annotated: true,
-            hidden_lines: 0,
-            id: a.id.clone(),
-            title: a.title.clone(),
-            kind: kind_label(&format!("{:?}", a.kind)),
-            range_label: label(unit.range.start, unit.range.end),
-            body_html: markdown::render(&a.body),
-            code: slice(highlighted, unit.range.start, unit.range.end),
-            features: a.rust_features.clone(),
-            examples: a.examples.clone(),
+
+        let run = macro_run(units, i);
+        blocks.push(if run > 1 || unit.annotation.kind == Kind::MacroUse {
+            macro_block(&units[i..i + run], highlighted, defs, file)
+        } else {
+            annotated(unit, highlighted)
         });
-        cursor = cursor.max(unit.range.end + 1);
+
+        cursor = cursor.max(units[i + run - 1].range.end + 1);
+        i += run;
     }
     if cursor <= total {
         blocks.push(gap(cursor, total, highlighted));
     }
     blocks
+}
+
+/// How many units starting at `i` belong in one macro-use block: 1 for anything
+/// that is not a macro use, otherwise the run of uses that share a definition
+/// *and* are contiguous in the source. Contiguity matters — merging across a
+/// hole would hide unannotated lines, which is the one thing this project
+/// cannot do.
+fn macro_run(units: &[Unit], i: usize) -> usize {
+    let first = &units[i].annotation;
+    if first.kind != Kind::MacroUse {
+        return 1;
+    }
+    let mut n = 1;
+    while i + n < units.len() {
+        let next = &units[i + n];
+        if next.annotation.kind != Kind::MacroUse
+            || next.annotation.macro_def != first.macro_def
+            || next.range.start != units[i + n - 1].range.end + 1
+        {
+            break;
+        }
+        n += 1;
+    }
+    n
+}
+
+fn annotated(unit: &Unit, highlighted: &[Line]) -> Block {
+    let a = &unit.annotation;
+    Block {
+        annotated: true,
+        hidden_lines: 0,
+        id: a.id.clone(),
+        title: a.title.clone(),
+        kind: kind_label(&format!("{:?}", a.kind)),
+        range_label: label(unit.range.start, unit.range.end),
+        body_html: markdown::render(&a.body),
+        code: slice(highlighted, unit.range.start, unit.range.end),
+        features: a.rust_features.clone(),
+        examples: a.examples.clone(),
+        expands_name: String::new(),
+        expands_href: String::new(),
+        uses: Vec::new(),
+    }
+}
+
+fn macro_block(
+    units: &[Unit],
+    highlighted: &[Line],
+    defs: &BTreeMap<String, (String, String)>,
+    file: &str,
+) -> Block {
+    let start = units[0].range.start;
+    let end = units[units.len() - 1].range.end;
+    let def_id = units[0].annotation.macro_def.as_deref().unwrap_or_default();
+    let def = defs.get(def_id);
+
+    // A definition in another file is linked by page; one in this file by
+    // anchor, so the reader is not sent on a round trip to land two screens up.
+    let (name, href) = match def {
+        Some((def_file, name)) if def_file == file => (name.clone(), format!("#{def_id}")),
+        Some((def_file, name)) => (name.clone(), format!("{}#{def_id}", page_name(def_file))),
+        None => (String::new(), String::new()),
+    };
+
+    let uses: Vec<Use> = units
+        .iter()
+        .map(|u| Use {
+            id: u.annotation.id.clone(),
+            label: u.annotation.title.clone(),
+            range_label: label(u.range.start, u.range.end),
+            body_html: markdown::render(&u.annotation.body),
+            start: u.range.start,
+            end: u.range.end,
+        })
+        .collect();
+
+    let kind = if units.len() > 1 {
+        format!("macro use ×{}", units.len())
+    } else {
+        "macro use".to_string()
+    };
+
+    Block {
+        annotated: true,
+        hidden_lines: 0,
+        // Not the first annotation's id: every row carries its own, so a link
+        // to one invocation lands on that row rather than on the group.
+        id: format!("uses-L{start}"),
+        title: if name.is_empty() {
+            "macro invocations".to_string()
+        } else {
+            name.clone()
+        },
+        kind,
+        range_label: label(start, end),
+        body_html: String::new(),
+        code: slice(highlighted, start, end),
+        features: union(units, |a| &a.rust_features),
+        examples: union(units, |a| &a.examples),
+        expands_name: name,
+        expands_href: href,
+        uses,
+    }
+}
+
+/// Collects one list field across a group, de-duplicated, first-seen order.
+fn union(
+    units: &[Unit],
+    field: impl Fn(&slbl_core::schema::Annotation) -> &Vec<String>,
+) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for u in units {
+        for v in field(&u.annotation) {
+            if !out.iter().any(|seen| seen == v) {
+                out.push(v.clone());
+            }
+        }
+    }
+    out
 }
 
 /// Unannotated runs are previewed rather than rendered in full.
@@ -203,6 +384,9 @@ fn gap(start: u32, end: u32, highlighted: &[Line]) -> Block {
         code: slice(highlighted, start, shown_end),
         features: Vec::new(),
         examples: Vec::new(),
+        expands_name: String::new(),
+        expands_href: String::new(),
+        uses: Vec::new(),
     }
 }
 

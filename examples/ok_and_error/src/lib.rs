@@ -40,7 +40,7 @@ impl serde_core::ser::Error for Error {
 /// Generates a scalar-only `Serializer`. The only difference between the two
 /// implementations is `$ok` and how the rendered text is converted into it.
 ///
-/// serde_core does the same thing for the same reason: see the `primitive!`
+/// serde_core does the same thing for the same reason: see the `primitive_impl!`
 /// macro in `src/ser/impls.rs`.
 macro_rules! scalar_serializer {
     ($name:ty, $ok:ty, |$text:ident| $finish:expr) => {

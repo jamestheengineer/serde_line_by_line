@@ -40,6 +40,12 @@ pub struct Annotation {
     pub examples: Vec<String>,
     #[serde(default)]
     pub prereqs: Vec<String>,
+    /// For `kind = "macro-use"` only: the id of the `macro-def` annotation this
+    /// span expands. Required there and rejected elsewhere — the renderer
+    /// collapses runs of uses sharing one def, so this is a rendering input,
+    /// not documentation.
+    #[serde(default)]
+    pub macro_def: Option<String>,
     pub body: String,
 }
 

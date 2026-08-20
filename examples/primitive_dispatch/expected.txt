@@ -1,0 +1,27 @@
+one row per primitive_impl! invocation, in source order
+
+value          method reached       argument
+----------------------------------------------------
+true           serialize_bool       true
+3isize         serialize_i64        3
+-8i8           serialize_i8         -8
+-16i16         serialize_i16        -16
+-32i32         serialize_i32        -32
+-64i64         serialize_i64        -64
+-128i128       (none reached)       i128 is not supported
+3usize         serialize_u64        3
+8u8            serialize_u8         8
+16u16          serialize_u16        16
+32u32          serialize_u32        32
+64u64          serialize_u64        64
+128u128        (none reached)       u128 is not supported
+1.5f32         serialize_f32        1.5
+1.5f64         serialize_f64        1.5
+'R'            serialize_char       R
+
+isize and usize have no method of their own: the `as i64` / `as u64`
+tail on their invocation widens them first. The method name above is
+the same on a 64-bit host and on 32-bit WASM.
+
+i128 and u128 are the only two of the sixteen whose Serializer method
+has a default body, and that body errors. Trace never overrode them.

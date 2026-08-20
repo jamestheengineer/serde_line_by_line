@@ -11,12 +11,12 @@
 </div>
 
 {% for b in blocks %}
-<section class="block{% if !b.annotated %} gap{% endif %}" id="{{ b.id }}">
+<section class="block{% if !b.annotated %} gap{% endif %}{% if !b.uses.is_empty() %} macro{% endif %}" id="{{ b.id }}">
   <div class="code">
     <div class="codehead"><span class="range">{{ b.range_label }}</span></div>
     <div class="src">
     {%- for line in b.code %}
-      <div class="ln" id="{{ b.id }}-L{{ line.number }}"><span class="num">{{ line.number }}</span><code>{{ line.html|safe }}</code></div>
+      <div class="ln" id="{{ b.id }}-L{{ line.number }}" data-n="{{ line.number }}"><span class="num">{{ line.number }}</span><code>{{ line.html|safe }}</code></div>
     {%- endfor %}
     {%- if b.hidden_lines > 0 %}
       <div class="elided">&hellip; {{ b.hidden_lines }} more lines</div>
@@ -27,7 +27,22 @@
     {% if b.annotated %}
       <div class="kind">{{ b.kind }}</div>
       <h2>{{ b.title }}</h2>
+      {% if !b.expands_href.is_empty() %}
+      <a class="expands" href="{{ b.expands_href }}">expands <code>{{ b.expands_name }}</code></a>
+      {% endif %}
+      {% if !b.body_html.is_empty() %}
       <div class="prose">{{ b.body_html|safe }}</div>
+      {% endif %}
+      {% if !b.uses.is_empty() %}
+      <div class="uses">
+        {% for u in b.uses %}
+        <div class="use" id="{{ u.id }}" tabindex="0" data-start="{{ u.start }}" data-end="{{ u.end }}">
+          <div class="uselabel"><span class="usetitle">{{ u.label }}</span><span class="userange">{{ u.range_label }}</span></div>
+          <div class="prose">{{ u.body_html|safe }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
       {% if !b.features.is_empty() %}
       <ul class="tags">{% for f in b.features %}<li>{{ f }}</li>{% endfor %}</ul>
       {% endif %}

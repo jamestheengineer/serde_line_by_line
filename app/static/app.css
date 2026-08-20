@@ -372,6 +372,65 @@ main { padding: 0 0 80px; min-width: 0; }
   background: var(--pair-line);
 }
 
+/* ---------- macro-use groups ----------
+
+   A run of invocations sharing one definition renders as rows under a single
+   heading. The rows are the only place in the reader where prose does not sit
+   opposite its own lines, so hovering a row tints exactly the lines it claims
+   (`.lit`, applied by app.js). That is the whole reason the compression is
+   readable rather than confusing. */
+
+.expands {
+  display: inline-block;
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  text-decoration: none;
+  border-bottom: 1px solid var(--line-strong);
+}
+.expands:hover { color: var(--accent); border-bottom-color: var(--accent); }
+.expands code {
+  font-family: var(--mono);
+  font-size: 0.95em;
+  color: var(--fg);
+}
+
+.use {
+  padding: 7px 10px;
+  border-top: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: default;
+}
+.use:first-child { border-top: none; }
+.use:hover,
+.use:focus-visible {
+  outline: none;
+  background: var(--pair);
+  box-shadow: inset 2px 0 0 var(--pair-edge);
+}
+
+.uselabel {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.usetitle { font-family: var(--mono); font-size: 12.5px; font-weight: 600; }
+.userange {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+
+.use .prose { font-size: 13.5px; }
+.use .prose p { margin: 3px 0 0; }
+.use .prose p + p { margin-top: 8px; }
+
+/* Lines belonging to the row under the cursor. Brighter than the pane tint,
+   because this is the precise answer to "which lines is this row about?". */
+.block.macro .ln.lit { background: var(--pair-line); }
+
 .code, .note { transition: background 90ms ease-out, box-shadow 90ms ease-out; }
 
 @media (prefers-reduced-motion: reduce) {
