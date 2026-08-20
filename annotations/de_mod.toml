@@ -789,3 +789,445 @@ Elsewhere in this crate it appears as a field, marking a type parameter as used.
 Here it is a **value**, chosen precisely because it is the only value its type
 has, so passing it communicates a type and nothing else.
 """
+
+[[annotation]]
+id    = "de-mod-0027"
+file  = "src/de/mod.rs"
+lines = "828-894"
+title = "The same 29 types, read back — and the sentence that starts everything"
+kind  = "doc-contract"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["lifetime-de", "strings", "borrowing"]
+prereqs = ["ser-mod-0013", "ser-mod-0014"]
+body = """
+The same twenty-nine types as `ser/mod.rs`, described from the other direction,
+and the list is nearly a transcription. Two entries are not.
+
+Under **string**: *"When serializing, all strings are handled equally. When
+deserializing, there are three flavors of strings: transient, owned, and
+borrowed."* Under **byte array**, the same note. Those two sentences are the
+reason this half of the crate is shaped the way it is.
+
+Serializing a string is one case: you have a `&str`, you hand it over, the format
+copies what it needs. Reading one back is three:
+
+- **transient** — the deserializer has the text in a scratch buffer it is about
+  to reuse. The visitor may look but must copy if it wants to keep it.
+- **owned** — the deserializer built a `String` and will give it away. If the
+  visitor wanted a `String` anyway, no copy happens.
+- **borrowed** — the text sits in the original input, unchanged and still alive.
+  The visitor may keep a reference into it, and no copy happens at all.
+
+Only the third can produce a `&str` that outlives the call, and only if the
+visitor can prove the input outlives the result. That proof is the `'de`
+lifetime.
+
+The other difference is in **seq** and **tuple**: on the serialization side the
+length may be unknown, on this side a `seq`'s length is discovered by reading and
+a `tuple`'s is known before reading starts. Same distinction, opposite direction.
+"""
+
+[[annotation]]
+id    = "de-mod-0028"
+file  = "src/de/mod.rs"
+lines = "895-944"
+title = "Two entry points, and the choice that decides which formats you support"
+kind  = "doc-contract"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["traits", "lifetime-de"]
+prereqs = ["de-mod-0027"]
+body = """
+The most consequential fifty lines in the module, and they are prose rather than
+code.
+
+**`deserialize_any`** asks the format *"what have you got?"* A self-describing
+format like JSON can answer — an opening brace means a map — and drives the
+visitor accordingly. This is how `serde_json::Value` works: it does not know what
+it wants, so it accepts whatever is there.
+
+**The `deserialize_*` methods** tell the format what to expect. They are *hints*,
+not commands: `deserialize_u64` says "the program is expecting an integer here",
+and a non-self-describing format like Postcard needs exactly that, because the
+bytes on the wire do not say what they are. Without the hint there is nothing to
+read.
+
+Then the warning, and it deserves to be read as a rule rather than advice:
+*"relying on `Deserializer::deserialize_any` means your data type will be able to
+deserialize from self-describing formats only, ruling out Postcard and many
+others."*
+
+That is a real fork in the road, and it is invisible at the point you take it. A
+hand-written `Deserialize` that calls `deserialize_any` because it seemed simpler
+compiles fine, works fine in tests against JSON, and silently cannot be used with
+half the format ecosystem. Anyone reviewing a manual `Deserialize` impl should
+look for this first.
+
+The `# Lifetime` section restates `'de` once more, this time as *"the lifetime of
+data that may be borrowed from the input"* — subtly different wording from
+`Deserialize`'s, and the difference is the point of view: there, what `Self` may
+borrow; here, what the format may lend.
+"""
+
+[[annotation]]
+id    = "de-mod-0029"
+file  = "src/de/mod.rs"
+lines = "945-962"
+title = "Deserializer, its Error type, and deserialize_any"
+kind  = "trait-item"
+tracks = ["reference", "course"]
+course_unit = "03-associated-types"
+rust_features = ["traits", "associated-types", "sized-bound", "generic-params"]
+prereqs = ["de-mod-0028", "ser-mod-0017"]
+body = """
+`pub trait Deserializer<'de>: Sized` — `Sized` for the same reason `Serializer`
+needs it: every method takes `self` by value, so the type has to be movable, and
+`dyn Deserializer` is ruled out.
+
+`type Error: Error` is the only associated type here, against `Serializer`'s
+nine. The reason is the whole design of this half: a serializer needs seven
+associated types because *it* builds the compound structures, while a
+deserializer hands the visitor an access object and the visitor drives. Those
+access types are generic parameters on the visitor's methods rather than
+associated types on the format.
+
+`deserialize_any` comes first, and it is **required**, not defaulted. A format
+that cannot self-describe still has to provide it — and typically provides one
+that returns an error. Serde could have given it a default; leaving it required
+forces every format author to make the decision consciously.
+
+The shape every method in this trait shares: take `self`, take a visitor, return
+`V::Value`. The deserializer never returns data. It calls a method on the visitor
+and returns whatever the visitor made.
+"""
+
+[[annotation]]
+id    = "de-mod-0030"
+file  = "src/de/mod.rs"
+lines = "963-987"
+title = "bool, i8 … i64 — six hints, one shape"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "generic-params"]
+prereqs = ["de-mod-0029", "ser-mod-0019"]
+body = """
+Six required methods, identical apart from the type they name, each documented
+with the same sentence: *"Hint that the `Deserialize` type is expecting an `iN`
+value."*
+
+The word **hint** is doing precise work. This is not a request to produce an
+`i32`; it is a statement about what the program wants, and the format is free to
+supply something else. A JSON deserializer asked for `deserialize_i32` on the
+input `1.0` may legitimately call `visit_f64` — and then it is the *visitor* that
+decides whether to accept, convert, or reject.
+
+That is the inversion at the heart of this module. On the serialization side,
+calling `serialize_i32` writes an `i32`. Here, calling `deserialize_i32` asks a
+question and the answer arrives through a completely different trait.
+"""
+
+[[annotation]]
+id    = "de-mod-0031"
+file  = "src/de/mod.rs"
+lines = "988-997"
+title = "deserialize_i128 — the same late arrival, from the other side"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["default-methods", "custom-errors"]
+prereqs = ["ser-mod-0021", "de-mod-0030"]
+body = """
+The mirror of `serialize_i128`: one of only two methods in this trait with a
+default body, and that body is
+`Err(Error::custom("i128 is not supported"))` — the same message, in the same
+words, as its serialization counterpart.
+
+`let _ = visitor;` to discard the unused parameter without renaming it, the same
+convention as `ser/impossible.rs`.
+
+The reason is compatibility. Adding a required method to a public trait breaks
+every existing implementation, so 128-bit support arrived as a default that
+fails, and formats opt in one at a time. The cost is that a type using `i128`
+compiles against every format and fails at run time against the ones that never
+implemented it.
+"""
+
+[[annotation]]
+id    = "de-mod-0032"
+file  = "src/de/mod.rs"
+lines = "998-1030"
+title = "u8 … u128 — the unsigned mirror, including the same default"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "default-methods"]
+prereqs = ["de-mod-0031"]
+body = """
+Four required methods and one defaulted, exactly matching the signed block above
+and exactly matching `Serializer`'s layout. `deserialize_u128` carries the
+identical erroring default as `deserialize_i128`.
+
+Nothing here is new, which is itself worth noting: the two traits were laid out
+so that a format author writing the second one has already written the first, and
+the sameness is deliberate.
+"""
+
+[[annotation]]
+id    = "de-mod-0033"
+file  = "src/de/mod.rs"
+lines = "1031-1044"
+title = "f32, f64, char — the last of the scalars"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits"]
+prereqs = ["de-mod-0032", "ser-mod-0024", "ser-mod-0025"]
+body = """
+Three more required hints, closing out the fourteen primitives.
+
+`deserialize_char` is the one that will most often go unanswered as asked. Almost
+no format has a character type, so a JSON deserializer receiving this hint reads
+a string and calls `visit_str`, leaving the visitor to check that it holds
+exactly one scalar value. The hint still earns its place: a format that *does*
+have a character type now knows to use it.
+"""
+
+[[annotation]]
+id    = "de-mod-0034"
+file  = "src/de/mod.rs"
+lines = "1045-1066"
+title = "str and string — the first hint about ownership, not type"
+kind  = "trait-item"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["lifetime-de", "strings", "ownership", "borrowing"]
+prereqs = ["de-mod-0027"]
+body = """
+Two methods for one data model type, and the difference between them is not what
+is in the input — it is **what the program intends to do with it**.
+
+`deserialize_str` says: I will look at this string and I do not need to own a
+`String`. `deserialize_string` says: I am going to keep it, so if you already
+have a `String` lying around, hand it over rather than lending me a slice I will
+have to copy.
+
+Neither is a promise about what arrives. Both may be answered with `visit_str`,
+`visit_borrowed_str`, or `visit_string` — the hint only tells the format which
+choice would save work. A deserializer that has just parsed escapes into a
+scratch buffer will answer `deserialize_string` by moving that buffer out, and
+answer `deserialize_str` by lending it and reusing it afterwards.
+
+This is the first place the three flavors from the data model list become an API
+rather than a paragraph, and it is the shape of everything that follows. The type
+being deserialized is the same. The allocation strategy is what is being
+negotiated.
+"""
+
+[[annotation]]
+id    = "de-mod-0035"
+file  = "src/de/mod.rs"
+lines = "1067-1088"
+title = "bytes and byte_buf — the same negotiation, for [u8]"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["borrowing", "ownership", "collections"]
+prereqs = ["de-mod-0034", "ser-mod-0027"]
+body = """
+The byte-array pair, with documentation that is the string pair's with `String`
+replaced by `Vec<u8>`. Same distinction, same freedom for the format to answer
+either way.
+
+Worth remembering the asymmetry with serialization here. A `Vec<u8>` does *not*
+serialize through `serialize_bytes` — it goes out as a sequence of numbers unless
+you use `serde_bytes`. These two methods exist for the types that do opt in, and
+for formats that have a native byte-string concept, which most binary formats do
+and most text formats do not.
+"""
+
+[[annotation]]
+id    = "de-mod-0036"
+file  = "src/de/mod.rs"
+lines = "1089-1104"
+title = "option and unit — absence, and nothing"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["option", "traits"]
+prereqs = ["ser-mod-0028", "ser-mod-0029"]
+body = """
+`deserialize_option` is what lets a format map its own idea of absence onto
+`Option`. The docs say it plainly: a nullable value becomes `None` or
+`Some(value)`. JSON's `null`, a missing key, a Postcard tag byte — all arrive
+here, and the visitor sees `visit_none` or `visit_some`.
+
+Note what `visit_some` receives: not a value, but *another deserializer*. The
+inner value has not been read yet at the point the visitor is told there is one.
+That is how `Option<T>` avoids committing to `T`'s representation.
+
+`deserialize_unit` is the degenerate case — the input contains nothing, and
+saying so still requires a method, because a format has to know to consume
+whatever placeholder it wrote.
+"""
+
+[[annotation]]
+id    = "de-mod-0037"
+file  = "src/de/mod.rs"
+lines = "1105-1123"
+title = "unit_struct and newtype_struct — the first methods that carry a name"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "proc-macro-boundary"]
+prereqs = ["ser-mod-0031"]
+body = """
+The first two methods with a parameter beyond the visitor: `name: &'static str`.
+
+That name comes from the derive, which knew it at compile time, and it exists so
+a self-describing format can check what it is reading against what the program
+declared. Most formats ignore it. The ones that do not — a format that writes
+type names into the output, or one checking a schema — could not work without it.
+
+`&'static str` and not `&str`, because these are always literals baked into the
+binary. Nothing has to be allocated to pass a type's own name around.
+"""
+
+[[annotation]]
+id    = "de-mod-0038"
+file  = "src/de/mod.rs"
+lines = "1124-1145"
+title = "seq, tuple, tuple_struct — where the length comes from"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "collections"]
+prereqs = ["ser-mod-0033", "ser-mod-0034"]
+body = """
+Three methods for three levels of prior knowledge, and the parameters record
+exactly how much is known before reading.
+
+`deserialize_seq` takes nothing but a visitor: the length is whatever the input
+turns out to hold. `deserialize_tuple` takes `len`, because the program knows —
+a `(u8, String)` is two elements whatever the input says. `deserialize_tuple_struct`
+takes a name as well.
+
+This is the reverse of the serialization side, where `serialize_seq` takes an
+`Option<usize>` hint the format may ignore. Here `len` is not a hint at all: for
+a non-self-describing format it is the only thing that makes the input readable,
+because the wire holds elements with nothing marking where they stop.
+"""
+
+[[annotation]]
+id    = "de-mod-0039"
+file  = "src/de/mod.rs"
+lines = "1146-1173"
+title = "map, struct, enum — and the string lists the derive hands over"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "proc-macro-boundary", "collections"]
+prereqs = ["de-mod-0038", "ser-mod-0036"]
+body = """
+`deserialize_map` is the open case: arbitrary keys, unknown count.
+`deserialize_struct` and `deserialize_enum` are the closed cases, and both take
+something the open one cannot — a `&'static [&'static str]` of every field or
+variant name.
+
+Those two slices are the derive's output made visible. `serde_derive` reads your
+struct definition and writes the field names into a static array, and the
+deserializer receives the complete set before it reads a byte. That is what makes
+several things possible at once: a format can look up a key without allocating,
+`unknown_field` can list the alternatives in its error message, and a
+non-self-describing format can read a struct as a plain sequence because it knows
+how many fields to expect and in what order.
+
+It is also the concrete answer to "what does the derive actually generate?" A
+large part of the answer is: these two arrays, and a visitor that matches against
+them.
+"""
+
+[[annotation]]
+id    = "de-mod-0040"
+file  = "src/de/mod.rs"
+lines = "1174-1185"
+title = "identifier and ignored_any — the two methods that are not about types"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "proc-macro-boundary"]
+prereqs = ["de-mod-0039"]
+body = """
+Neither of these corresponds to a data model type. Both exist because of how
+derived code reads structs and enums.
+
+`deserialize_identifier` is called for a **field name or variant discriminant**,
+not for a value. A self-describing format answers with the string it found; a
+compact format answers with an integer index. Making it its own method is what
+lets one derived visitor handle both, which is why the same `#[derive]` works for
+JSON and Postcard.
+
+`deserialize_ignored_any` says: whatever is here, consume it and hand back
+something I can discard. This is how `#[serde(deny_unknown_fields)]`'s absence
+works — an unrecognized field is skipped rather than read. The docs note the
+catch: *"Deserializers for non-self-describing formats may not support this
+mode"*, because skipping a value you cannot identify requires knowing how long it
+is, and on a bare wire format there is nothing to measure.
+
+`IgnoredAny`, the visitor that pairs with this method, is the entire subject of
+the next file.
+"""
+
+[[annotation]]
+id    = "de-mod-0041"
+file  = "src/de/mod.rs"
+lines = "1186-1256"
+title = "is_human_readable — the leak, and the compatibility warning attached to it"
+kind  = "trait-item"
+tracks = ["reference", "course"]
+course_unit = "04-generic-bounds"
+rust_features = ["default-methods", "inlining"]
+prereqs = ["ser-mod-0041", "ser-impls-0052"]
+body = """
+The one method here that is not about the input at all. It asks what kind of
+format is on the other side, and it is the same escape hatch `Serializer`
+provides — with the same seventy lines of documentation arguing for restraint.
+
+The doctest is the canonical use: a `Timestamp` that reads an RFC 3339 string
+from JSON and a `u64` of seconds from a binary format. `ser/impls.rs` does exactly
+this for `IpAddr` and the socket address types, and those are close to the
+complete list of justified cases.
+
+The last paragraph is the part to take seriously: *"modifying this method to
+change a format from human-readable to compact or vice versa should be regarded
+as a breaking change, as a value serialized in human-readable mode is not
+required to deserialize from the same data in compact mode."* A format author
+flipping this default silently changes the meaning of every document their users
+have ever written. It looks like a one-line behavioural tweak and it is a wire
+format change.
+
+The default is `true`, and `#[inline]` on a body that returns a constant means
+the branch in the doctest above compiles away entirely for any format that does
+not override it.
+"""
+
+[[annotation]]
+id    = "de-mod-0042"
+file  = "src/de/mod.rs"
+lines = "1257-1266"
+title = "__deserialize_content_v1 — a private method on a public trait"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["visibility", "cfg", "associated-types"]
+prereqs = ["de-mod-0029"]
+body = """
+Marked `// Not public API.`, `#[doc(hidden)]`, named with two leading underscores,
+and gated on the derive being present and an allocator existing. Everything about
+it says *do not call this*.
+
+It exists for `#[serde(untagged)]` and internally tagged enums, which have to
+buffer a value before they know what type to interpret it as. That buffer is
+`private::Content`, and the `V: Visitor<'de, Value = crate::private::Content<'de>>`
+bound is the giveaway — the method is only callable with a visitor producing
+serde's own internal type, which no outside crate can name.
+
+The default forwards to `deserialize_any`. A format can override it to buffer
+more efficiently, which is why it is on the trait at all rather than being a free
+function. The `v1` in the name is version-tolerance: when the internal
+representation changes, a `v2` can be added beside it without breaking formats
+that overrode the first.
+
+This is what a stability escape hatch looks like in a crate that cannot make
+breaking changes — and there are more of them in `private/`.
+"""
