@@ -209,3 +209,725 @@ is nothing to copy. Both impls pass `self` by reference instead, so the body
 differs, so no macro. That is the whole boundary between the generated half of
 this file and the hand-written half.
 """
+
+[[annotation]]
+id    = "ser-impls-0010"
+file  = "src/ser/impls.rs"
+lines = "37-48"
+title = "str — the impl that proves Serialize has no Sized bound"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "02-traits-and-supertraits"
+rust_features = ["sized-bound", "traits"]
+prereqs = ["ser-mod-0010", "ser-mod-0026"]
+body = """
+`impl Serialize for str` — not `&str`, not `String`. `str` is unsized: you can
+never hold one, only borrow one. This impl exists because `Serialize` was
+declared without a `Sized` supertrait, and this is where that restraint gets
+spent.
+
+The payoff shows up two ways. `&str` gets an impl for free from the blanket
+`impl<'a, T> Serialize for &'a T where T: ?Sized + Serialize` further down, and
+`String` gets one by deref coercion. Had `Serialize` required `Sized`, both would have needed
+hand-written impls that duplicate this body, and every other unsized type —
+`[T]`, `CStr`, `Path`, `OsStr` — would have needed the same treatment.
+
+No `#[cfg]` on this one. `str` is a language primitive, available in the barest
+`no_std` build, so there is nothing to gate.
+"""
+
+[[annotation]]
+id    = "ser-impls-0011"
+file  = "src/ser/impls.rs"
+lines = "49-60"
+title = "String — the same body, reached by deref coercion"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg", "no-std", "strings", "smart-pointers"]
+prereqs = ["ser-impls-0010"]
+body = """
+Byte for byte the same body as `str` above, and that is not duplication — it is
+deref coercion. `self` here is a `&String`, `serialize_str` wants a `&str`, and
+the compiler inserts the `Deref` call at the call site. Nothing in this impl
+mentions `str` at all.
+
+The two attributes are the interesting part. `#[cfg(any(feature = "std", feature
+= "alloc"))]` gates the impl on `String` existing, since it comes from `alloc`.
+`#[cfg_attr(docsrs, doc(cfg(...)))]` is the paired half: it makes docs.rs print
+the little "Available on crate features std or alloc" banner. Every gated item
+in this crate carries both, one for the compiler and one for the reader, and
+forgetting the second is invisible until someone reads the docs and cannot work
+out why the impl they need is missing.
+"""
+
+[[annotation]]
+id    = "ser-impls-0012"
+file  = "src/ser/impls.rs"
+lines = "61-69"
+title = "fmt::Arguments — serializing a format that has not happened yet"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["lifetimes", "no-std", "strings"]
+examples = ["collect_str"]
+prereqs = ["ser-mod-0040"]
+body = """
+`fmt::Arguments<'a>` is what `format_args!("{x} of {y}")` evaluates to: the
+format string plus borrowed references to the arguments, with no formatting
+performed and nothing allocated. The `'a` is those borrows, which is why the
+impl needs a lifetime parameter it never names again.
+
+Serializing one calls `collect_str`, whose whole reason for existing is this
+case — render a `Display` value straight into the output without building a
+`String` first. In a `std` build it takes the allocating shortcut; in `no_std`
+it cannot, and does the harder thing instead.
+
+So `serializer.collect_str(&format_args!(...))` is the no-allocation way to
+serialize computed text, and this nine-line impl is what makes it work.
+"""
+
+[[annotation]]
+id    = "ser-impls-0013"
+file  = "src/ser/impls.rs"
+lines = "70-95"
+title = "CStr and CString — bytes, minus the terminator"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "msrv", "no-std", "strings"]
+prereqs = ["ser-mod-0027", "ser-mod-0007"]
+body = """
+Two impls, one idea: a C string goes out as `serialize_bytes`, not as a string.
+It has no UTF-8 guarantee, so `serialize_str` is not available to it.
+
+`to_bytes()` **excludes the trailing nul**. What lands in the output is the
+content only, and the deserializer is responsible for putting the terminator
+back. That is the right call — the nul is a representation detail of the C ABI,
+not part of the value — but it is worth knowing before you diff two encodings
+and wonder where the byte went.
+
+The `#[cfg]`s are the most intricate so far, and `no_core_cstr` is not a Cargo
+feature. It is set by this crate's `build.rs` when the compiler is older than
+1.64, the release that moved `CStr` into `core` and `CString` into `alloc`. So
+`any(feature = "std", not(no_core_cstr))` reads as: *`std` is on, or the
+toolchain is new enough that `core` has this type.* `CString` adds
+`feature = "alloc"` on top, because it owns its buffer and `CStr` does not.
+
+This is the version-detecting build script pattern in practice — the crate keeps
+an MSRV of 1.56 while still offering everything a modern toolchain can support,
+and no user has to configure anything.
+"""
+
+[[annotation]]
+id    = "ser-impls-0014"
+file  = "src/ser/impls.rs"
+lines = "96-113"
+title = "Option<T> — the first impl with a decision in it"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "04-generic-bounds"
+rust_features = ["option", "pattern-matching", "borrowing", "generic-params"]
+prereqs = ["ser-mod-0028"]
+body = """
+Everything up to here forwarded a value. This one branches, and it is the first
+impl where the data model's shape shows through: `Option` is not encoded as an
+enum with two variants, it gets `serialize_some` and `serialize_none` of its
+own, so formats can render absence natively — a JSON `null`, a missing key, a
+protobuf optional field.
+
+`match *self { Some(ref value) => ... }` is worth a second look. Dereferencing
+`self` would move the `T` out of the borrow, so the `ref` binds a reference
+instead. Written today you would say `match self { Some(value) => ... }` and let
+default binding modes — "match ergonomics", stable since Rust 1.26 — do it for
+you. This crate predates that and keeps the explicit form, which you will see
+throughout serde and in a lot of code from the same era.
+
+`T: Serialize` is required here and it is not optional: `serialize_some` takes
+the inner value, so there genuinely is something to serialize.
+"""
+
+[[annotation]]
+id    = "ser-impls-0015"
+file  = "src/ser/impls.rs"
+lines = "114-128"
+title = "PhantomData — a type with no value, given a name anyway"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "08-phantomdata-and-variance"
+rust_features = ["marker-types", "sized-bound", "generic-params"]
+prereqs = ["ser-mod-0029"]
+body = """
+`PhantomData<T>` holds nothing, occupies no bytes, and exists only to tell the
+compiler that a type behaves as though it contained a `T`. Serializing it emits
+`serialize_unit_struct("PhantomData")` — the empty value, plus a name.
+
+Two details in three lines of signature:
+
+`T: ?Sized`, so `PhantomData<[u8]>` and `PhantomData<dyn Error>` work. There is
+no value of type `T` anywhere near this code, so no reason to demand one be
+sizeable.
+
+And no `T: Serialize` bound. `PhantomData<NotSerializable>` serializes fine,
+which matters more than it sounds: a struct with a phantom type parameter would
+otherwise drag a bound onto every derive that touches it.
+
+The name string is what a self-describing format writes. Most formats treat a
+unit struct as nothing at all, so it usually disappears — but the model records
+it, on the principle that a distinction not recorded cannot be recovered.
+"""
+
+[[annotation]]
+id    = "ser-impls-0016"
+file  = "src/ser/impls.rs"
+lines = "129-141"
+title = "[T; 0] — the special case whose bound is deliberately missing"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "result"]
+prereqs = ["ser-mod-0034"]
+body = """
+The upstream comment says it: *does not require `T: Serialize`*. An empty array
+has no elements to serialize, so demanding the bound would reject
+`[Unserializable; 0]` for no reason anyone could act on. Every other length,
+generated by the macro just below, does require it.
+
+Note the destination: `serialize_tuple(0)`, not `serialize_seq`. Arrays have a
+length fixed at compile time, so they go to the model's tuple methods and a
+format is free to omit the count from the output entirely.
+
+This is also the first `tri!` in the file. It is serde's own `?`, defined in
+`crate_root.rs` for one reason recorded in a comment there: none of this crate's
+error handling needs the `From::from` conversion that `?` performs, and skipping
+it measured 9% faster to compile than `?` and 5.5% faster than the old `try!`.
+On a crate that monomorphizes into every project in the ecosystem, that is a
+real number rather than a micro-optimization.
+"""
+
+[[annotation]]
+id    = "ser-impls-0017"
+file  = "src/ser/impls.rs"
+lines = "142-165"
+title = "array_impls! — thirty-two lengths, before const generics"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "macro-repetition", "generic-params", "iterators"]
+prereqs = ["ser-impls-0002", "ser-mod-0043"]
+body = """
+`($($len:tt)+)` — token trees again, but with `+` rather than `*`: one or more,
+so an empty invocation is a compile error instead of a silent no-op.
+
+The body is a real one this time, not a forward. It opens a tuple of the array's
+length, iterates, and ends. Note `for e in self`: `self` is a `&[T; $len]`, and
+iterating a reference to an array yields `&T`, so `serialize_element(e)` gets a
+reference and the array is never consumed.
+
+**Why thirty-two impls and not one.** Const generics —
+`impl<T, const N: usize> Serialize for [T; N]` — have been stable since Rust
+1.51, and this crate's MSRV is 1.56, so the usual explanation does not apply
+here. The obstacle is the impl directly above: `[T; 0]` deliberately omits the
+`T: Serialize` bound, and a single const-generic impl cannot vary its bounds
+depending on `N`. Collapsing these thirty-two would mean putting a bound on the
+empty array that is not there today, which is a breaking change for anyone whose
+struct holds a `[SomethingUnserializable; 0]`.
+
+So the pre-const-generics shape survives, not because the language cannot
+express the general case, but because the general case is very slightly wrong.
+"""
+
+[[annotation]]
+id    = "ser-impls-0018"
+file  = "src/ser/impls.rs"
+lines = "166-171"
+title = "01 … 32 → thirty-two impls, laid out in a grid"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition"]
+macro_def = "ser-impls-0017"
+body = """
+One invocation, thirty-two expansions, arranged ten to a row so a human can
+count them.
+
+The leading zeros are why the columns line up, and they are harmless: `01` is a
+decimal literal equal to `1`, and `[T; 01]` is the same type as `[T; 1]`.
+Passing the lengths as `tt` is what allows it — the tokens go through verbatim,
+so the formatting choice never has to survive being parsed as anything.
+"""
+
+[[annotation]]
+id    = "ser-impls-0019"
+file  = "src/ser/impls.rs"
+lines = "172-186"
+title = "[T] — one line, and the shape six collections copy"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["sized-bound", "iterators", "blanket-impls"]
+prereqs = ["ser-mod-0038", "ser-impls-0010"]
+body = """
+A slice is unsized and has a length known only at run time, so unlike the arrays
+above it goes to `collect_seq` rather than to the tuple methods.
+
+`collect_seq(self)` does a surprising amount of work for one line. It takes
+anything `IntoIterator`, and `&[T]` iterates as `&T`, which is `Serialize`
+whenever `T` is. Inside, it opens a sequence with a length hint, forwards every
+element, and ends — the whole loop from `array_impls!` above, written once in
+`ser/mod.rs` instead of inlined here.
+
+Remember this body. The next six collection impls are this exact line, and the
+macro below exists only because their type names and feature gates differ.
+"""
+
+[[annotation]]
+id    = "ser-impls-0020"
+file  = "src/ser/impls.rs"
+lines = "187-208"
+title = "seq_impl! — where the caller supplies the attributes"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "macro-repetition", "cfg", "generic-params", "where-clauses"]
+prereqs = ["ser-impls-0002"]
+body = """
+A different macro technique from `primitive_impl!`, and the more useful one to
+learn.
+
+**`$(#[$attr:meta])*` puts the `#[cfg]`s at the call site.** The macro body has
+no idea which features gate which collection; each invocation carries its own
+attributes and the transcriber pastes them back on. Six collections, six
+different feature requirements, one body. The alternative — teaching the macro
+about `std` versus `alloc` — would have meant a matcher branch per gate.
+
+**The matcher mimics the syntax it generates.** `$ty:ident <T $(, $typaram:ident
+: $bound:ident)*>` has literal `<`, `>`, and `,` tokens in it, so an invocation
+reads like the type it produces: `HashSet<T, H: BuildHasher>`. The optional
+repetition then fans out into two places in the body — `impl<T $(, $typaram)*>`
+and `for $ty<T $(, $typaram)*>` — which is the thing a macro can do that a
+generic function cannot.
+
+`$bound:ident` is a single identifier, so `BuildHasher` matches and
+`core::hash::BuildHasher` would not. Nothing here needs the general case, and
+the narrow fragment keeps the matcher honest about it.
+
+Now look for `$bound` in the transcriber. It is not there. The bound is matched
+and discarded — the generated impl's only `where` clause is `T: Serialize`. See
+`map_impl!` below, which takes the same idea considerably further.
+
+The body itself is one line, identical to the slice impl above.
+"""
+
+[[annotation]]
+id    = "ser-impls-0021"
+file  = "src/ser/impls.rs"
+lines = "209-220"
+title = "BinaryHeap, BTreeSet → two orderings, one body"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["collections", "iterators"]
+macro_def = "ser-impls-0020"
+body = """
+Both expand to `collect_seq(self)`, and both therefore emit whatever order their
+iterator produces — which is where they differ sharply.
+
+`BTreeSet` iterates in sorted order, so its encoding is deterministic and
+diffable. `BinaryHeap::iter` is documented as **arbitrary order** and guarantees
+nothing beyond that — in practice it walks the backing array, which the sift
+operations leave in whatever shape the insertion sequence produced. Two heaps
+holding equal sets can serialize to different sequences. Nothing here is wrong, but if you are hashing or comparing
+serialized output, a `BinaryHeap` field will surprise you.
+"""
+
+[[annotation]]
+id    = "ser-impls-0022"
+file  = "src/ser/impls.rs"
+lines = "221-226"
+title = "HashSet → the invocation with the extra type parameter"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["collections", "generic-params"]
+macro_def = "ser-impls-0020"
+body = """
+The one call that uses the optional part of the matcher. `HashSet<T, H:
+BuildHasher>` passes a second type parameter and its bound, and the macro fans
+it out into both the impl generics and the type being implemented — so a
+`HashSet` with a custom hasher serializes exactly like one with the default.
+
+It is also the only entry here gated on `std` alone rather than `std` or
+`alloc`, because `HashSet` lives in `std`.
+
+Its iteration order is not merely unspecified, it is randomized per process by
+`RandomState`. The same program serializing the same set twice can produce two
+different sequences. `BTreeSet` is the one to reach for when the output has to
+be stable.
+"""
+
+[[annotation]]
+id    = "ser-impls-0023"
+file  = "src/ser/impls.rs"
+lines = "227-244"
+title = "LinkedList, Vec, VecDeque → nothing left to distinguish"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["collections"]
+macro_def = "ser-impls-0020"
+prereqs = ["ser-impls-0007"]
+body = """
+Three ordered sequences, three identical expansions, gated identically on `std`
+or `alloc`. There is genuinely nothing to say about them individually, which is
+the macro doing its job.
+
+`Vec<T>` is the one that carries the traffic, and its one trap is upstream of
+here: `Vec<u8>` takes this path like any other `Vec`, so a byte buffer goes out
+as a sequence of numbers rather than as a byte string. Nothing in this
+invocation could change that — the impl is chosen by the type, and `u8` is not
+special to it.
+"""
+
+[[annotation]]
+id    = "ser-impls-0024"
+file  = "src/ser/impls.rs"
+lines = "245-261"
+title = "Range — a std type serialized as if it were derived"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "modules", "where-clauses"]
+prereqs = ["ser-mod-0036"]
+body = """
+`1..5` goes out as a two-field struct named `Range`, with fields `start` and
+`end` — exactly what `#[derive(Serialize)]` would have produced if `Range` were
+serde's type to annotate. In JSON that is `{"start":1,"end":5}`, not `[1,5]` and
+not `"1..5"`.
+
+`use super::SerializeStruct;` inside the function body is the detail to notice.
+`state.serialize_field(...)` and `state.end()` are trait methods, so the trait
+has to be in scope to call them — the same rule that put `Error` and
+`SerializeTuple` in this file's header. Here it is scoped to the one function
+that needs it instead, which keeps the top of the file honest about what the
+file as a whole depends on. Four more impls below repeat the same line for the
+same reason.
+
+The `2` passed to `serialize_struct` is the field count, promised up front so a
+format that needs to write a length prefix can.
+"""
+
+[[annotation]]
+id    = "ser-impls-0025"
+file  = "src/ser/impls.rs"
+lines = "262-278"
+title = "RangeFrom — the same thing with one field"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params"]
+prereqs = ["ser-impls-0024"]
+body = """
+`5..` is a one-field struct named `RangeFrom`. Nothing new happens here.
+
+What is worth noticing is that it is written out by hand. Four range types get
+four near-identical impls across seventy lines, differing only in the type name,
+the field count, and which fields exist — precisely the shape that `seq_impl!`
+and `map_impl!` use a macro for elsewhere in this file. The line where upstream
+stops reaching for a macro is somewhere between four impls and six, and there is
+no rule about it beyond what stays readable.
+"""
+
+[[annotation]]
+id    = "ser-impls-0026"
+file  = "src/ser/impls.rs"
+lines = "279-296"
+title = "RangeInclusive — accessors, and a flag that does not survive"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "visibility"]
+prereqs = ["ser-impls-0024"]
+body = """
+The only range impl that calls methods — `&self.start()` and `&self.end()` —
+rather than reading fields, because `RangeInclusive`'s fields are private.
+
+They are private for a reason that matters here. Alongside `start` and `end`,
+`RangeInclusive` carries a hidden flag recording whether iteration has finished.
+It has to: `1..=u8::MAX` cannot signal completion by advancing past its end
+without overflowing, so the type tracks exhaustion separately.
+
+That flag is not among the two fields written out. A `RangeInclusive` that has
+been iterated to completion serializes identically to a fresh one, and comes
+back as a fresh one. For the overwhelmingly common case — a range used as a
+value, not as a half-consumed iterator — this is exactly right. It is only a
+trap if you were treating a partly-consumed range as state worth saving.
+"""
+
+[[annotation]]
+id    = "ser-impls-0027"
+file  = "src/ser/impls.rs"
+lines = "297-313"
+title = "RangeTo — and the two range types that are missing"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params"]
+prereqs = ["ser-impls-0024"]
+body = """
+`..5` is a one-field struct named `RangeTo`. The last of the four.
+
+Count what is not here: `RangeFull` (`..`) and `RangeToInclusive` (`..=5`) have
+no `Serialize` impls in this crate, and the facade in `crate_root.rs` does not
+even import them. `RangeFull` is a unit struct carrying no information, so an
+impl would be pure ceremony; `RangeToInclusive` is a plain omission that nobody
+has needed enough to ask for.
+
+That asymmetry is a fair sample of how this file grew. It is not a systematic
+sweep of `core` and `std` — it is every type someone had a reason to serialize,
+added when they had the reason.
+"""
+
+[[annotation]]
+id    = "ser-impls-0028"
+file  = "src/ser/impls.rs"
+lines = "314-335"
+title = "Bound — the first enum, and the indices you must not renumber"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "04-generic-bounds"
+rust_features = ["pattern-matching", "generic-params", "borrowing"]
+prereqs = ["ser-mod-0030", "ser-mod-0032"]
+body = """
+The first enum in the file, and the clearest look at how the data model handles
+one. Each arm names the enum, the variant's **index**, and the variant's name.
+An empty variant uses `serialize_unit_variant`; a variant wrapping one value
+uses `serialize_newtype_variant`. This is precisely what `serde_derive` emits
+for any enum you write, so reading it here is reading the generated code you
+usually never see.
+
+The literal `0`, `1`, `2` are the thing to be careful about. Formats that encode
+variants compactly write the index instead of the name, so the numbers are part
+of the wire format. Reordering `Bound`'s variants — or inserting one in the
+middle — would silently change the meaning of previously written data. The names
+are safe to read; the numbers are a compatibility commitment.
+
+`ref value` again, for the same reason as `Option`: `*self` would move the `T`
+out of a borrow.
+"""
+
+[[annotation]]
+id    = "ser-impls-0029"
+file  = "src/ser/impls.rs"
+lines = "336-358"
+title = "() and ! — one value and no values, both trivial"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg", "pattern-matching", "zero-cost"]
+prereqs = ["ser-mod-0029"]
+body = """
+Two impls that are trivial for opposite reasons.
+
+`()` has exactly one value, so there is nothing to write down — knowing the type
+tells you the value. `serialize_unit()` records the fact that something was
+there.
+
+`!` has *no* values, and the body is the one-liner `*self`. That is not a typo
+and it is not returning anything: `self` is a `&!`, so `*self` is an expression
+of type `!`, which means evaluating it diverges. Rust lets a `!` expression
+coerce to any type, so it type-checks as the `Result` the signature promises,
+and the code is unreachable because a caller can never obtain a `!` to call it
+on. The impl exists so that a generic type parameter instantiated with `!`
+still satisfies `Serialize`.
+
+It sits behind `feature = "unstable"` because `!` is still not a stable type in
+Rust — the only nightly-only item in this file.
+"""
+
+[[annotation]]
+id    = "ser-impls-0030"
+file  = "src/ser/impls.rs"
+lines = "359-374"
+title = "tuple_impls! — nested repetition, and a macro that calls a macro"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "macro-repetition", "generic-params", "where-clauses"]
+prereqs = ["ser-impls-0017"]
+body = """
+The matcher is the most structured in the crate:
+
+```rust
+($($len:expr => ($($n:tt $name:ident)+))+)
+```
+
+Two levels of repetition. The outer `$(...)+` runs once per tuple length; the
+inner one runs once per element within that length, pairing a field index with a
+type-parameter name. `2 => (0 T0 1 T1)` reads as "arity two, whose elements are
+field `0` of type `T0` and field `1` of type `T1`".
+
+Both levels fan out in the body. `impl<$($name),+>` becomes `impl<T0, T1>`,
+`($($name,)+)` becomes `(T0, T1,)`, and `$($name: Serialize,)+` becomes the
+where clause. Three different separators for three different positions —
+commas between generic parameters, a trailing comma inside the tuple type,
+newline-ish for the bounds — all driven by one match.
+
+That trailing comma matters: `(T0,)` is a one-element tuple and `(T0)` is just
+`T0` in parentheses. Emitting the comma unconditionally makes the expansion
+correct at every arity.
+
+`#[cfg_attr(docsrs, doc(hidden))]` hides all fifteen impls from the rendered
+docs — see the hand-written one-tuple below for what replaces them.
+
+Then the body: `tuple_impl_body!($len => ($($n)+));`. A macro invoking another
+macro, which is how the one-tuple impl gets the identical body without going
+through this matcher at all.
+"""
+
+[[annotation]]
+id    = "ser-impls-0031"
+file  = "src/ser/impls.rs"
+lines = "375-390"
+title = "tuple_impl_body! — a macro that expands to a trait method"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "macro-repetition", "zero-cost", "inlining"]
+prereqs = ["ser-impls-0030"]
+body = """
+This one expands to an `fn`, not to an item — it is invoked *inside* an impl
+block, in the position where a method would be written. `macro_rules!` can be
+called anywhere an item is allowed, and a trait method is an item, so this
+works. It is not a common placement and it is worth recognising when you meet
+it.
+
+`&self.$n` is why the index is a `tt`. Tuple field access needs a bare token
+after the dot; a fragment matched as `expr` or `literal` becomes a single opaque
+AST node, and `self.<opaque>` does not parse. This is the same transparency
+argument as `primitive_impl!`'s `$($cast:tt)*`, in a different disguise, and it
+is the reason `tt` shows up so often in real macros.
+
+The repetition unrolls the element loop at compile time. A sixteen-element tuple
+does not iterate — it produces sixteen straight-line `serialize_element` calls
+with no counter, no bounds check, and no branch. Combined with `#[inline]`, a
+tuple of primitives can compile down to a handful of instructions.
+
+Only two things vary between the sixteen impls: the length passed to
+`serialize_tuple`, and how many calls follow it.
+"""
+
+[[annotation]]
+id    = "ser-impls-0032"
+file  = "src/ser/impls.rs"
+lines = "391-402"
+title = "(T,) → hand-written, so rustdoc can tell one story instead of sixteen"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-rules", "cfg"]
+macro_def = "ser-impls-0031"
+body = """
+The one-tuple gets its own impl block purely so it can carry two rustdoc
+attributes, then borrows the body from `tuple_impl_body!` like all the others.
+
+`doc(fake_variadic)` is an unstable rustdoc feature that renders a family of
+tuple impls as a single entry — `impl Serialize for (T₁, T₂, …, Tₙ)` — instead
+of listing every arity. It attaches to the one-element impl; the rest are
+`doc(hidden)` from the macro above, so they vanish from the page. The second
+attribute supplies the sentence that goes with it.
+
+Without this, the `Serialize` documentation would open with sixteen
+indistinguishable tuple impls before reaching anything a reader came for. Six
+lines of attributes to fix that is a good trade, and it is why the one-tuple
+looks anomalous in the source.
+"""
+
+[[annotation]]
+id    = "ser-impls-0033"
+file  = "src/ser/impls.rs"
+lines = "403-420"
+title = "2 … 16 → fifteen tuple impls, and the ceiling"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition", "monomorphization"]
+macro_def = "ser-impls-0030"
+body = """
+Fifteen lines, each one arity wider than the last, ending at sixteen. Together
+with the one-tuple above that is every tuple serde can handle.
+
+Seventeen is not a language limit — tuples have no maximum arity in Rust. It is
+a cost decision. Each arity is a distinct impl with its own generic parameters,
+and every one of them is parsed, expanded, and type-checked in every crate that
+depends on serde, whether or not any tuple is used. Sixteen is the conventional
+stopping point across the ecosystem, and the reason a nineteen-element tuple
+fails to serialize with a missing-impl error rather than working slowly.
+
+If you need one, the answer is the same as it has always been: give it a name
+and derive on it.
+"""
+
+[[annotation]]
+id    = "ser-impls-0034"
+file  = "src/ser/impls.rs"
+lines = "421-444"
+title = "map_impl! — an elaborate matcher whose bounds are decoration"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "macro-repetition", "where-clauses", "generic-params", "collections"]
+prereqs = ["ser-impls-0020", "ser-mod-0039"]
+body = """
+The matcher:
+
+```rust
+$ty:ident <K $(: $kbound1:ident $(+ $kbound2:ident)*)*, V $(, $typaram:ident : $bound:ident)*>
+```
+
+Nested optional repetitions, so the key's bounds can be absent, a single trait,
+or a `+`-separated list. It accepts `BTreeMap<K: Ord, V>` and
+`HashMap<K: Eq + Hash, V, H: BuildHasher>` from the same rule.
+
+Now look for `$kbound1`, `$kbound2`, or `$bound` in the body. **None of them are
+there.** Every bound the matcher works so hard to capture is discarded, and the
+generated impl says only `K: Serialize, V: Serialize`.
+
+That is not an oversight. `BTreeMap<K, V>` as a *type* carries no bounds — `Ord`
+is required by the methods that insert and look up, not by the struct — so an
+impl that never touches a key beyond handing it to `collect_map` does not need
+it. The bounds are in the matcher so each invocation reads like the type's real
+declaration, which is a legitimate use of a macro: the call site documents
+itself, and the transcriber ignores what it does not need.
+
+The cost is that the matcher is now three times the size of the body it guards.
+Worth knowing before you copy this pattern — you are paying complexity for
+readability at the call site, and there are only two call sites.
+"""
+
+[[annotation]]
+id    = "ser-impls-0035"
+file  = "src/ser/impls.rs"
+lines = "445-451"
+title = "BTreeMap → sorted keys, stable output"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["collections"]
+macro_def = "ser-impls-0034"
+body = """
+`collect_map(self)` over an iterator that yields keys in sorted order, so the
+encoding is deterministic: the same map always produces the same bytes. That
+property is what you want for content hashes, golden-file tests, and anything
+that gets diffed.
+"""
+
+[[annotation]]
+id    = "ser-impls-0036"
+file  = "src/ser/impls.rs"
+lines = "452-457"
+title = "HashMap → three type parameters, and unordered output"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["collections", "generic-params"]
+macro_def = "ser-impls-0034"
+prereqs = ["ser-impls-0022"]
+body = """
+The invocation that exercises the whole matcher: a key with two bounds, a value,
+and a hasher parameter with a bound of its own. All four bounds are discarded in
+expansion; what survives is `impl<K, V, H> Serialize for HashMap<K, V, H> where
+K: Serialize, V: Serialize`.
+
+Iteration order is randomized per process, so a `HashMap` serializes to a
+different key order on every run. Reach for `BTreeMap` when the bytes have to
+be reproducible.
+
+One thing this impl cannot help with: nothing here requires the key to be a
+*string*. `K: Serialize` is satisfied by any serializable type, so
+`HashMap<MyStruct, V>` compiles — and then fails at run time in a format like
+JSON, whose keys can only be strings. The model permits arbitrary keys; whether
+they can be written is the format's call, and you find out when you run it.
+"""
