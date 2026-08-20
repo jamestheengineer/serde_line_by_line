@@ -931,3 +931,743 @@ One thing this impl cannot help with: nothing here requires the key to be a
 JSON, whose keys can only be strings. The model permits arbitrary keys; whether
 they can be written is the format's call, and you find out when you run it.
 """
+
+[[annotation]]
+id    = "ser-impls-0037"
+file  = "src/ser/impls.rs"
+lines = "458-476"
+title = "deref_impl! — the macro that refuses to parse its input"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "smart-pointers", "sized-bound", "borrowing"]
+prereqs = ["ser-impls-0034"]
+body = """
+Put this next to `map_impl!` above. They solve the same problem — generate an
+impl whose header varies — and they take opposite approaches.
+
+`map_impl!` parses the header into fragments: a type name, key bounds, value,
+extra parameters. `deref_impl!` parses nothing. Its matcher is a literal `<`
+followed by `$($desc:tt)+`, which swallows the entire rest of the invocation as
+raw tokens and pastes it back after the word `impl`. The generics, the trait,
+the type, the `where` clause — the call site writes all of it, and the macro
+contributes only the opening brace and the body.
+
+That is why the invocations below read exactly like impl headers with the `{`
+left off. It also means the macro cannot inspect what it was given, cannot
+validate it, and cannot generate anything conditional on it. A malformed
+invocation produces an error pointing at the expansion rather than at the
+mistake. The trade is deliberate: six impls whose headers have nothing in common
+beyond starting with `<`.
+
+**The body is the semantic point.** `(**self).serialize(serializer)` — `self` is
+a `&Self`, one deref reaches the smart pointer, the second reaches through it to
+the pointee. Every type here is therefore **transparent on the wire**: a
+`Box<u32>` serializes as `32`, not as a wrapper around it. There is no tag, no
+indirection, nothing in the output to indicate a pointer was ever involved.
+
+`T: ?Sized` on every invocation is what admits `Box<str>`, `Rc<[u8]>`, and
+`Cow<'_, str>`.
+"""
+
+[[annotation]]
+id    = "ser-impls-0038"
+file  = "src/ser/impls.rs"
+lines = "477-485"
+title = "&T and &mut T → why you can serialize a reference to anything"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["borrowing", "lifetimes", "blanket-impls", "sized-bound"]
+macro_def = "ser-impls-0037"
+body = """
+The two impls the rest of serde quietly depends on. `&T: Serialize` whenever
+`T: Serialize` is what lets `collect_seq` hand `&T` items to the serializer,
+what gives `&str` and `&[u8]` their impls from the unsized `str` and `[T]` ones,
+and what makes `(&a, &b)` work as a tuple.
+
+They also compose without limit: `&&&T` picks up the impl three times over, each
+layer stripping one reference in the body.
+
+`&mut T` is here for completeness rather than for a use case — serializing does
+not need mutable access — but leaving it out would make generic code that
+happens to hold a `&mut` fail for no reason a caller could act on.
+"""
+
+[[annotation]]
+id    = "ser-impls-0039"
+file  = "src/ser/impls.rs"
+lines = "486-491"
+title = "Box<T> → the wrapper that leaves no trace"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["smart-pointers", "sized-bound"]
+macro_def = "ser-impls-0037"
+body = """
+`Box<T>` serializes as `T`. Boxing a field to break a recursive type or to move
+a large value off the stack changes nothing about the encoding, which is what
+you want — the indirection is a Rust-side representation choice, not part of the
+data.
+
+`?Sized` matters here: `Box<str>` and `Box<[u8]>` are real types worth
+serializing, and both borrow their impls from the unsized cases earlier in the
+file.
+"""
+
+[[annotation]]
+id    = "ser-impls-0040"
+file  = "src/ser/impls.rs"
+lines = "492-519"
+title = "Rc<T> and Arc<T> → shared once, written every time"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["smart-pointers", "cfg"]
+macro_def = "ser-impls-0037"
+body = """
+The two invocations that carry documentation, and the warning in it is the most
+consequential sentence in this file.
+
+Sharing does not survive serialization. A graph where one `Rc` is referenced
+from ten places serializes as **ten copies** of its contents. Deserializing that
+gives ten separate allocations, not one shared node. For a genuinely shared
+subgraph this is a size explosion; for a cyclic one it does not terminate at all.
+
+Note how the documentation gets here. `$(#[$attr:meta])*` in the matcher accepts
+doc comments as well as `#[cfg]`s — a `///` line is `#[doc = "..."]` to the
+parser — so the prose is supplied at the call site and pasted onto the generated
+impl. One capture, doing two jobs.
+
+Both are gated on `feature = "rc"`, which is **off by default**. That is
+unusual: serde's features are otherwise additive conveniences, and this one is a
+deliberate speed bump. You have to ask for reference-counted serialization, and
+the doc link tells you what you are asking for before you get it.
+"""
+
+[[annotation]]
+id    = "ser-impls-0041"
+file  = "src/ser/impls.rs"
+lines = "520-525"
+title = "Cow<'a, T> → borrowed or owned, indistinguishable on the wire"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["smart-pointers", "lifetimes", "strings"]
+macro_def = "ser-impls-0037"
+body = """
+The last deref impl, and the one with an extra bound: `T: ?Sized + Serialize +
+ToOwned`, since `Cow` is defined in terms of `ToOwned`.
+
+`(**self)` reaches the `T` whichever variant is live, so `Cow::Borrowed("hi")`
+and `Cow::Owned(String::from("hi"))` produce identical output. The variant is a
+statement about who owns the memory, and that is not information the data model
+carries.
+
+Worth holding on to for the deserialize side, where `Cow` is the whole point:
+`'de` exists so a deserializer can hand back borrowed data when the input allows
+it and owned data when it does not.
+"""
+
+[[annotation]]
+id    = "ser-impls-0042"
+file  = "src/ser/impls.rs"
+lines = "526-566"
+title = "Weak — upgrade first, and a dead reference becomes null"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["smart-pointers", "option", "cfg"]
+prereqs = ["ser-impls-0040", "ser-impls-0014"]
+body = """
+`RcWeak` and `ArcWeak` cannot use `deref_impl!`, because there may be nothing to
+deref to. Instead: `self.upgrade().serialize(serializer)`.
+
+`upgrade()` returns an `Option`, so these two impls route straight into the
+`Option` impl from earlier. A live weak reference serializes as its contents; a
+dead one serializes as `None` — a JSON `null`.
+
+That makes the output depend on the strong count at the instant of serialization
+rather than on the value alone. Serialize the same structure twice with a drop
+in between and you get two different documents, legitimately. It is the correct
+answer — there is nothing else a dead `Weak` could mean — but it is the only
+place in this file where the same value can serialize two different ways.
+
+These are the two impls with the longest attribute stacks in the crate: a doc
+comment, a three-clause `#[cfg]`, and a `cfg_attr` repeating it for docs.rs,
+spread over eight lines before the impl even begins. That is what feature-gating
+costs when a type needs `rc` *and* an allocator.
+"""
+
+[[annotation]]
+id    = "ser-impls-0043"
+file  = "src/ser/impls.rs"
+lines = "567-583"
+title = "nonzero_integers! — and the comma that must be trailing"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "macro-repetition", "marker-types"]
+prereqs = ["ser-impls-0002"]
+body = """
+The smallest macro in the file, and it teaches one precise thing about
+repetition syntax.
+
+The matcher is `($($T:ident,)+)`: the comma is **inside** the repetition. That
+makes it a terminator, so every element including the last must be followed by
+one, and the invocation below has to end with a trailing comma. Write it as
+`$($T:ident),+` instead — comma as a *separator* — and the opposite rule
+applies: commas between elements only, and a trailing one is an error. Neither
+form accepts both. It is a two-character difference that changes what compiles,
+and it is the single most common thing to get wrong when writing a list macro.
+
+`num::$T` puts the path in the transcriber, so the invocation is twelve bare
+type names rather than twelve qualified paths.
+
+The body is `self.get().serialize(serializer)`. `get()` returns the underlying
+primitive, which then dispatches through `primitive_impl!`'s impls from the top
+of the file — so a `NonZeroU32` serializes as a plain `u32`. The non-zero
+invariant is not represented in the output at all. It exists on the Rust side,
+is proved on the way out, and has to be proved again by the deserializer on the
+way back in.
+"""
+
+[[annotation]]
+id    = "ser-impls-0044"
+file  = "src/ser/impls.rs"
+lines = "584-598"
+title = "NonZeroI8 … NonZeroUsize → twelve, one per primitive"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition"]
+macro_def = "ser-impls-0043"
+prereqs = ["ser-impls-0004", "ser-impls-0005"]
+body = """
+Twelve types, each ending in the mandatory comma the matcher demands, including
+the last.
+
+They inherit everything the primitives do. `NonZeroIsize` widens to
+`serialize_i64` and `NonZeroUsize` to `serialize_u64`, because `get()` hands back
+an `isize` or `usize` and the impl from the top of the file takes over.
+`NonZeroI128` and `NonZeroU128` inherit the erroring default, so they fail on a
+format that never implemented 128-bit integers — two indirections away from
+where that decision was made.
+"""
+
+[[annotation]]
+id    = "ser-impls-0045"
+file  = "src/ser/impls.rs"
+lines = "599-610"
+title = "Cell<T> — the only impl that demands Copy"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["interior-mutability", "ownership", "where-clauses"]
+prereqs = ["ser-impls-0037"]
+body = """
+`T: Serialize + Copy` — the only `Copy` bound in the file, and it comes straight
+from `Cell::get`, which returns a copy of the contents because a `Cell` will not
+hand out references to what it holds.
+
+The consequence is a hole in the coverage: `Cell<String>` has no `Serialize`
+impl, and no amount of deriving will produce one. `Cell` is for small copyable
+values; anything larger belongs in a `RefCell`, which is the impl directly
+below and has no such restriction.
+
+What lands in the output is the value at the moment `get()` runs. Interior
+mutability means another part of the program can change it a line later, and
+nothing about the encoding records which instant you captured.
+"""
+
+[[annotation]]
+id    = "ser-impls-0046"
+file  = "src/ser/impls.rs"
+lines = "611-625"
+title = "RefCell<T> — the first impl that can fail on its own account"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["interior-mutability", "custom-errors", "result"]
+prereqs = ["ser-mod-0011", "ser-impls-0045"]
+body = """
+Everything failing so far has failed because a *format* could not represent
+something — no 128-bit integers, no NaN in JSON. This is the first impl that
+fails because of the program's own state: if a `RefMut` is outstanding when
+serialization reaches this cell, `try_borrow` returns `Err` and the whole
+operation stops with `already mutably borrowed`.
+
+`try_borrow` rather than `borrow` is the deliberate part. `borrow` panics; this
+returns an error the caller can handle, through `Error::custom` — the escape
+hatch every format's error type is required to provide, being used exactly as
+intended.
+
+Note the bound: `T: ?Sized`, no `Copy`. `RefCell` hands out a reference rather
+than a copy, so `RefCell<String>` and even `RefCell<[u8]>` work where `Cell`
+could not.
+
+It is reachable in ordinary code: serialize a structure from inside a method
+that is already holding a `borrow_mut()` on part of it, and this is the error
+you get.
+"""
+
+[[annotation]]
+id    = "ser-impls-0047"
+file  = "src/ser/impls.rs"
+lines = "626-659"
+title = "Mutex and RwLock — serialization that can block"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["interior-mutability", "custom-errors", "cfg"]
+prereqs = ["ser-impls-0046"]
+body = """
+The same shape as `RefCell`, with the failure mode moved from borrow-checking to
+locking, and one property that deserves stating plainly: **these impls acquire a
+lock.**
+
+`self.lock()` blocks. Serializing a structure containing a `Mutex` waits for
+whatever else holds it, for as long as that takes. If the current thread already
+holds that lock — serializing from inside a critical section — `std::sync::Mutex`
+is not reentrant and the program deadlocks. Nothing in the signature hints at
+this; `serialize` looks like a pure read.
+
+`RwLock` uses `.read()`, taking the shared lock, so concurrent serializations of
+the same structure do not contend with each other.
+
+The `Err` arm is poisoning: a thread panicked while holding the lock, so the
+contents may be inconsistent. Both impls decline rather than serialize possibly
+broken data, and report it through `Error::custom` with the same message.
+
+`std`-only, because neither type exists in `core` or `alloc`.
+"""
+
+[[annotation]]
+id    = "ser-impls-0048"
+file  = "src/ser/impls.rs"
+lines = "660-681"
+title = "Result — an ordinary enum, behind a feature you can turn off"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["result", "cfg", "pattern-matching", "feature-unification"]
+prereqs = ["ser-impls-0028"]
+body = """
+Structurally this is `Bound` again: a two-variant enum, both variants carrying a
+value, encoded with `serialize_newtype_variant` and the indices `0` and `1`.
+`Ok(5)` becomes `{"Ok":5}` in a self-describing format. There is nothing special
+about `Result` to the data model — it is a name, two variants, and two indices.
+
+The gate is what makes this impl interesting. `feature = "result"` is **on by
+default**, so the impl is normally present, but a crate can switch it off with
+`default-features = false`. That is unusual in serde, where features are
+otherwise additive things you add rather than defaults you remove.
+
+It is also a reminder that Cargo features must be additive: if any crate in the
+graph enables `result`, every crate gets the impl. Turning it off is only
+effective if nothing else in your dependency tree turns it back on, which for a
+default feature of serde is a real constraint rather than a theoretical one.
+"""
+
+[[annotation]]
+id    = "ser-impls-0049"
+file  = "src/ser/impls.rs"
+lines = "682-696"
+title = "Duration — two fields, and the units are in the names"
+kind  = "impl"
+tracks = ["reference"]
+prereqs = ["ser-impls-0024"]
+body = """
+A two-field struct, `secs` and `nanos`, read through `as_secs()` and
+`subsec_nanos()` rather than from fields, since `Duration`'s representation is
+private.
+
+`subsec_nanos()` is the sub-second remainder, not the total — so the pair is
+`secs + nanos/1e9`, never `nanos` alone. A three-and-a-half second duration
+serializes as `{"secs":3,"nanos":500000000}`, and reading `nanos` in isolation
+tells you nothing.
+
+No `#[cfg]`: `Duration` lives in `core`, so it is available in the barest
+`no_std` build. `SystemTime`, immediately below, is not.
+"""
+
+[[annotation]]
+id    = "ser-impls-0050"
+file  = "src/ser/impls.rs"
+lines = "697-717"
+title = "SystemTime — an epoch, and the times it cannot express"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["custom-errors", "result", "cfg"]
+prereqs = ["ser-impls-0049"]
+body = """
+`SystemTime` is an opaque platform timestamp with no defined zero, so it cannot
+be serialized directly. This impl converts it to a `Duration` since the Unix
+epoch first, and writes that as two fields — `secs_since_epoch` and
+`nanos_since_epoch`, named differently from `Duration`'s so the encodings cannot
+be confused for one another.
+
+**Any time before 1970 fails.** `duration_since(UNIX_EPOCH)` returns `Err` for
+an earlier instant, and this impl turns that into
+`SystemTime must be later than UNIX_EPOCH`. A birth date, a historical
+timestamp, a clock that has not been set yet — all unserializable. The
+alternative would have been a signed offset, which `Duration` cannot represent.
+
+The early return is written out longhand rather than with `tri!`, because the
+two error types are different: `duration_since` yields a
+`SystemTimeError` and the function returns `S::Error`, so the conversion has to
+go through `Error::custom` explicitly. `tri!` deliberately does no `From`
+conversion, which is exactly why it does not fit here.
+"""
+
+[[annotation]]
+id    = "ser-impls-0051"
+file  = "src/ser/impls.rs"
+lines = "718-733"
+title = "serialize_display_bounded_length! — formatting without an allocator"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "11-no-std-and-features"
+rust_features = ["macro-rules", "no-std", "strings", "cfg"]
+prereqs = ["ser-impls-0002"]
+body = """
+A macro with a doc comment, which is unusual — and the comment is load-bearing,
+because it documents a panic.
+
+The body writes a `Display` value into a **stack array** of exactly `$max`
+bytes, using `crate::format::Buf`, a thirty-line `fmt::Write` implementation
+whose only job is to fill a fixed slice. No `String`, no allocator, so this
+works in a `no_std` build where the obvious `value.to_string()` does not exist.
+
+Then `.unwrap()`. `Buf::write_str` returns `Err(fmt::Error)` when the value
+overruns the buffer, so a `Display` impl that writes more than `MAX_LEN` bytes
+panics here. A library panicking on its own data would normally be a bug; it is
+tolerable in this one case because every call site pairs its `MAX_LEN` with a
+`debug_assert_eq!` against a literal example of the longest possible value.
+The constant is checked against reality in debug builds, and the panic is what
+happens if that check was wrong.
+
+The `#[cfg]` sits on the macro *definition*, so in a build without networking
+support the macro does not exist at all. And the outer `{{ ... }}` makes the
+expansion a block expression, so the invocation can be used as the value of an
+`if` arm — which is exactly how the impls below use it.
+"""
+
+[[annotation]]
+id    = "ser-impls-0052"
+file  = "src/ser/impls.rs"
+lines = "734-757"
+title = "IpAddr — the first impl that asks what kind of format it is talking to"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "04-generic-bounds"
+rust_features = ["cfg", "pattern-matching"]
+prereqs = ["ser-mod-0041"]
+body = """
+`if serializer.is_human_readable()` — and the same value now has two entirely
+different encodings.
+
+For JSON and friends: the string `"192.168.0.1"`, by delegating to the `Ipv4Addr`
+or `Ipv6Addr` impl. For a compact binary format: an externally tagged enum,
+`serialize_newtype_variant("IpAddr", 0, "V4", a)`, whose payload is the raw
+octets. A human reading a config file gets something they can edit; a wire
+protocol gets four bytes instead of fifteen.
+
+This is the one place the data model deliberately leaks information about the
+format back to the value being serialized, and `ser/mod.rs` argues at length
+that it should be used sparingly. Address types are the canonical justified
+case: the textual form is genuinely the natural one for humans and genuinely
+wasteful for machines, and no single choice serves both.
+
+The cost is real and worth stating: **the two encodings are not
+interchangeable.** A document written by a human-readable format cannot be read
+by a binary one, and vice versa, even with the same serde version and the same
+types.
+"""
+
+[[annotation]]
+id    = "ser-impls-0053"
+file  = "src/ser/impls.rs"
+lines = "758-803"
+title = "DEC_DIGITS_LUT and format_u8 — the only hand-optimized code in the crate"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["collections", "pattern-matching", "zero-cost"]
+body = """
+Forty-five lines of ordinary imperative Rust, which makes this the least
+serde-like passage in the crate — and one of the few places to see what the
+crate looks like when it is optimizing rather than abstracting.
+
+`DEC_DIGITS_LUT` is the classic two-digits-at-a-time table: two hundred bytes
+holding `"00", "01", … "99"` end to end, so converting a number to decimal
+becomes an index rather than a division per digit. It is the same trick the
+`itoa` crate is built on. `format_u8` uses it in three cases — three digits, two
+digits, one — and returns how many bytes it wrote.
+
+Below it, a `#[test]` that runs `format_u8` against `to_string()` for **every
+one of the 256 possible inputs**. Exhaustive testing is normally out of reach;
+here the domain is one byte, so the test is not a sample, it is a proof. When
+you can do this, do it.
+
+Both items are gated on the same networking `#[cfg]` as everything else in this
+section. They exist for exactly one caller: the `Ipv4Addr` impl immediately
+below.
+"""
+
+[[annotation]]
+id    = "ser-impls-0054"
+file  = "src/ser/impls.rs"
+lines = "804-827"
+title = "Ipv4Addr — a prefilled buffer, and one of the crate's two unsafe blocks"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "12-errors-iterators-closures"
+rust_features = ["unsafe", "strings", "zero-cost"]
+prereqs = ["ser-impls-0053", "ser-impls-0052"]
+body = """
+The human-readable branch is a small piece of systems programming.
+
+`let mut buf = [b'.'; MAX_LEN]` fills the buffer with dots **first**, so the
+three separators are already in place and the loop only writes digits, skipping
+one byte between octets. No separator is ever written explicitly.
+
+`debug_assert_eq!(MAX_LEN, "101.102.103.104".len())` is a pattern worth
+stealing: the magic constant `15` is checked against a literal example of the
+longest possible value, so the number cannot silently drift from what it claims
+to describe.
+
+Then `unsafe { str::from_utf8_unchecked(...) }`. This is **one of exactly two
+`unsafe` blocks in the entire crate** — the other is in `format.rs`, doing the
+same thing for the same reason. The safety argument is airtight and stated in a
+comment directly above: only ASCII digits and dots were written, so the bytes
+are valid UTF-8 by construction. It is also worth being honest about the size of
+the prize: skipping validation on at most fifteen bytes. Two `unsafe` blocks in
+twelve thousand lines is the ratio to notice, not the micro-optimization.
+
+The binary branch is one line: `self.octets()` is a `[u8; 4]`, which reaches
+`array_impls!` and goes out as a four-element tuple.
+"""
+
+[[annotation]]
+id    = "ser-impls-0055"
+file  = "src/ser/impls.rs"
+lines = "828-843"
+title = "Ipv6Addr — where the bounded-length macro pays for itself"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings", "no-std"]
+prereqs = ["ser-impls-0051", "ser-impls-0054"]
+body = """
+IPv6 text form has zero compression, embedded IPv4 notation, and variable-width
+groups — far too much to hand-roll the way `Ipv4Addr` does. So this impl uses
+the `Display` impl that `core` already provides and captures it into a stack
+buffer with `serialize_display_bounded_length!`.
+
+`MAX_LEN` is 39, checked against `"1001:1002:1003:1004:1005:1006:1007:1008"` —
+eight groups of four hex digits and seven colons, the longest form that exists
+once you know no compression is applied.
+
+The binary branch sends `self.octets()`, a `[u8; 16]`, which lands on the
+sixteen-element tuple impl — the very last arity `tuple_impls!` generates. One
+more byte of address and this line would not compile.
+"""
+
+[[annotation]]
+id    = "ser-impls-0056"
+file  = "src/ser/impls.rs"
+lines = "844-867"
+title = "SocketAddr — the same two-encoding split, one level up"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+prereqs = ["ser-impls-0052"]
+body = """
+Structurally identical to `IpAddr`: delegate to the concrete impl when the
+format is human-readable, emit a tagged enum with indices `0` and `1` when it is
+not.
+
+The nesting is worth tracing once. A `SocketAddr` in a binary format becomes a
+variant wrapping a `SocketAddrV4`, which becomes a two-element tuple of an
+`Ipv4Addr` and a `u16`, where the address is itself a four-element tuple. Four
+model constructs deep, and every layer was chosen by an impl that had no idea
+what the layer above it was doing.
+"""
+
+[[annotation]]
+id    = "ser-impls-0057"
+file  = "src/ser/impls.rs"
+lines = "868-902"
+title = "SocketAddrV4 and V6 — where the two encodings stop agreeing"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings", "pattern-matching"]
+prereqs = ["ser-impls-0055"]
+body = """
+Both follow the pattern: bounded-length `Display` when human-readable,
+`(self.ip(), self.port())` as a two-tuple when not. And in the V6 case those two
+branches do not carry the same information.
+
+`SocketAddrV6` has four components — address, port, flowinfo, and scope id. The
+`Display` form includes the scope: the `MAX_LEN` of 58 is checked against
+`"[1001:…:1008%4294967295]:65000"`, and that `%4294967295` is the scope id at
+full width. The binary branch sends `(ip, port)` and **drops flowinfo and scope
+id entirely**.
+
+So a link-local IPv6 socket address — exactly the case where the scope id is not
+optional — round-trips through JSON and loses nothing, and round-trips through a
+compact binary format as a different address. That is a genuine inconsistency
+rather than a design trade, and it is invisible unless you go looking at both
+branches side by side.
+
+The `MAX_LEN` of 21 for V4, `"101.102.103.104:65000"`, is the same
+checked-constant discipline as everywhere else in this section.
+"""
+
+[[annotation]]
+id    = "ser-impls-0058"
+file  = "src/ser/impls.rs"
+lines = "903-929"
+title = "Path and PathBuf — UTF-8 or nothing"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings", "custom-errors", "cfg", "sized-bound"]
+prereqs = ["ser-impls-0010", "ser-mod-0008"]
+body = """
+A `Path` serializes as a string, and if it is not valid UTF-8 it does not
+serialize at all: `path contains invalid UTF-8 characters`.
+
+This is the example the `Error::custom` documentation in `ser/mod.rs` uses to
+justify the whole mechanism, so it is worth seeing the actual line. A
+`Serialize` impl discovers a problem, has no idea what error type the format
+uses, and cannot construct one — so it goes through the constructor every format
+is required to provide.
+
+Paths are not UTF-8 on any real platform. A Unix path is arbitrary bytes minus
+`/` and nul; a Windows path is arbitrary UTF-16 including unpaired surrogates.
+Serde takes the strings that fit and refuses the rest, which is the honest
+choice for a *portable* encoding — the alternative is the `OsStr` impl below,
+and its cost is on display there.
+
+`PathBuf` delegates through `as_path()`, the same relationship `String` has to
+`str`, spelled out here because `PathBuf` does not deref-coerce all the way to
+the impl.
+"""
+
+[[annotation]]
+id    = "ser-impls-0059"
+file  = "src/ser/impls.rs"
+lines = "930-963"
+title = "OsStr — an encoding that names the platform it came from"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "strings", "iterators"]
+prereqs = ["ser-impls-0058"]
+body = """
+Two `fn serialize` definitions inside one impl block, one `#[cfg(unix)]` and one
+`#[cfg(windows)]`. Exactly one survives compilation, which is how a single impl
+gets a per-platform body without duplicating the surrounding block. Note the
+outer gate, `any(unix, windows)`: on any other target the impl does not exist,
+and `OsStr` is simply not serializable.
+
+Unix sends raw bytes; Windows sends a `Vec<u16>` of UTF-16 code units. Both wrap
+the payload in a variant named for the platform — index `0` `"Unix"`, index `1`
+`"Windows"` — so the encoding records where it was produced.
+
+That tag is doing real work: it makes cross-platform reads **fail loudly**
+rather than silently mangling a path. It also means an `OsString` written on
+Linux cannot be read on Windows at all, which is the price of representing what
+`Path` refused to.
+
+The variant name is `"OsString"`, not `"OsStr"`, in an impl for `OsStr`. That is
+deliberate — `OsString` below delegates here, and both types must produce the
+same encoding.
+
+`self.encode_wide().collect::<Vec<_>>()` is the one allocation in this stretch
+of the file, and unavoidable: the iterator has to be materialized before it can
+be handed over as a slice.
+"""
+
+[[annotation]]
+id    = "ser-impls-0060"
+file  = "src/ser/impls.rs"
+lines = "964-1005"
+title = "Wrapping, Saturating, Reverse — three newtypes that disappear"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["marker-types", "msrv", "cfg", "zero-cost"]
+prereqs = ["ser-impls-0037"]
+body = """
+Three impls, one body each: `self.0.serialize(serializer)`. These are newtype
+wrappers that change how arithmetic or ordering behaves, not what the value
+*is*, so nothing about them reaches the output. A `Wrapping<u8>` is a `u8` on
+the wire.
+
+The distinction they carry is a Rust-side behavioural one, and the model has no
+vocabulary for behaviour. Compare `NonZeroU32` earlier, which also serializes as
+its primitive: same conclusion, different reason.
+
+`Saturating` is gated on `not(no_core_num_saturating)` — another build-script
+cfg, set below Rust 1.74 where the type was stabilized. The crate keeps its 1.56
+MSRV and quietly gains the impl on any newer toolchain, with nothing for the
+user to configure. `Wrapping` and `Reverse` are old enough to need no gate at
+all.
+"""
+
+[[annotation]]
+id    = "ser-impls-0061"
+file  = "src/ser/impls.rs"
+lines = "1006-1026"
+title = "atomic_impl! — a macro that generates its own cfgs"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "11-no-std-and-features"
+rust_features = ["macro-rules", "cfg", "interior-mutability", "msrv"]
+prereqs = ["ser-impls-0043"]
+body = """
+The last macro in the file, and the only one whose transcriber emits `#[cfg]`
+attributes of its own rather than passing through ones the caller supplied.
+
+`($($ty:ident $size:expr)*)` pairs a type with a width string, with **no
+separator between the pairs at all** — just whitespace, since `tt`-level parsing
+does not care. The width then appears inside a generated attribute:
+`#[cfg(any(no_target_has_atomic, target_has_atomic = $size))]`. So each of the
+eleven impls is independently gated on the target actually having an atomic of
+that width. A platform without 64-bit atomics gets the other impls and not those
+two, silently and correctly.
+
+`no_target_has_atomic` is the escape hatch for compilers too old to know the
+`target_has_atomic` cfg at all — set by the build script, and it makes the
+`any(...)` fall through to "just compile it".
+
+The body is `self.load(Ordering::Relaxed)`, with a comment noting it matches what
+libcore's `Debug` impl does. `Relaxed` is the right choice and worth
+understanding: serializing an atomic performs no synchronization and establishes
+no happens-before with any other thread. You get *a* value that was in the cell,
+not a consistent snapshot across several of them. Serializing a struct with
+three atomics can produce a combination that never simultaneously existed.
+"""
+
+[[annotation]]
+id    = "ser-impls-0062"
+file  = "src/ser/impls.rs"
+lines = "1027-1039"
+title = "AtomicBool … AtomicUsize → nine, gated per width"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["cfg", "interior-mutability"]
+macro_def = "ser-impls-0061"
+body = """
+Nine types paired with the width their `target_has_atomic` gate will check.
+`AtomicIsize` and `AtomicUsize` use `"ptr"`, which is what the cfg calls a
+pointer-width atomic — and they then widen to `i64`/`u64` on the wire like the
+plain integers do.
+"""
+
+[[annotation]]
+id    = "ser-impls-0063"
+file  = "src/ser/impls.rs"
+lines = "1040-1045"
+title = "AtomicI64, AtomicU64 → a second invocation, for a second reason"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["cfg", "msrv"]
+macro_def = "ser-impls-0061"
+body = """
+The sixty-four-bit atomics are split into their own invocation because they need
+a different outer gate: `not(no_std_atomic64)` rather than `not(no_std_atomic)`.
+The build script sets those two separately, since a target can have 32-bit
+atomics and not 64-bit ones — 32-bit ARM without the right extensions, some
+embedded targets, `wasm32` in certain configurations.
+
+Two invocations rather than one extra parameter, and the file ends here.
+"""
