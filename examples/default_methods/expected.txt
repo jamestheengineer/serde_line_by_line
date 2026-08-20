@@ -1,0 +1,25 @@
+Same format twice. Tuned overrides three default methods.
+
+i128 value
+  Verbose   error: i128 is not supported
+  Tuned     170141183460469231731687303715884105727
+  the Verbose message is serde_core's own default body talking
+
+Elapsed(4_265)
+  Verbose   "1h 11m 05s"
+  Tuned     4265
+  one Serialize impl, asking is_human_readable and believing the answer
+
+Reading { note: Some(..) }
+  Verbose   {elapsed: "1h 11m 05s", celsius: 21.5, note: "calibrated"}   [serialize_struct(len = 3)]
+  Tuned     {elapsed: 4265, celsius: 21.5, note: "calibrated"}   [serialize_struct(len = 3)]
+
+Reading { note: None }
+  Verbose   {elapsed: "1h 11m 05s", celsius: 21.5}   [serialize_struct(len = 2)]
+  Tuned     {elapsed: 4265, celsius: 21.5, note: -}   [serialize_struct(len = 2), skip_field("note")]
+  Verbose recorded no skip_field: its default body is just Ok(())
+
+Notice the length in the last case. Both formats were told len = 2,
+because a skipped field is not counted; Verbose then wrote two fields
+and Tuned wrote three. The length says what the data structure intends
+to send, not what the format decides to emit.

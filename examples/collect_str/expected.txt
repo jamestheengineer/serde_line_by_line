@@ -1,0 +1,30 @@
+Two formats. One overrides collect_str, the other inherits it.
+
+Version(1, 2, 3)
+  Naive      serialize_str(&str, 5 bytes)
+  Streaming  collect_str(Display) -> 5 pieces, 5 bytes, 0 allocated in between
+  both wrote 1.2.3
+
+Version(10, 0, 12345)
+  Naive      serialize_str(&str, 10 bytes)
+  Streaming  collect_str(Display) -> 5 pieces, 10 bytes, 0 allocated in between
+  both wrote 10.0.12345
+
+Borrowed("already a str")
+  Naive      serialize_str(&str, 13 bytes)
+  Streaming  collect_str(Display) -> 1 piece, 13 bytes, 0 allocated in between
+  both wrote already a str
+
+Instant { seconds: 1431709260, nanos: 500 }
+  Naive      serialize_str(&str, 21 bytes)
+  Streaming  collect_str(Display) -> 10 pieces, 21 bytes, 0 allocated in between
+  both wrote 1431709260.000000500s
+
+Naive never sees a Display value: the default collect_str resolved it
+to a String and passed a borrow of that String to serialize_str. The
+piece counts show what Streaming saw instead — the Display impl writing
+its parts one at a time, into the output buffer itself.
+
+Borrowed is the case where the default costs a copy of a string that
+already existed. Instant is the case where no string ever exists:
+format_args! is a recipe, and only Streaming declines to cook it twice.

@@ -202,6 +202,7 @@ kind  = "macro-def"
 tracks = ["reference", "course"]
 course_unit = "10-macro-rules"
 rust_features = ["macro-rules", "macro-repetition", "supertraits", "cfg", "custom-errors"]
+examples = ["error_custom"]
 prereqs = ["ser-mod-0007"]
 body = """
 Sixty lines of macro to declare one trait. Worth understanding exactly why.
@@ -662,6 +663,7 @@ kind  = "trait-item"
 tracks = ["reference", "course"]
 course_unit = "05-default-methods"
 rust_features = ["default-methods", "traits", "msrv"]
+examples = ["default_methods"]
 prereqs = ["ser-mod-0020"]
 body = """
 Every other integer method is required. This one has a body:
@@ -1040,6 +1042,7 @@ kind  = "trait-item"
 tracks = ["reference", "course"]
 course_unit = "03-associated-types"
 rust_features = ["traits", "associated-types", "option", "iterators"]
+examples = ["seq_state_machine"]
 prereqs = ["ser-mod-0018"]
 body = """
 The first of the seven compound constructors, and the shape they all share:
@@ -1203,6 +1206,7 @@ kind  = "trait-item"
 tracks = ["reference", "course"]
 course_unit = "05-default-methods"
 rust_features = ["default-methods", "iterators", "generic-params", "where-clauses", "associated-types"]
+examples = ["seq_state_machine"]
 prereqs = ["ser-mod-0033"]
 body = """
 After thirty declarations, an actual implementation:
@@ -1272,6 +1276,7 @@ kind  = "cfg-gate"
 tracks = ["reference", "course"]
 course_unit = "11-no-std-and-cfg"
 rust_features = ["cfg", "no-std", "default-methods", "strings", "sized-bound"]
+examples = ["collect_str"]
 prereqs = ["ser-mod-0039"]
 body = """
 The same signature declared twice under mutually exclusive `cfg`s, and the
@@ -1312,6 +1317,7 @@ title = "is_human_readable — the one place formats are allowed to leak"
 kind  = "trait-item"
 tracks = ["reference"]
 rust_features = ["default-methods", "inlining", "zero-cost"]
+examples = ["default_methods"]
 prereqs = ["ser-mod-0040"]
 body = """
 The last method in the trait, and an admitted compromise:
@@ -1358,6 +1364,7 @@ kind  = "trait-item"
 tracks = ["reference", "course"]
 course_unit = "03-associated-types"
 rust_features = ["traits", "associated-types", "borrowing", "sized-bound"]
+examples = ["seq_state_machine"]
 prereqs = ["ser-mod-0033"]
 body = """
 The type `Serializer::SerializeSeq` was promising back at line 373, now declared.
@@ -1493,6 +1500,7 @@ title = "SerializeStruct — and skip_field, which usually does nothing"
 kind  = "trait-item"
 tracks = ["reference"]
 rust_features = ["traits", "default-methods", "inlining", "associated-types"]
+examples = ["default_methods"]
 prereqs = ["ser-mod-0036"]
 body = """
 The state trait behind every derived struct impl. `serialize_field` takes the
@@ -1562,6 +1570,7 @@ kind  = "plumbing"
 tracks = ["reference", "course"]
 course_unit = "05-default-methods"
 rust_features = ["iterators", "option", "pattern-matching", "generic-params"]
+examples = ["seq_state_machine"]
 prereqs = ["ser-mod-0038"]
 body = """
 The private helper `collect_seq` and `collect_map` use, and a small piece of

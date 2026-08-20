@@ -1,0 +1,9 @@
+[package]
+name = "seq_state_machine"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+serde_core = "=1.0.229"

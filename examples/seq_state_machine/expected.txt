@@ -1,0 +1,64 @@
+Every call the sequence protocol makes, in order.
+
+vec![10, 20, 30]
+  serialize_seq(len = Some(3))
+    serialize_element #1
+    serialize_i32(10)
+    serialize_element #2
+    serialize_i32(20)
+    serialize_element #3
+    serialize_i32(30)
+  end() -> hint 3 matched
+  = [10, 20, 30]
+
+vec![vec![1, 2], vec![], vec![3]]
+  serialize_seq(len = Some(3))
+    serialize_element #1
+    serialize_seq(len = Some(2))
+      serialize_element #1
+      serialize_i32(1)
+      serialize_element #2
+      serialize_i32(2)
+    end() -> hint 2 matched
+    serialize_element #2
+    serialize_seq(len = Some(0))
+    end() -> hint 0 matched
+    serialize_element #3
+    serialize_seq(len = Some(1))
+      serialize_element #1
+      serialize_i32(3)
+    end() -> hint 1 matched
+  end() -> hint 3 matched
+  = [[1, 2], [], [3]]
+
+collect_seq(map)     — exact size
+  serialize_seq(len = Some(6))
+    serialize_element #1
+    serialize_i32(2)
+    serialize_element #2
+    serialize_i32(4)
+    serialize_element #3
+    serialize_i32(6)
+    serialize_element #4
+    serialize_i32(8)
+    serialize_element #5
+    serialize_i32(10)
+    serialize_element #6
+    serialize_i32(12)
+  end() -> hint 6 matched
+  = [2, 4, 6, 8, 10, 12]
+
+collect_seq(filter)  — size unknown
+  serialize_seq(len = None)
+    serialize_element #1
+    serialize_i32(2)
+    serialize_element #2
+    serialize_i32(4)
+    serialize_element #3
+    serialize_i32(6)
+  end() -> no hint, wrote 3
+  = [2, 4, 6]
+
+Both reached the same serialize_seq. Only the hint differs, because
+iterator_len_hint returns Some only when the iterator's lower and upper
+bounds agree — filter cannot promise that, map over a slice can.

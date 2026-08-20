@@ -1,0 +1,24 @@
+One Serialize impl, two formats, two error types.
+
+input     ["ok", "fine", "good"]
+  Plain     ok: "ok" "fine" "good"
+  Located   ok: "ok" "fine" "good"
+
+input     ["ok", "fine", "héllo"]
+  Plain     error: non-ASCII character 'é' at byte 1
+  Located   error: at value #3: non-ASCII character 'é' at byte 1
+
+input     ["café", "fine", "good"]
+  Plain     error: non-ASCII character 'é' at byte 3
+  Located   error: at value #1: non-ASCII character 'é' at byte 3
+
+Plain cannot say where it happened. Located can, because the
+format attached the count after custom had already returned.
+
+custom takes anything that implements Display:
+  a &str
+  x
+  format_args!, 0 allocations
+  6 bytes for 5 chars
+
+And because Error: StdError under std, it boxes: non-ASCII character 'é' at byte 3
