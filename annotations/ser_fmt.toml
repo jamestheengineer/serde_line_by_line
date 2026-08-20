@@ -1,0 +1,222 @@
+schema = 1
+source = "serde_core-1.0.229"
+
+[[annotation]]
+id    = "ser-fmt-0001"
+file  = "src/ser/fmt.rs"
+lines = "1-9"
+title = "fmt::Error as a serde error — a type with nowhere to put the message"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["custom-errors", "traits"]
+prereqs = ["ser-mod-0008"]
+body = """
+Five lines that make this whole file possible, and they throw information away.
+
+`ser::Error` requires one method: build an error from any `Display` value.
+`fmt::Error` is a unit struct — no field, no message, nothing to build *with* —
+so `custom` ignores its argument and returns the only value the type has. The
+underscore on `_msg` is the giveaway.
+
+That is a real cost, and it is the right trade. `std::fmt` has no error channel
+beyond "something went wrong", because a `Display` impl writing into a formatter
+has nowhere to report detail to. Serde's contract only demands that an error be
+*constructible* from a message, not that it retain one, precisely so lossy cases
+like this can participate.
+
+The consequence to remember: anything that fails while serializing into a
+`Formatter` fails with no explanation at all. If you need to know why, this is
+not the serializer to debug with.
+"""
+
+[[annotation]]
+id    = "ser-fmt-0002"
+file  = "src/ser/fmt.rs"
+lines = "10-19"
+title = "fmt_primitives! — sixteen forwards to Display"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "macro-repetition", "traits"]
+prereqs = ["ser-impls-0043", "ser-impls-0031"]
+body = """
+A method-generating macro, invoked inside an impl block — the same placement as
+`tuple_impl_body!` in `ser/impls.rs`, and the same trick of expanding to trait
+items rather than to whole items.
+
+Two things distinguish it from the macros in that file. The comma sits inside
+the repetition, `($($f:ident: $t:ty,)*)`, so a trailing comma is mandatory — the
+`nonzero_integers!` rule again. And the parameter type is `$t:ty`, not `ident`,
+because this list includes `&str` and `&'static str`, which are types and not
+identifiers. `primitive_impl!` could get away with `ident` because all sixteen of
+its arguments were single words; this one cannot.
+
+The body is `Display::fmt(&v, self)`: hand the value straight to the formatter.
+No quoting, no escaping, no delimiters. This "format" is whatever `Display`
+already prints.
+"""
+
+[[annotation]]
+id    = "ser-fmt-0003"
+file  = "src/ser/fmt.rs"
+lines = "20-48"
+title = "&mut Formatter is a Serializer — and the reason it has to be a reference"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "09-blanket-impls-and-coherence"
+rust_features = ["traits", "borrowing", "lifetimes", "associated-types", "proc-macro-boundary"]
+prereqs = ["ser-mod-0016", "ser-impossible-0002"]
+body = """
+The declaration to stare at: `impl<'a> Serializer for &mut fmt::Formatter<'a>`.
+The impl is on the **reference**, not on `Formatter`.
+
+It has to be. `Serializer` takes `self` by value and every method consumes it —
+that is what makes a serializer a one-shot state machine rather than something
+you can call twice. A formatter is a thing you write into repeatedly and do not
+own, so the type that gets consumed is the borrow. This is the general pattern
+for any serializer that writes into a buffer it does not own, and seeing it here
+in five words is cheaper than deriving it later from `serde_json`.
+
+`type Ok = ()` — success produces nothing, because the output has already gone
+into the formatter by the time you get it back. `type Error = fmt::Error`, via
+the impl above.
+
+Then seven associated types, all `Impossible<(), fmt::Error>`. The previous file
+existed for exactly this: a text rendering has no notion of a sequence or a map,
+those seven slots still have to be filled with types implementing the
+corresponding traits, and `Impossible` is a type no one can construct.
+
+The doctest is the payoff and the reason anyone would want this. Derive
+`Serialize` on an enum with `#[serde(rename_all = "kebab-case")]`, then write a
+three-line `Display` impl that calls `self.serialize(f)`, and
+`MessageType::StartRequest` prints as `start-request`. The renaming rules you
+already configured for your wire format now drive your `Display` output, with no
+second list of strings to keep in sync.
+"""
+
+[[annotation]]
+id    = "ser-fmt-0004"
+file  = "src/ser/fmt.rs"
+lines = "49-67"
+title = "serialize_bool … serialize_unit_struct → sixteen methods, no quotes"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition", "strings"]
+macro_def = "ser-fmt-0002"
+prereqs = ["ser-impls-0005"]
+body = """
+Sixteen entries, ending in the trailing comma the matcher requires.
+
+Two are worth picking out. `serialize_i128` and `serialize_u128` are
+**implemented here**, not left to the erroring default they carry in the trait —
+so a `Formatter` handles 128-bit integers when plenty of real wire formats do
+not. `Display` has always been able to print them, so there was nothing to opt
+into.
+
+`serialize_str: &str` renders a string with no quoting and no escaping, which is
+what makes this a text renderer rather than an encoder: the output is meant to be
+read, not parsed. And `serialize_unit_struct: &'static str` prints the struct's
+*name*, since a unit struct has nothing else to show.
+"""
+
+[[annotation]]
+id    = "ser-fmt-0005"
+file  = "src/ser/fmt.rs"
+lines = "68-83"
+title = "unit_variant and newtype_struct — the two that carry the doctest"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "proc-macro-boundary"]
+prereqs = ["ser-fmt-0003", "ser-mod-0030"]
+body = """
+`serialize_unit_variant` ignores the enum name and the index and displays the
+**variant name** — and that one line is what the doctest at the top of this impl
+is built on. `#[serde(rename_all = "kebab-case")]` rewrites variant names before
+they ever reach a serializer, so what arrives here is already `start-request`.
+
+`serialize_newtype_struct` forwards to the wrapped value, so `struct Meters(f64)`
+displays as its number. Consistent with `ser/impls.rs`, where newtype wrappers
+also vanish: a name you gave a value in Rust is not part of the value.
+
+Everything below these two refuses.
+"""
+
+[[annotation]]
+id    = "ser-fmt-0006"
+file  = "src/ser/fmt.rs"
+lines = "84-115"
+title = "bytes, none, some, unit, newtype_variant — five refusals with reasons"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["option", "custom-errors"]
+prereqs = ["ser-fmt-0001", "ser-mod-0028"]
+body = """
+`Err(fmt::Error)` five times, and each one is a decision rather than an omission.
+
+`serialize_bytes` — arbitrary bytes have no text form. `serialize_unit` and
+`serialize_none` — there is no string that means "nothing"; rendering them as the
+empty string would silently produce output indistinguishable from a value that
+was there.
+
+`serialize_some` is the interesting refusal, because it *could* have forwarded
+to the inner value the way `serialize_newtype_struct` just did. Look at what that
+would cost: `Some(3)` and `3` would print identically, while `None` still could
+not print at all. Half of `Option` working is worse than none of it, so the whole
+type is out.
+
+`serialize_newtype_variant` is refused for the shape rather than the payload —
+`Variant(value)` needs two things printed and some punctuation between them, and
+choosing that punctuation is a formatting decision this serializer has no basis
+for making.
+
+Every one of these errors arrives at the caller with no message, per the `Error`
+impl at the top of the file. The reasoning above is not recoverable at run time.
+"""
+
+[[annotation]]
+id    = "ser-fmt-0007"
+file  = "src/ser/fmt.rs"
+lines = "116-163"
+title = "The seven compound methods — where Impossible earns its keep"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["associated-types", "traits"]
+prereqs = ["ser-impossible-0004", "ser-mod-0033"]
+body = """
+Forty-eight lines that all say `Err(fmt::Error)`.
+
+Read the return types rather than the bodies. Each promises a
+`Result<Impossible<(), fmt::Error>, fmt::Error>`, and every one of them takes the
+`Err` branch — necessarily, because the `Ok` branch would require constructing an
+`Impossible`, and no one can. The type makes the error path the only reachable
+one, and the compiler agrees without being told.
+
+This is the shape every scalar-only format ends up with, and it is why
+`Impossible` is public API rather than an internal detail. A format author
+writing a serializer for a flat key-value store copies these forty-eight lines
+almost verbatim.
+"""
+
+[[annotation]]
+id    = "ser-fmt-0008"
+file  = "src/ser/fmt.rs"
+lines = "164-170"
+title = "collect_str — the override that closes the loop"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "no-std", "strings", "zero-cost"]
+prereqs = ["ser-mod-0040", "ser-impls-0012"]
+body = """
+The last method, and the one whose default would have been embarrassing here.
+
+`Serializer::collect_str` has a default body that renders the `Display` value
+into a `String` and forwards it to `serialize_str`. For a serializer that *is* a
+formatter, that means allocating a string in order to write it into the
+formatter it came from. This override does the obvious thing instead:
+`Display::fmt(value, self)`, straight through, nothing allocated.
+
+That completes a circle worth tracing. `fmt::Arguments` implements `Serialize` by
+calling `collect_str`. `&mut Formatter` implements `Serializer` with
+`collect_str` as a direct `Display::fmt`. So serializing a `format_args!` into a
+formatter is, after inlining, the write it would have been anyway — and the
+whole path works in `no_std` with no allocator present.
+"""

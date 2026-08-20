@@ -1,0 +1,192 @@
+schema = 1
+source = "serde_core-1.0.229"
+
+[[annotation]]
+id    = "ser-impossible-0001"
+file  = "src/ser/impossible.rs"
+lines = "1-9"
+title = "One module, one type, eight imports"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["modules", "traits"]
+prereqs = ["ser-mod-0018"]
+body = """
+The import list is the summary of the file: all seven compound-serialization
+traits, plus `ser` itself for the `ser::Error` bound and `Serialize` for the
+method signatures. One type implements every one of them, which is why they all
+have to be in scope at once.
+
+`use crate::ser::{self, ...}` brings in both the module and its contents — `self`
+in a use-group imports the module under its own name, so `ser::Error` stays
+spelled that way rather than colliding with the `Error` type parameter that
+appears throughout this file.
+"""
+
+[[annotation]]
+id    = "ser-impossible-0002"
+file  = "src/ser/impossible.rs"
+lines = "10-59"
+title = "The doc comment, and a doctest that has to lie carefully"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types"]
+prereqs = ["ser-mod-0018"]
+body = """
+The problem this type solves, stated plainly by the docs: `Serializer` has seven
+associated types, and every implementation must supply all seven with types that
+implement the matching traits — even a format that cannot represent a sequence
+or a map at all. There is no way to leave one out.
+
+`Impossible` is the answer. It implements all seven traits and cannot be
+instantiated, so `type SerializeSeq = Impossible<(), Error>;` satisfies the
+compiler while `serialize_seq` returns an error at run time.
+
+The doctest below is worth reading as a piece of craft. A doctest must actually
+compile, so demonstrating this requires a complete `Serializer` — all
+twenty-nine methods — which would bury the six lines that matter. Three tricks
+get around it:
+
+- `# serde_core::__serialize_unimplemented! { ... }` stubs the other
+  twenty-eight methods, hidden behind `#` so it never appears on the page.
+- `# stringify! { Err(...) };` wraps illustrative pseudo-code so that `Err(...)`
+  renders as the point being made without having to be valid.
+- `# unimplemented!()` supplies the return value the real body would.
+
+What the reader sees is a nine-line example. What rustc compiles is a working
+serializer. That gap is maintained by hand, and it is why doc examples in this
+crate are as dense as they are.
+"""
+
+[[annotation]]
+id    = "ser-impossible-0003"
+file  = "src/ser/impossible.rs"
+lines = "60-67"
+title = "Void — a type with no values, and the struct built around it"
+kind  = "trait-item"
+tracks = ["reference", "course"]
+course_unit = "08-phantomdata-and-variance"
+rust_features = ["marker-types", "pattern-matching", "variance", "zero-cost"]
+prereqs = ["ser-impls-0015", "ser-impls-0029"]
+body = """
+Eight lines carrying the entire design.
+
+`enum Void {}` is an enum with **no variants**. There is no expression anywhere
+in Rust that produces a `Void`, which makes the type *uninhabited*: it has no
+values, ever. A struct with a field of an uninhabited type is uninhabited too,
+so `Impossible` cannot be constructed either — not by this crate, not by a
+format author, not by anyone. That property is the whole point, and it is
+enforced by the type system rather than by a private constructor or a
+convention.
+
+Rust does have a built-in uninhabited type, `!`, and `ser/impls.rs` even
+implements `Serialize` for it. But `!` is still unstable *as a type*, so a stable
+crate that needs one declares an empty enum instead. This is the standard
+workaround, and it is worth recognising in other people's code.
+
+`ok: PhantomData<Ok>` and `error: PhantomData<Error>` are there because
+`Impossible<Ok, Error>` names two type parameters that appear in no real field.
+Rust requires every declared parameter to be used, and `PhantomData` is how you
+say "used only in the types of my methods". Both fields are zero-sized, and
+since no value of this type exists, they cost nothing at run time in the most
+literal sense available.
+"""
+
+[[annotation]]
+id    = "ser-impossible-0004"
+file  = "src/ser/impossible.rs"
+lines = "68-87"
+title = "SerializeSeq — match on nothing, and why that compiles"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "08-phantomdata-and-variance"
+rust_features = ["pattern-matching", "traits", "sized-bound", "zero-cost"]
+prereqs = ["ser-impossible-0003", "ser-mod-0042"]
+body = """
+The first of seven, and the only one that needs explaining. Every method body is
+`match self.void {}` — a match with **zero arms**.
+
+That is exhaustive. Exhaustiveness means covering every variant, `Void` has no
+variants, so covering none of them covers all of them. The compiler also knows
+the expression can never produce a value, so the match diverges, and a diverging
+expression type-checks as whatever the context requires — here, `Result<(),
+Error>` in one method and `Result<Ok, Error>` in the other. Same coercion the
+`!` impl in `ser/impls.rs` relies on.
+
+Compare the alternative, `unreachable!()`. That compiles too, but it is a
+run-time panic the compiler cannot prove is unreachable, and it leaves a panic
+path in the binary. `match self.void {}` is a *proof*: reaching this code would
+require a value that cannot exist, so the code is not merely unreached, it is
+unreachable, and the optimizer knows it.
+
+`let _ = value;` is the other detail. The parameter is unused because the body
+diverges, and the usual fix — renaming it `_value` — would change what rustdoc
+prints in the method signature. Discarding it in the body silences the warning
+and leaves the documented name intact.
+
+The `where Error: ser::Error` bound is not optional: `SerializeSeq` declares
+`type Error: Error`, so the associated type must satisfy it.
+"""
+
+[[annotation]]
+id    = "ser-impossible-0005"
+file  = "src/ser/impossible.rs"
+lines = "88-147"
+title = "SerializeTuple, SerializeTupleStruct, SerializeTupleVariant — the same, three times"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits"]
+prereqs = ["ser-impossible-0004"]
+body = """
+Sixty lines, and the only differences from the impl above are the trait name and
+whether the element method is called `serialize_element` or `serialize_field`.
+
+This is where you might expect a macro — the file has seven impls that vary in
+almost nothing, and `ser/impls.rs` reaches for `macro_rules!` at far less
+provocation. It does not happen here, and the reason is legible: the seven
+traits differ in their method *names* and *arities*, so the matcher would have
+to accept a method list, at which point the macro is longer than the code it
+replaces and harder to read than seven blocks you can skim.
+
+Knowing when not to write the macro is the same skill as knowing when to.
+"""
+
+[[annotation]]
+id    = "ser-impossible-0006"
+file  = "src/ser/impossible.rs"
+lines = "148-175"
+title = "SerializeMap — the only one with two ways in"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits"]
+prereqs = ["ser-impossible-0004", "ser-mod-0045"]
+body = """
+`SerializeMap` is the odd trait of the seven: keys and values arrive through
+separate calls, so this impl has three diverging methods instead of two.
+
+The split exists because a map's key and value can be serialized at different
+times — a format may need to write the key, then decide how to write the value.
+Here it makes no difference at all, since none of the three can be called.
+"""
+
+[[annotation]]
+id    = "ser-impossible-0007"
+file  = "src/ser/impossible.rs"
+lines = "176-216"
+title = "SerializeStruct and SerializeStructVariant — named fields, and the end"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "lifetimes"]
+prereqs = ["ser-impossible-0004", "ser-mod-0046"]
+body = """
+The last two, and the only ones whose `serialize_field` takes a key as well as a
+value. The key is `&'static str`, not `&str` — struct field names are known at
+compile time and live in the binary, which is what lets a format write them
+without copying.
+
+Two `let _ =` lines apiece instead of one, for the same reason as everywhere
+else, and then the file ends.
+
+Two hundred and sixteen lines to express "this cannot happen" in a way the
+compiler enforces. It is a lot of source for one idea, and every line of it is
+doing something the type system will check.
+"""
