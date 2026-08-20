@@ -1231,3 +1231,456 @@ that overrode the first.
 This is what a stability escape hatch looks like in a crate that cannot make
 breaking changes — and there are more of them in `private/`.
 """
+
+[[annotation]]
+id    = "de-mod-0043"
+file  = "src/de/mod.rs"
+lines = "1267-1316"
+title = "Visitor — the trait that receives what the format found"
+kind  = "doc-contract"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["traits", "lifetime-de", "associated-types"]
+prereqs = ["de-mod-0029"]
+body = """
+The third trait in this file to define `'de`, and the third wording: *"the
+requirement for lifetime of data that may be borrowed by `Self::Value`"*.
+
+Collect all three and the picture is complete. On `Deserialize` it is what `Self`
+may borrow. On `Deserializer` it is what the format may lend. On `Visitor` it is
+what the produced value may keep. One lifetime, three vantage points, and every
+confusing `'de` error is a disagreement between two of them.
+
+The `LongString` example is worth reading for what it does *not* do. It has state
+— a `min` field — which it uses in both `expecting` and `visit_str`. It
+implements exactly one visit method. And it rejects with `invalid_value` rather
+than `invalid_type`, because a short string is the right kind of thing with the
+wrong content. Everything a hand-written visitor needs is in those twenty lines.
+"""
+
+[[annotation]]
+id    = "de-mod-0044"
+file  = "src/de/mod.rs"
+lines = "1317-1343"
+title = "type Value and expecting — the only thing you must write"
+kind  = "trait-item"
+tracks = ["reference", "course"]
+course_unit = "03-associated-types"
+rust_features = ["associated-types", "traits", "sized-bound"]
+prereqs = ["de-mod-0043"]
+body = """
+`type Value` is not `Self`. The visitor is a temporary object that receives
+callbacks; the value is what it builds. `LongString` is not a string, it produces
+one. Conflating the two is the standard first error when writing a visitor by
+hand.
+
+`expecting` is the **only required method** in a trait with twenty-eight. Every
+`visit_*` has a default, so a visitor is defined entirely by which ones it
+overrides — and the ones it does not override refuse. That inversion is the trick
+of the whole design: you do not declare what you accept, you implement it, and
+silence means no.
+
+The consequence is that `expecting` has to carry real information, because it is
+what the reader sees when nothing matched. *"a string containing at least 64
+bytes"* explains a failure; *"a LongString"* does not. The docs pin the wording
+convention — complete the sentence "This Visitor expects to receive …",
+uncapitalized, no period — and the `Expected` blanket impl earlier in the file is
+what routes it into error messages.
+"""
+
+[[annotation]]
+id    = "de-mod-0045"
+file  = "src/de/mod.rs"
+lines = "1344-1353"
+title = "visit_bool — the default that refuses, and why that is the right default"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["default-methods", "custom-errors"]
+prereqs = ["de-mod-0044", "de-mod-0009"]
+body = """
+Ten lines that set the pattern for the next four hundred:
+
+```rust
+Err(Error::invalid_type(Unexpected::Bool(v), &self))
+```
+
+The default refuses, reporting what arrived and passing `&self` as the
+description of what was wanted — the `Expected` blanket impl over all visitors
+turning into a concrete error message.
+
+Refusing by default is what makes the trait usable. A visitor for a `u32` should
+reject a boolean, and it gets that for free by not writing `visit_bool`. The
+alternative — a required method per type — would mean every visitor spelling out
+twenty-eight refusals, which is exactly what `ser/impossible.rs` has to do and
+exactly why that file is two hundred lines long.
+"""
+
+[[annotation]]
+id    = "de-mod-0046"
+file  = "src/de/mod.rs"
+lines = "1354-1400"
+title = "visit_i8 … visit_i64 — where serde's widening policy actually lives"
+kind  = "trait-item"
+tracks = ["reference", "course"]
+course_unit = "04-generic-bounds"
+rust_features = ["default-methods", "traits"]
+prereqs = ["de-mod-0045"]
+body = """
+Not all defaults refuse. `visit_i8`, `visit_i16`, and `visit_i32` **forward** —
+each widens to `i64` and calls `visit_i64`, which is the one that refuses.
+
+That single decision is serde's integer conversion policy, and it is worth
+knowing where it lives, because people go looking for it in the derive or in
+`serde_json`. A visitor that implements only `visit_i64` accepts all four signed
+widths without writing a line of conversion code. A format that emits the
+narrowest type it can — Postcard writing a `1` as an `i8` — still reaches a
+visitor expecting `i64`.
+
+Widening is always lossless, which is why the defaults can do it unconditionally.
+Narrowing is not, so it is not here: a visitor wanting an `i8` has to implement
+`visit_i64` and range-check, and the derive-generated visitors do exactly that.
+"""
+
+[[annotation]]
+id    = "de-mod-0047"
+file  = "src/de/mod.rs"
+lines = "1401-1416"
+title = "visit_i128 — a stack buffer, because Unexpected has no variant for it"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["no-std", "strings", "custom-errors", "default-methods"]
+prereqs = ["de-mod-0015", "ser-impls-0051"]
+body = """
+This closes a loop opened earlier in the file. `Unexpected` has no variant for
+128-bit integers, so this default cannot say `Unexpected::Signed(v)` — the value
+does not fit. It formats a message instead and reports it through
+`Unexpected::Other`.
+
+And it does so without allocating, using the same `crate::format::Buf` stack
+writer as the `Ipv4Addr` serializer: a fixed array, a `fmt::Write` impl that
+fills it, an `.unwrap()` that can only fire if the array was sized wrong.
+
+The array is sized exactly. `[0u8; 58]` holds ``integer `` (9 bytes) plus
+`i128::MIN` at its full 40 characters plus `` as i128`` (9 bytes) — 58. The
+`u128` version below uses 57, because `u128::MAX` is 39 digits and has no sign.
+Two constants, each computed from the widest possible value, in a crate that
+cannot allocate to find out.
+
+Note it forwards to nothing. Unlike the narrower signed types, a `i128` cannot
+widen any further, so this is terminal by necessity rather than by choice.
+"""
+
+[[annotation]]
+id    = "de-mod-0048"
+file  = "src/de/mod.rs"
+lines = "1417-1478"
+title = "visit_u8 … visit_u128 — the mirror, and the bridge that is missing"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["default-methods", "traits"]
+prereqs = ["de-mod-0046", "de-mod-0047"]
+body = """
+The unsigned block widens the same way: `u8`, `u16`, and `u32` forward to
+`visit_u64`, which refuses, and `visit_u128` builds its message in a 57-byte
+stack buffer.
+
+The gap worth noticing is between the two blocks. `visit_u64` does **not**
+forward to `visit_i64`, and `visit_i64` does not forward to `visit_u64`. A
+visitor implementing only `visit_i64` rejects every unsigned value a format hands
+it, including ones that would fit perfectly.
+
+That is deliberate — the conversion is not lossless in either direction, so serde
+declines to guess — and it is why derive-generated visitors implement both sides
+and range-check. It is also a common surprise in a hand-written visitor: it works
+against one format and fails against another, because the two formats disagree
+about whether `1` is signed.
+"""
+
+[[annotation]]
+id    = "de-mod-0049"
+file  = "src/de/mod.rs"
+lines = "1479-1514"
+title = "visit_f32, visit_f64, visit_char — two more forwards"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["default-methods", "strings", "no-std"]
+prereqs = ["de-mod-0046"]
+body = """
+`visit_f32` widens to `visit_f64`, which refuses. Same policy as the integers,
+and lossless for the same reason.
+
+`visit_char` is the interesting one: it forwards to `visit_str` with a
+one-character string, built by `v.encode_utf8(&mut [0u8; 4])` — a four-byte stack
+array, the maximum length of a UTF-8 scalar, so no allocation happens even in
+`no_std`.
+
+That default is what makes `char` work against formats that have no character
+type. JSON hands the visitor a string, the visitor's `visit_str` checks it holds
+exactly one scalar; a format with a native char type calls `visit_char`, and a
+visitor that only implemented `visit_str` still receives it. Both directions
+covered by one line of default.
+"""
+
+[[annotation]]
+id    = "de-mod-0050"
+file  = "src/de/mod.rs"
+lines = "1515-1532"
+title = "visit_str — the transient string, and a rule stated twice"
+kind  = "trait-item"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["borrowing", "lifetimes", "strings"]
+prereqs = ["de-mod-0034", "de-mod-0045"]
+body = """
+The first of the three string flavors, and the docs open with the constraint:
+*"The lifetime of the string is ephemeral and it may be destroyed after this
+method returns."*
+
+Read the signature — `v: &str`, with an anonymous lifetime tied to the call.
+Nothing about it can escape. A visitor wanting to keep this text must copy it,
+and that is not a limitation to work around, it is the deserializer telling the
+truth about a scratch buffer it is going to reuse.
+
+Then the rule, which this file states four separate times for the four methods it
+applies to: *"It is never correct to implement `visit_string` without
+implementing `visit_str`. Implement neither, both, or just `visit_str`."*
+
+The reason is that `visit_string`'s default forwards here, and nothing forwards
+the other way. Implement only the owned variant and every format that hands you a
+borrowed or transient string hits the erroring `visit_str` default — your type
+works with one deserializer and mysteriously fails with the next. Stating it four
+times is not redundancy; it is the most common way to get this trait wrong.
+"""
+
+[[annotation]]
+id    = "de-mod-0051"
+file  = "src/de/mod.rs"
+lines = "1533-1549"
+title = "visit_borrowed_str — sixteen lines, and the entire point of 'de"
+kind  = "trait-item"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["lifetime-de", "borrowing", "lifetimes", "zero-cost"]
+prereqs = ["de-mod-0050"]
+body = """
+```rust
+fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
+```
+
+`&'de str`, not `&str`. That one lifetime is what this entire module is built
+around, and everything else about the method is unremarkable.
+
+`'de` is the input's lifetime. A string with that lifetime points into the
+original bytes, not into a scratch buffer, and it stays valid as long as the
+input does. So a visitor producing `&'de str` can return this reference
+**unchanged** — no copy, no allocation, no `String`. The docs' example is the
+whole promise: JSON input containing `"borrowed"` deserializes into a `&'a str`
+that points directly at the eight bytes inside the original document.
+
+The default forwards to `visit_str`, and forwarding **throws the lifetime away** —
+`&'de str` coerces to a shorter `&str` and the knowledge that it could have been
+kept is gone. That is the correct default, because most visitors cannot use the
+guarantee, and it is why zero-copy is opt-in: a type gets it only by overriding
+this method, which is exactly what `&'de str`'s own `Deserialize` impl does.
+
+Not every format can call it. A deserializer reading from an `io::Read` has no
+persistent input to point into and will only ever call `visit_str`. That is the
+practical content of the `DeserializeOwned` bound on `from_reader`, seen from the
+other end.
+"""
+
+[[annotation]]
+id    = "de-mod-0052"
+file  = "src/de/mod.rs"
+lines = "1550-1574"
+title = "visit_string — the owned flavor, and the copy it exists to avoid"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["ownership", "strings", "cfg", "no-std"]
+prereqs = ["de-mod-0050"]
+body = """
+The third flavor: the deserializer built a `String` — because the input had
+escape sequences, or arrived in pieces — and is handing over ownership rather
+than lending a view of it.
+
+A visitor producing a `String` takes it and is done: zero copies. The default
+takes it, calls `visit_str(&v)`, and **drops it**, which the documentation says
+outright. That is one wasted allocation, and it is the right trade — the
+alternative is every visitor implementing a method it does not need.
+
+Note the hedge in the docs about `deserialize_string`: *"although not every
+deserializer will honor such a request."* The hint says what would help; the
+format answers with whatever it has. A visitor must handle all three flavors no
+matter which one it asked for.
+
+Gated on `std` or `alloc`, since `String` needs an allocator. In a bare `no_std`
+build this method does not exist and only the borrowed and transient flavors
+remain — which is a coherent world, just a smaller one.
+"""
+
+[[annotation]]
+id    = "de-mod-0053"
+file  = "src/de/mod.rs"
+lines = "1575-1592"
+title = "visit_bytes — the same three flavors, for [u8]"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["borrowing", "collections"]
+prereqs = ["de-mod-0050"]
+body = """
+The byte-array triple begins, and the documentation is the string documentation
+with `String` replaced by `Vec<u8>` — including the fourth statement of the
+implement-`visit_bytes`-or-nothing rule.
+
+The default refuses with `Unexpected::Bytes(v)`, which the `Display` impl renders
+as the bare words *"byte array"* without the contents. An error message about
+megabytes of binary is not improved by including them.
+"""
+
+[[annotation]]
+id    = "de-mod-0054"
+file  = "src/de/mod.rs"
+lines = "1593-1608"
+title = "visit_borrowed_bytes — zero-copy, for the formats that have bytes"
+kind  = "trait-item"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["lifetime-de", "borrowing", "zero-cost"]
+prereqs = ["de-mod-0051"]
+body = """
+`&'de [u8]`, and everything true of `visit_borrowed_str` is true here.
+
+The docs' example names Postcard rather than JSON, and the choice is not
+arbitrary. A binary format stores bytes verbatim, so a borrowed slice is always
+available. JSON has no byte type at all — `serde_bytes` exists precisely to
+bridge that — so zero-copy byte deserialization is mostly a binary-format
+capability, while zero-copy strings work in both.
+"""
+
+[[annotation]]
+id    = "de-mod-0055"
+file  = "src/de/mod.rs"
+lines = "1609-1633"
+title = "visit_byte_buf — the last of the six"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["ownership", "collections", "cfg"]
+prereqs = ["de-mod-0052"]
+body = """
+Ownership of a `Vec<u8>`, defaulting to `visit_bytes(&v)` and dropping the
+vector. Gated on an allocator, like `visit_string`.
+
+That completes the set: three string methods and three byte methods, transient,
+borrowed, and owned in each. Six methods for two data model types, and the
+multiplication is entirely about who owns the memory. It is the clearest
+statement in the crate of what deserialization actually costs, and where the cost
+can be avoided.
+"""
+
+[[annotation]]
+id    = "de-mod-0056"
+file  = "src/de/mod.rs"
+lines = "1634-1654"
+title = "visit_none and visit_some — the second of which receives a deserializer"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["option", "default-methods", "generic-params"]
+prereqs = ["de-mod-0036"]
+body = """
+`visit_none` takes nothing. `visit_some` takes **a deserializer**, not a value.
+
+That is the detail to hold on to. At the moment the visitor learns something is
+present, the inner value has not been read — the format has only established that
+it is not null. The visitor is handed the means to read it and decides what type
+to read it as.
+
+The error types differ in a way that follows from this. `visit_none` is generic
+over `E: Error` like every other visit method; `visit_some` returns `D::Error`,
+because the error can now come from the nested deserialization rather than from
+this call. The same pattern appears in `visit_newtype_struct` below, and in
+`visit_seq`, `visit_map`, and `visit_enum`, which all borrow their error type
+from the access object they were given.
+
+Both defaults refuse with `Unexpected::Option`, which is why a `u32` field
+rejects a JSON `null` rather than silently producing zero.
+"""
+
+[[annotation]]
+id    = "de-mod-0057"
+file  = "src/de/mod.rs"
+lines = "1655-1678"
+title = "visit_unit and visit_newtype_struct"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["default-methods", "generic-params"]
+prereqs = ["de-mod-0056"]
+body = """
+`visit_unit` receives nothing and means nothing was there. It is what a
+`()`-producing visitor implements, and also what `Option`'s visitor sees in
+formats that encode `None` as a unit rather than as a null.
+
+`visit_newtype_struct` receives a deserializer for the wrapped value, mirroring
+`visit_some`. Since newtype wrappers are transparent on the serialization side, a
+format that wrote nothing extra will call this method with a deserializer
+positioned exactly where the inner value starts — the wrapper costs nothing in
+either direction.
+
+`let _ = deserializer;` in both defaults, discarding the parameter without
+renaming it so rustdoc keeps the documented name. The same convention as
+`ser/impossible.rs`.
+"""
+
+[[annotation]]
+id    = "de-mod-0058"
+file  = "src/de/mod.rs"
+lines = "1679-1711"
+title = "visit_seq, visit_map, visit_enum — where the visitor takes control"
+kind  = "trait-item"
+tracks = ["reference", "course"]
+course_unit = "03-associated-types"
+rust_features = ["traits", "generic-params", "associated-types"]
+prereqs = ["de-mod-0056"]
+body = """
+The three compound methods, and the inversion is complete here.
+
+Each receives an **access object** — `SeqAccess`, `MapAccess`, `EnumAccess` — and
+the visitor drives it. The deserializer is not looping and calling back; it has
+handed over a cursor and is waiting. That is why the flattening doctest earlier
+could run a `while let Some(elem) = seq.next_element()?` loop inside
+`visit_seq`: at that moment the visitor is in charge, and the format is the thing
+being asked.
+
+The error type is `A::Error`, taken from the access object rather than from a
+generic `E`. There is nowhere else it could come from — the errors that arise
+inside the loop are the format's.
+
+All three defaults refuse, so a scalar visitor handed a JSON array reports
+*"invalid type: sequence, expected …"* rather than doing something creative.
+"""
+
+[[annotation]]
+id    = "de-mod-0059"
+file  = "src/de/mod.rs"
+lines = "1712-1720"
+title = "__private_visit_untagged_option — an error type of ()"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["visibility", "result"]
+prereqs = ["de-mod-0042"]
+body = """
+The second hidden method in this file, for flattened `Option` fields, and the
+signature is worth a second look: `Result<Self::Value, ()>`.
+
+An error type of `()` carries no information, which tells you this is a **probe**
+rather than an operation. The caller is asking "can you produce a value from
+this?" and the only two answers needed are yes-with-a-value and no. There is
+nothing to report, because a failure here is not an error — it is the normal path
+for a field that turned out to be absent.
+
+The default is `Err(())`, so any visitor that has not opted in simply says no.
+Like `__deserialize_content_v1`, it exists so derived code can reach behaviour the
+public API does not expose, without that behaviour becoming a stability
+commitment.
+
+That closes the `Visitor` trait: twenty-eight methods, one of them required.
+"""
