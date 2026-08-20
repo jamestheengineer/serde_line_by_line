@@ -1,0 +1,791 @@
+schema = 1
+source = "serde_core-1.0.229"
+
+[[annotation]]
+id    = "de-mod-0001"
+file  = "src/de/mod.rs"
+lines = "1-10"
+title = "The same two roles, and why this half is harder"
+kind  = "doc-contract"
+tracks = ["reference", "course"]
+course_unit = "01-why-a-data-model"
+rust_features = ["traits"]
+prereqs = ["ser-mod-0001"]
+body = """
+Word for word the structure of `ser/mod.rs`: a data structure trait and a data
+format trait, each knowing nothing about the other. Read the two openings side by
+side and the symmetry is exact.
+
+The asymmetry is in what the two jobs actually involve. Serializing means walking
+a value you already have and telling the format what you found — the shape is
+known, and the format writes it down. Deserializing means the reverse and the
+information flows the wrong way: the format has bytes, the type knows what it
+wants, and neither can proceed alone.
+
+That is the whole reason this module is larger and stranger than its counterpart.
+`ser` has two traits worth reading. `de` has `Deserialize`, `Deserializer`,
+`Visitor`, `SeqAccess`, `MapAccess`, `EnumAccess`, `VariantAccess`,
+`DeserializeSeed`, and a lifetime parameter threading through all of them. Every
+one of those exists because you cannot hand back a value the caller has not told
+you how to build.
+"""
+
+[[annotation]]
+id    = "de-mod-0002"
+file  = "src/de/mod.rs"
+lines = "11-29"
+title = "Where Deserialize implementations come from"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["traits", "proc-macro-boundary"]
+prereqs = ["ser-mod-0002"]
+body = """
+The same four sources as on the serialization side: built into serde, generated
+by `serde_derive`, written by hand, or supplied by a third-party crate for its
+own types.
+
+Note the phrasing of the third: *"In rare cases it may be necessary to implement
+`Deserialize` manually."* On the `Serialize` side, writing one by hand is
+unusual but straightforward — you have the value, you describe it. Doing the same
+here means writing a `Visitor`, and the docs are being honest by calling it rare
+rather than routine. Most of the difficulty in this module is difficulty you
+never meet, because the derive absorbs it.
+"""
+
+[[annotation]]
+id    = "de-mod-0003"
+file  = "src/de/mod.rs"
+lines = "30-37"
+title = "Formats live in other crates, on this side too"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["traits"]
+prereqs = ["ser-mod-0003"]
+body = """
+Three named examples, the same three the serialization module names, and the same
+consequence: serde ships no format at all. `serde_json`, `serde_yaml`, and
+`postcard` implement `Deserializer` without serde knowing they exist.
+
+Worth noticing that the two lists are identical. A crate that implements one half
+almost always implements both, because the hard part — modelling the format — is
+shared, and shipping only half would be a strange product.
+"""
+
+[[annotation]]
+id    = "de-mod-0004"
+file  = "src/de/mod.rs"
+lines = "38-102"
+title = "The built-in list, and the types that only go one way"
+kind  = "doc-contract"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["lifetime-de", "strings", "collections"]
+prereqs = ["ser-mod-0004"]
+body = """
+Sixty lines of list, and the sentence introducing it is the one to read twice:
+*"This is a slightly different set of types than what is supported for
+serialization. Some types can be serialized by Serde but not deserialized. One
+example is `OsStr`."*
+
+Compare the two lists and the differences are all the same shape. `OsStr` can be
+written — `ser/impls.rs` tags it with the platform it came from — but not read
+back, because reconstructing one requires either raw bytes or UTF-16 depending on
+where you are running, and the target platform may not be the source platform.
+`Path` serializes and does not deserialize, for the same reason `&Path` is a
+borrow of something the deserializer would have to own. `SocketAddr` appears on
+both. `Weak` appears on neither side of the read.
+
+The category with no counterpart at all is **Zero-copy types**: `&str` and
+`&[u8]`. Nothing in `ser` needed a heading for these, because serializing a
+borrow is trivial. Deserializing *into* one means handing back a reference that
+points into the deserializer's own input, and the caller has to be able to prove
+that input outlives the result.
+
+That single requirement is where the `'de` lifetime comes from, and it is the
+reason this module's every trait carries a lifetime parameter that `ser`'s do
+not. Two lines of a documentation list; the rest of the file is the consequence.
+"""
+
+[[annotation]]
+id    = "de-mod-0005"
+file  = "src/de/mod.rs"
+lines = "103-114"
+title = "Link definitions, and the same maintenance constraint"
+kind  = "plumbing"
+tracks = ["reference"]
+prereqs = ["ser-mod-0005"]
+body = """
+Eleven reference-style link targets for the module docs above. Four point at
+`serde.rs`, six at other crates' repositories or docs, one at `crate::` paths.
+
+The same rule as in `ser/mod.rs` applies: intra-doc links like
+`crate::Deserialize` are checked by rustdoc, and the six external URLs are not
+checked by anything. They rot silently.
+"""
+
+[[annotation]]
+id    = "de-mod-0006"
+file  = "src/de/mod.rs"
+lines = "115-134"
+title = "Module wiring, and the three spellings of StdError again"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["modules", "visibility", "cfg", "no-std", "msrv"]
+prereqs = ["ser-mod-0006", "ser-mod-0007"]
+body = """
+`pub mod value` is public and `mod ignored_any` / `mod impls` are private, with
+`IgnoredAny` re-exported by name. Same shape as `ser`: the impls are an
+implementation detail, the useful types are lifted to the module root.
+
+`de::value` being public is the difference. It is a whole module of adapter
+deserializers — turn a `u32` into a `Deserializer`, turn an iterator into a
+`SeqAccess` — and it has no counterpart in `ser`, because there is nothing on the
+serialization side that needs adapting. It is also 1,895 lines, the third-largest
+file in the crate.
+
+Then the three `StdError` spellings, identical to `ser/mod.rs`: `std::error::Error`
+with `std`, `core::error::Error` when the toolchain has it, and serde's own
+shim otherwise. Chosen by `#[cfg]`, gated on a build-script probe rather than on
+user configuration, and re-exported with `#[doc(no_inline)]` so rustdoc renders a
+link instead of copying the trait in.
+"""
+
+[[annotation]]
+id    = "de-mod-0007"
+file  = "src/de/mod.rs"
+lines = "135-165"
+title = "declare_error_trait! — the same name, a different macro"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "macro-repetition", "supertraits", "cfg", "custom-errors"]
+prereqs = ["ser-mod-0008"]
+body = """
+Byte for byte the matcher from `ser/mod.rs`:
+`(Error: Sized $(+ $($supertrait:ident)::+)*)`. Same name, same trick, same
+reason — a trait's supertrait list cannot be `#[cfg]`-ed, so the whole
+declaration is abstracted over the part that varies.
+
+And it is a **separate macro**, not a shared one. `macro_rules!` macros are
+scoped to where they are defined, and `ser` and `de` each declare their own copy.
+Nothing but the matcher is common: the trait inside differs entirely, in its
+documentation and in how much it demands.
+
+That difference is the thing to carry into the next few annotations.
+`ser::Error` declares exactly one method. This trait declares one required method
+and **seven with default bodies**, and the reason is structural rather than
+incidental. Serialization fails when a format cannot represent something — a
+short list, known to the format. Deserialization fails when the input does not
+match the program, which happens in recognizable, recurring ways: wrong type,
+wrong value, wrong length, unknown field, missing field, duplicate field. Serde
+names all six, so every format reports them in the same words.
+
+The `diagnostic::on_unimplemented` attribute is the same courtesy as on the
+serialization side — replace rustc's default "trait bound not satisfied" with a
+sentence naming `serde::de::Error` specifically.
+"""
+
+[[annotation]]
+id    = "de-mod-0008"
+file  = "src/de/mod.rs"
+lines = "166-197"
+title = "custom — the one method a format must write"
+kind  = "trait-item"
+tracks = ["reference", "course"]
+course_unit = "12-errors-iterators-closures"
+rust_features = ["custom-errors", "traits", "result"]
+prereqs = ["de-mod-0007"]
+body = """
+The same signature as its serialization counterpart — `fn custom<T>(msg: T) -> Self
+where T: Display` — and the same rationale: a `Deserialize` impl that hits a
+problem has no idea what error type the format uses and cannot construct one, so
+every format must offer a way to build an error out of any displayable value.
+
+`Display` rather than `&str` again, so `format_args!` can be passed without
+allocating. Every one of the seven default methods below relies on that.
+
+The doc example is the pattern you will actually write. Deserialize a `String`,
+call `.parse()`, and map the parse failure through `de::Error::custom` — three
+lines that turn any `FromStr` type into a `Deserialize` type. It is the most
+common hand-written `Deserialize` impl there is, and it never mentions `Visitor`
+at all.
+
+Note the style rule, repeated from `ser`: messages are not capitalized and do not
+end with a period, because they get embedded inside larger messages by formats.
+"""
+
+[[annotation]]
+id    = "de-mod-0009"
+file  = "src/de/mod.rs"
+lines = "198-233"
+title = "invalid_type and invalid_value — the two that read the input back to you"
+kind  = "trait-item"
+tracks = ["reference", "course"]
+course_unit = "12-errors-iterators-closures"
+rust_features = ["custom-errors", "trait-objects", "default-methods"]
+prereqs = ["de-mod-0008"]
+body = """
+The first two of the seven defaults, and the distinction between them is exactly
+the one a confused user needs: `invalid_type` means the input had the wrong
+*kind* of thing, `invalid_value` means the right kind with an unusable content.
+An integer where a string was expected is the first. Bytes that are not UTF-8
+where a string was expected is the second — a byte string was the right shape, its
+contents were not.
+
+Both take `unexp: Unexpected` and `exp: &dyn Expected`, and the pairing is worth
+noticing. `Unexpected` is an enum of what was found, built by the deserializer.
+`Expected` is a **trait object** — one of only a handful of `dyn` uses in the
+whole crate — because what was expected is described by the `Visitor` that was
+waiting, and any visitor can supply it.
+
+`#[cold]` on every default method here tells the optimizer these are error paths:
+move the code out of line and lay out the caller's hot path without them. It
+appears on all seven, and on nothing else in this module.
+
+The bodies all funnel into `custom(format_args!(...))`. A format that implements
+only `custom` still gets *"invalid type: integer `7`, expected a string"* for
+free, phrased identically to every other serde format. That uniformity is the
+point of putting these here instead of leaving each format to invent its own.
+"""
+
+[[annotation]]
+id    = "de-mod-0010"
+file  = "src/de/mod.rs"
+lines = "234-247"
+title = "invalid_length — for the shapes that count"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["custom-errors", "default-methods"]
+prereqs = ["de-mod-0009"]
+body = """
+Raised when a sequence or map holds the wrong number of elements — a four-element
+tuple in the input where the program declared six.
+
+The signature is `(len: usize, exp: &dyn Expected)`, so the message can say what
+was found and what was wanted, and the docs are careful to note that the count
+may be too high *or* too low. A tuple, a fixed-size array, and a tuple struct all
+route their length complaints here.
+
+Same `#[cold]`, same funnel into `custom`.
+"""
+
+[[annotation]]
+id    = "de-mod-0011"
+file  = "src/de/mod.rs"
+lines = "248-283"
+title = "unknown_variant and unknown_field — where the derive's field lists surface"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["custom-errors", "default-methods", "proc-macro-boundary"]
+prereqs = ["de-mod-0010"]
+body = """
+These two produce the error messages people actually see, and their second
+parameter is where derived code shows through: `expected: &'static [&'static str]`
+is the list of names `serde_derive` baked into the binary when it generated the
+impl. Both `'static`, because both are compile-time constants — the field names of
+your struct, sitting in the read-only section of your program.
+
+Each has two branches. When the list is empty the message says *"there are no
+variants"* rather than listing nothing, which is the difference between a useful
+error and a confusing one for a struct with `#[serde(deny_unknown_fields)]` and no
+fields.
+
+Otherwise the list is wrapped in `OneOf`, a helper defined further down this file
+whose only job is to render `["a", "b", "c"]` as *"one of `a`, `b`, `c`"* with
+correct grammar at one, two, and many. Ten lines of formatting code, so that
+thousands of error messages read like English.
+"""
+
+[[annotation]]
+id    = "de-mod-0012"
+file  = "src/de/mod.rs"
+lines = "284-301"
+title = "missing_field and duplicate_field — the last two, and the end of the macro"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["custom-errors", "default-methods"]
+prereqs = ["de-mod-0011"]
+body = """
+The simplest of the seven. Both take a single `&'static str` — again a name the
+derive knew at compile time — and both produce a one-clause message.
+
+`duplicate_field` is the one worth pausing on, because it encodes a decision that
+is not obvious: seeing the same field twice is an **error**, not a
+last-one-wins overwrite. Formats vary on this and JSON's own specification
+declines to rule, so serde ruled, and every derived struct rejects duplicates
+identically.
+
+Then three closing braces: the trait, the macro's single rule, and the macro.
+"""
+
+[[annotation]]
+id    = "de-mod-0013"
+file  = "src/de/mod.rs"
+lines = "302-307"
+title = "The two invocations, unchanged from ser"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["cfg", "no-std", "supertraits"]
+macro_def = "de-mod-0007"
+prereqs = ["ser-mod-0009"]
+body = """
+`Error: Sized + StdError` with `std`, `Error: Sized + Debug + Display` without —
+the identical pair from `ser/mod.rs`, twelve hundred lines away in another file.
+
+The `no_std` bound is strictly weaker, so anything written against it works in
+both builds. That is why serde's own internals only ever rely on `Display`.
+"""
+
+[[annotation]]
+id    = "de-mod-0014"
+file  = "src/de/mod.rs"
+lines = "308-336"
+title = "Unexpected — naming what the input actually held"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["custom-errors", "traits"]
+prereqs = ["de-mod-0009"]
+body = """
+The docs give this type one job: describe *what was found*, so that
+`invalid_type` and `invalid_value` can say something more useful than "wrong
+type".
+
+Read the doctest carefully, because it is the shape of every rejection you will
+ever write. A `Visitor` that does not want booleans implements `visit_bool` and
+immediately returns `Err(de::Error::invalid_type(Unexpected::Bool(v), &self))`.
+The visitor reports the value it was handed *and passes itself* as the
+description of what it wanted — that second argument is why the `Expected` trait
+below exists.
+
+Note that this is what a `Visitor` does with a method it does not support. It
+does not omit the method; it implements it and refuses. The reason is in the
+`Visitor` trait further down, and it is the single most important thing to
+understand about this module.
+"""
+
+[[annotation]]
+id    = "de-mod-0015"
+file  = "src/de/mod.rs"
+lines = "337-399"
+title = "Eighteen variants, and the ones the data model collapses"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "borrowing", "lifetimes", "ownership"]
+prereqs = ["de-mod-0014", "ser-mod-0013"]
+body = """
+Eighteen variants for twenty-nine data model types, so some collapsing has
+happened, and the collapses are informative.
+
+`Unsigned(u64)` covers `u8` through `u64`; `Signed(i64)` covers `i8` through
+`i64`. The width is not preserved, because an error message saying *"expected a
+u16, found an integer"* loses nothing by not saying which integer width the
+input happened to use. `Float(f64)` does the same for `f32`.
+
+What is missing is more interesting: there is **no variant for 128-bit
+integers**. A format that hands a visitor a `u128` it did not want has to report
+it through `Other`, losing the value. The same gap as `serialize_i128`'s erroring
+default — 128-bit support was added late and did not reach everywhere.
+
+`Unexpected<'a>` carries a lifetime because `Str` and `Bytes` **borrow**. Building
+an error out of a string the deserializer is holding costs no allocation, which
+matters when the error is being constructed on a path that may be hot in a
+parser that fails often. The whole enum is `Copy` for the same reason — every
+payload is either a scalar or a shared reference.
+
+`Other(&'a str)` is the escape hatch, with a documented style rule: a noun
+phrase, uncapitalized, no period, because it gets embedded mid-sentence. The
+docs' own example — *"unoriginal superhero"* — tells you these messages are
+expected to be specific.
+"""
+
+[[annotation]]
+id    = "de-mod-0016"
+file  = "src/de/mod.rs"
+lines = "400-425"
+title = "Display for Unexpected — three deliberate choices in eighteen lines"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "strings", "modules"]
+prereqs = ["de-mod-0015"]
+body = """
+A flat match producing one phrase per variant, and three of the arms are
+decisions rather than transcriptions.
+
+**`Bytes(_)` prints "byte array" and nothing else.** The bytes themselves are
+discarded. They could be megabytes, they could be binary noise, and an error
+message is the wrong place for either. Compare `Str(s)`, which uses `{:?}` — so a
+string is quoted and escaped, and a string containing a newline does not break
+the message across lines.
+
+**`Unsigned` and `Signed` both print "integer".** The signedness is not leaked,
+so *"invalid type: integer `-1`, expected u32"* reads the way a person would say
+it.
+
+**`Float` goes through `WithDecimalPoint`.** That helper, defined at the bottom
+of this file, exists to stop `1.0f64` from rendering as `1` — which would make
+*"invalid type: floating point `1`"* look like it was complaining about an
+integer. It wraps the formatter, watches the bytes going past for a `.`, and
+appends `.0` if none appeared. Thirty lines of machinery so that one class of
+error message cannot mislead.
+
+`use self::Unexpected::*;` inside the function body keeps eighteen match arms
+from being eighteen qualified paths, without polluting the module.
+"""
+
+[[annotation]]
+id    = "de-mod-0017"
+file  = "src/de/mod.rs"
+lines = "426-488"
+title = "Expected — a one-method trait that Display could not have been"
+kind  = "doc-contract"
+tracks = ["reference", "course"]
+course_unit = "09-blanket-impls-and-coherence"
+rust_features = ["traits", "trait-objects", "blanket-impls"]
+prereqs = ["de-mod-0014"]
+body = """
+One method, with the identical signature to `Display::fmt`. The obvious question
+is why this is not simply `Display`, and the answer is coherence.
+
+What serde needs is for **every `Visitor` to be usable as a description of what
+was expected**, so a visitor can pass `&self` into an error constructor. That
+means a blanket impl over all visitors. `Display` is a foreign trait — it belongs
+to `core` — and the orphan rules forbid
+`impl<T: Visitor<'_>> Display for T` in a crate that owns neither. Declaring a
+local trait sidesteps the problem entirely: `Expected` is serde's, so serde may
+blanket-implement it for whatever it likes.
+
+The docs also fix the wording convention. The message completes the sentence
+*"This Visitor expects to receive …"*, so it is a noun phrase — *"an integer
+between 0 and 64"* — uncapitalized and unpunctuated, matching every other error
+string in this file.
+
+Two doctests for the two ways to supply one. Inside a `Visitor`, pass `&self` and
+the message comes from `expecting`. Outside, pass `&"a negative integer"` and the
+string is the message. The second is what you want in a hand-written
+`Deserialize` that is validating rather than visiting.
+"""
+
+[[annotation]]
+id    = "de-mod-0018"
+file  = "src/de/mod.rs"
+lines = "489-510"
+title = "Three impls, including one on a trait object"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "09-blanket-impls-and-coherence"
+rust_features = ["blanket-impls", "trait-objects", "lifetimes", "sized-bound"]
+prereqs = ["de-mod-0017"]
+body = """
+Twenty lines that make the previous annotation's design work, and every one of
+the three is doing something slightly unusual.
+
+`impl<'de, T> Expected for T where T: Visitor<'de>` is the blanket impl the trait
+was created for: every visitor describes itself by forwarding to its own
+`expecting` method. Note that `'de` appears nowhere in the self type — it is an
+unconstrained lifetime parameter, which Rust permits for lifetimes though not for
+type parameters, and it is fine here because the body cannot depend on it.
+
+`impl Expected for &str` is what makes `&"a negative integer"` compile. The
+argument type is `&dyn Expected`, so a `&&str` coerces with `&str` as the
+concrete type behind the object.
+
+`impl Display for dyn Expected + '_` is the one to stop at. This implements a
+trait **for a trait object type** rather than for a concrete type — legal,
+occasionally necessary, and rare enough that most Rust programmers never write
+one. It exists because the error constructors interpolate `exp` into
+`format_args!("... expected {}", exp)`, and `{}` requires `Display` on the
+`dyn Expected` itself, not on the types behind it. The body just forwards to
+`Expected::fmt`.
+
+The `+ '_` is an elided lifetime bound on the object type, letting the impl cover
+`dyn Expected + 'a` for any `'a` rather than only the `'static` case.
+"""
+
+[[annotation]]
+id    = "de-mod-0019"
+file  = "src/de/mod.rs"
+lines = "511-554"
+title = "Deserialize — and the Sized bound that Serialize refused"
+kind  = "doc-contract"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["traits", "sized-bound", "lifetime-de", "lifetimes"]
+prereqs = ["ser-mod-0010", "de-mod-0004"]
+body = """
+`pub trait Deserialize<'de>: Sized` — two differences from `Serialize`, and both
+matter.
+
+**`Sized`.** `Serialize` deliberately has no supertrait at all, which is what
+lets `str`, `[T]`, `Path`, and `CStr` implement it. `Deserialize` requires
+`Sized` because its method returns `Self` by value, and you cannot return an
+unsized value. That single bound is the reason the type list at the top of this
+file differs from the serialization one: everything unsized can be written and
+cannot be read back. `String` deserializes; `str` cannot.
+
+**`'de`.** The docs define it in one sentence — *"the lifetime of data that may
+be borrowed by `Self` when deserialized"* — and that sentence is worth
+memorizing, because it is the answer to almost every confusing `'de` error. It is
+not the lifetime of the deserializer. It is not the lifetime of `Self`. It is the
+lifetime of **the input**, and a type only constrains it if the type intends to
+borrow from that input. `String` implements `Deserialize<'de>` for every `'de`
+because it borrows nothing; `&'a str` implements `Deserialize<'de>` only where
+`'de: 'a`, because it borrows everything.
+
+The `on_unimplemented` attribute is more helpful than its `ser` counterpart: two
+`note` lines telling you to add a derive for your own type, or to look for a
+`serde` feature flag on someone else's. That second note answers what is probably
+the most frequently asked question in the ecosystem.
+
+The comment above the message is a small piece of packaging care —
+`serde_core::de::Deserialize` would confuse anyone who has only ever depended on
+`serde`, so the message names `serde::Deserialize` regardless of which crate the
+trait physically lives in.
+"""
+
+[[annotation]]
+id    = "de-mod-0020"
+file  = "src/de/mod.rs"
+lines = "555-563"
+title = "deserialize — an associated function, because there is no value yet"
+kind  = "trait-item"
+tracks = ["reference", "course"]
+course_unit = "03-associated-types"
+rust_features = ["traits", "associated-types", "generic-params", "result"]
+prereqs = ["de-mod-0019", "ser-mod-0012"]
+body = """
+Put this next to `Serialize::serialize` and the fundamental asymmetry of the two
+halves is visible in one line of signature.
+
+```rust
+fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>   // ser
+fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>       // de
+```
+
+Serializing has a `&self`: the value exists, and the method describes it.
+Deserializing has **no `self` at all** — it is an associated function, not a
+method, because the whole point is to produce a value that does not exist yet.
+There is nothing to take a reference to.
+
+That is why `Self` moves from the input side to the output side, and why the
+trait needs `Sized`. The error type still comes from the format, exactly as it
+does on the other side: the data structure does not know and does not care what
+`D::Error` is.
+
+`D: Deserializer<'de>` ties the format's lifetime parameter to the trait's. The
+input a `String` may borrow from is the same input the deserializer is reading —
+they are one lifetime, threaded through both traits so the compiler can check
+that a borrowed result does not outlive the bytes it points into.
+"""
+
+[[annotation]]
+id    = "de-mod-0021"
+file  = "src/de/mod.rs"
+lines = "564-593"
+title = "deserialize_in_place — public, stable, and hidden on purpose"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["default-methods", "borrowing", "visibility"]
+prereqs = ["de-mod-0020"]
+body = """
+A second method, with a default body, that most people will never call — and the
+documentation says so in as many words: *"This method is stable and an official
+public API, but hidden from the documentation because it is almost never what
+newbies are looking for."*
+
+That is an unusually candid piece of API design, and worth recognising as a
+technique. `#[doc(hidden)]` normally signals "internal, do not touch". Here it
+means "supported, but showing it would mislead by prominence". The prose is doing
+the work `#[doc(hidden)]` alone would have got wrong.
+
+What it does: deserialize into an existing value rather than returning a fresh
+one, so a `Vec` in a loop can keep its allocation instead of being rebuilt every
+iteration. The derive can generate these, and it forwards recursively — the docs
+warn that a manual implementation must call `deserialize_in_place` on its fields
+too, or the reuse stops at the first level.
+
+The caveat is the interesting part of the contract: **on error, `place` is left
+in an indeterminate state**, partially overwritten, though always memory-safe.
+Very few Rust APIs are willing to say that out loud. It is only acceptable
+because of the stated use case — a value that is about to be overwritten again
+anyway — and stating it is what keeps it from being a trap.
+
+The default body just delegates, so a type that ignores this method costs
+nothing and behaves correctly.
+"""
+
+[[annotation]]
+id    = "de-mod-0022"
+file  = "src/de/mod.rs"
+lines = "594-633"
+title = "DeserializeOwned — a higher-ranked bound wearing a trait's clothing"
+kind  = "trait-item"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["hrtb", "blanket-impls", "lifetime-de", "sealed-traits"]
+prereqs = ["de-mod-0019"]
+body = """
+Two lines of code and forty of explanation, and the two lines are the important
+Rust in this file:
+
+```rust
+pub trait DeserializeOwned: for<'de> Deserialize<'de> {}
+impl<T> DeserializeOwned for T where T: for<'de> Deserialize<'de> {}
+```
+
+An empty trait with a blanket impl is an **alias**: you never implement it, you
+only ask for it. What it aliases is `for<'de> Deserialize<'de>` — a higher-ranked
+trait bound, one of only two in the entire crate. Read it as *"deserializable
+from an input of any lifetime whatsoever, including one shorter than the
+result"*, which can only be true of a type that borrows nothing from the input.
+Hence the name.
+
+The doctest gives the reason it exists. `from_str<'a, T: Deserialize<'a>>` can
+return a type that borrows out of the string you passed in. `from_reader<T:
+DeserializeOwned>` cannot — the reader's buffer is gone by the time you get the
+value — so the bound has to exclude every borrowing type, and this is how you
+spell that.
+
+**The trap worth knowing:** `T: DeserializeOwned` is not the same as
+`T: Deserialize<'static>`, and people reach for the second one first. `&'static
+str` satisfies `Deserialize<'static>` — it borrows, but from data that lives
+forever. It does *not* satisfy `for<'de> Deserialize<'de>`, because a short `'de`
+would leave it borrowing from something already dropped. If you write
+`Deserialize<'static>` where you meant "owns its data", you have written a bound
+that quietly admits the one case you were trying to exclude.
+
+Writing the alias as a trait rather than making everyone type `for<'de>` is
+mostly ergonomics, but it also gives the bound a name that says what it means
+rather than how it is spelled.
+"""
+
+[[annotation]]
+id    = "de-mod-0023"
+file  = "src/de/mod.rs"
+lines = "634-694"
+title = "DeserializeSeed — the answer to \"how do I pass data into Deserialize?\""
+kind  = "doc-contract"
+tracks = ["reference", "course"]
+course_unit = "03-associated-types"
+rust_features = ["traits", "associated-types", "marker-types"]
+prereqs = ["de-mod-0020"]
+body = """
+The docs open by naming the question this trait answers: *"If you ever find
+yourself looking for a way to pass data into a `Deserialize` impl, this trait is
+the way to do it."* People do look for that, repeatedly, and the reason they
+cannot find it is structural — `Deserialize::deserialize` has no `self`, so there
+is nowhere for state to enter.
+
+`DeserializeSeed` restores the `self`. The seed *is* the state, passed by value
+into `deserialize`, and the produced value is a separate associated type rather
+than `Self`.
+
+The two signatures the docs put side by side are the whole idea:
+
+```rust
+fn func<'de, T: Deserialize<'de>>() -> Result<T, Error>
+fn func_seed<'de, T: DeserializeSeed<'de>>(seed: T) -> Result<T::Value, Error>
+```
+
+The second is strictly more general, which raises the obvious objection: why not
+make everything seeded? The answer is in the last paragraph — stateless
+deserialization is the overwhelming majority, and a seeded API is appeased by
+passing `PhantomData`. That escape hatch is implemented at the bottom of this
+section, and it is what makes the generalization free.
+"""
+
+[[annotation]]
+id    = "de-mod-0024"
+file  = "src/de/mod.rs"
+lines = "695-796"
+title = "The flattening example — a hundred lines that teach the whole module"
+kind  = "doc-contract"
+tracks = ["reference", "course"]
+course_unit = "03-associated-types"
+rust_features = ["traits", "associated-types", "borrowing", "lifetimes", "collections"]
+prereqs = ["de-mod-0023"]
+body = """
+The largest doctest in the crate, and the best single piece of teaching in it.
+The task: turn `[[1, 2], [3, 4, 5], [6]]` into `vec![1, 2, 3, 4, 5, 6]` with one
+allocation rather than one per inner array.
+
+Trace the pieces, because every trait in this module appears:
+
+- `FlattenedVecVisitor<T>` walks the **outer** array. Its `Value` is the finished
+  `Vec<T>`, and it creates the single vector.
+- For each inner array it calls `seq.next_element_seed(ExtendVec(&mut vec))`
+  rather than `next_element`. That is the whole trick — the seed carries a
+  mutable borrow of the vector into the nested deserialization.
+- `ExtendVec<'a, T>(&'a mut Vec<T>)` is the seed. Its `Value` is `()`, because it
+  appends rather than produces. A seed whose output is nothing is a perfectly
+  ordinary seed.
+- `ExtendVecVisitor` is defined **inside** the method that uses it — a serde
+  idiom you will see everywhere. Visitors are single-use types with no meaning
+  outside one call, so they are declared in the narrowest scope that works.
+- `seq.size_hint()` reserves capacity when the format knows the length. Note it
+  is an `Option`: a streaming format may not know, and the code copes.
+
+Then read the borrow structure. `&mut vec` is handed to a seed, which hands it to
+a visitor, which pushes through it while the outer loop is suspended mid-iteration
+— and none of it needs `RefCell` or unsafe, because the outer visitor is not
+touching the vector while the inner one holds it. The lifetime `'a` on `ExtendVec`
+is what proves that to the compiler.
+
+If you read one doctest in this crate, read this one.
+"""
+
+[[annotation]]
+id    = "de-mod-0025"
+file  = "src/de/mod.rs"
+lines = "797-812"
+title = "The trait itself — self by value, Value by association"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types", "sized-bound", "ownership"]
+prereqs = ["de-mod-0024"]
+body = """
+Sixteen lines after a hundred of explanation, which is the right ratio for a
+trait this small and this easy to misread.
+
+`type Value` is separate from `Self`. The seed and its product are different
+types — `ExtendVec` produces `()`, `PhantomData<T>` produces `T` — and conflating
+them is the usual first mistake.
+
+`fn deserialize(self, ...)` takes `self` **by value**. Not `&self`, not `&mut
+self`. A seed is consumed by the deserialization it feeds, which is what allows
+it to hand out the `&mut Vec<T>` it was holding without any borrow outliving the
+call.
+
+`Sized` for the same reason as `Deserialize`: the seed is moved.
+"""
+
+[[annotation]]
+id    = "de-mod-0026"
+file  = "src/de/mod.rs"
+lines = "813-827"
+title = "PhantomData as a seed — the bridge back to stateless"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "08-phantomdata-and-variance"
+rust_features = ["marker-types", "blanket-impls", "zero-cost", "inlining"]
+prereqs = ["de-mod-0025", "ser-impls-0015"]
+body = """
+Fourteen lines that make the entire seeded API optional.
+
+`PhantomData<T>` carries no data, which makes it the exact expression of "a seed
+with no state". Its `Value` is `T`, and its `deserialize` forwards straight to
+`T::deserialize`. So any function that demands a `DeserializeSeed` can be called
+statelessly by passing `PhantomData`, and the result is identical to what
+`Deserialize` would have produced.
+
+This is why serde could make every access trait's method pair — `next_element`
+and `next_element_seed`, `next_value` and `next_value_seed` — where the
+convenient one is defined in terms of the general one. Without this impl the two
+worlds would need parallel implementations. With it, the stateless case is the
+stateful case with a zero-sized seed, and `#[inline]` on a body this small means
+the abstraction has no run-time existence at all.
+
+Worth noticing what `PhantomData` is doing here, because it is not the usual job.
+Elsewhere in this crate it appears as a field, marking a type parameter as used.
+Here it is a **value**, chosen precisely because it is the only value its type
+has, so passing it communicates a type and nothing else.
+"""
