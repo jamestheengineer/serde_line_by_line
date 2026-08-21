@@ -1,0 +1,189 @@
+schema = 1
+source = "serde_core-1.0.229"
+
+[[annotation]]
+id    = "de-ignored-0001"
+file  = "src/de/ignored_any.rs"
+lines = "1-6"
+title = "Seven imports, which is the whole module in advance"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["modules", "traits"]
+prereqs = ["de-mod-0040"]
+body = """
+`Deserialize`, `Deserializer`, `Visitor`, and all four access traits. A file that
+imports every trait in `de/mod.rs` is a file that intends to handle every shape
+the data model has, which is exactly what discarding arbitrary input requires.
+"""
+
+[[annotation]]
+id    = "de-ignored-0002"
+file  = "src/de/ignored_any.rs"
+lines = "7-109"
+title = "The docs, and a worked example of skipping to element three"
+kind  = "doc-contract"
+tracks = ["reference", "course"]
+course_unit = "03-associated-types"
+rust_features = ["traits", "marker-types", "iterators"]
+prereqs = ["de-mod-0024"]
+body = """
+*"Think of this like `serde_json::Value` in that it can be deserialized from any
+type, except that it does not store any information."* That comparison is the
+fastest way in: same universality, none of the allocation.
+
+The `NthElement` example is the second-best doctest in the crate, after the
+flattening one in `de/mod.rs`, and it shows the type doing something you could
+not do otherwise. To read element three of a sequence whose other elements have
+types you do not know or care about:
+
+- loop `n` times calling `seq.next_element::<IgnoredAny>()?`, which consumes and
+  discards whatever is there,
+- call `seq.next_element()?` once with the real type,
+- then drain the rest with `while let Some(IgnoredAny) = seq.next_element()?`.
+
+Two details are worth stealing. The skip loop checks for `None` and reports
+`invalid_length(i, &self)` — running out early is an error, not a silent success.
+And the type implements both `Visitor` and `DeserializeSeed`, with the seed's
+`deserialize` doing nothing but `deserializer.deserialize_seq(self)`. One struct
+playing both roles is common in serde and saves a second type that would exist
+only to be passed along.
+
+`while let Some(IgnoredAny) = ...` is pattern matching on a unit struct as a way
+of saying "yes, and I want nothing from it".
+"""
+
+[[annotation]]
+id    = "de-ignored-0003"
+file  = "src/de/ignored_any.rs"
+lines = "110-118"
+title = "IgnoredAny — a zero-sized type that visits itself"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["marker-types", "associated-types", "zero-cost"]
+prereqs = ["de-ignored-0002"]
+body = """
+`pub struct IgnoredAny;` — no fields, no size, and `type Value = IgnoredAny`.
+The visitor and the value it produces are **the same type**, which is unusual
+enough to stop at. Everywhere else in this module a visitor is scaffolding that
+builds something else; here there is nothing to build, so the scaffolding is the
+answer.
+
+The consequence is that deserializing into `IgnoredAny` allocates nothing, stores
+nothing, and compiles to walking the input and dropping it. That is the "efficient"
+in "an efficient way of discarding data".
+
+`expecting` says *"anything at all"*, which is both accurate and, in this one
+case, guaranteed never to be printed: an error message about what was expected
+requires something to have been rejected, and this visitor rejects nothing.
+
+`#[derive(Copy, Clone, Debug, Default, PartialEq)]` on a type with one value —
+every one of those impls is trivial, and having them means `IgnoredAny` drops
+into generic code without special-casing.
+"""
+
+[[annotation]]
+id    = "de-ignored-0004"
+file  = "src/de/ignored_any.rs"
+lines = "119-190"
+title = "Eleven visits that say yes — and the ones that are missing"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "04-generic-bounds"
+rust_features = ["default-methods", "inlining", "zero-cost"]
+prereqs = ["de-mod-0046", "de-ignored-0003"]
+body = """
+Every body is `Ok(IgnoredAny)`, and every parameter is discarded with
+`let _ = x`. The interesting content is the list of methods that are **not** here.
+
+There is no `visit_i8`, `visit_i16`, or `visit_i32`. There is no `visit_u8`
+through `visit_u32`, no `visit_f32`, no `visit_char`, no `visit_borrowed_str`,
+and no `visit_string`. All of them are covered by the forwarding defaults in the
+`Visitor` trait — the narrow integers widen to `visit_i64` and `visit_u64`, `f32`
+widens to `f64`, `char` becomes a one-character `visit_str`, and both the
+borrowed and owned string flavors fall back to `visit_str`.
+
+So eleven implementations catch the entire scalar half of the data model. This is
+the clearest demonstration in the crate that the `Visitor` defaults are a
+conversion policy rather than boilerplate: change them and this file breaks, even
+though it never mentions them.
+
+`visit_some` and `visit_newtype_struct` are the two that do work, and both do the
+same work — `IgnoredAny::deserialize(deserializer)`, recursing to discard the
+contents. A wrapper around ignorable data is itself ignorable.
+
+`#[inline]` on all of them, on bodies that construct a zero-sized value. After
+optimization, discarding a boolean is nothing at all.
+
+Small inconsistency worth noticing rather than worrying about: `visit_str` and
+`visit_bytes` restate `where E: Error` and the others omit it. None of the bodies
+use the bound, so the omissions are the principled ones.
+"""
+
+[[annotation]]
+id    = "de-ignored-0005"
+file  = "src/de/ignored_any.rs"
+lines = "191-228"
+title = "seq, map, and enum — the recursive half, and one simplification"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["iterators", "pattern-matching", "traits"]
+prereqs = ["de-ignored-0004", "de-mod-0058"]
+body = """
+`visit_seq` and `visit_map` are three lines each and structurally identical:
+drain the access object with `while let Some(...) = tri!(...)`, then return.
+Because the element type is `IgnoredAny`, each nested value recurses into this
+same visitor, so an arbitrarily deep structure is consumed by a loop that never
+holds more than one level at a time.
+
+The comment on both loop bodies is `// Gobble`, which is the only joke in twelve
+thousand lines.
+
+`visit_map` uses `next_entry` rather than separate key and value calls, which is
+both shorter and the one place a format is invited to optimize the pair — the
+right choice for a method that will be called on every field of every unknown
+struct.
+
+`visit_enum` is the odd one:
+
+```rust
+tri!(data.variant::<IgnoredAny>()).1.newtype_variant()
+```
+
+Identify the variant, discarding its name, then read its payload as though every
+variant were a newtype variant. That is a **simplification**: unit, tuple, and
+struct variants are not newtype variants, and whether this works depends on how
+forgiving the format's `VariantAccess::newtype_variant` is with a shape it did not
+expect. It is also the only method in the file without `#[inline]`, and the only
+one whose behaviour is not obvious from reading it.
+"""
+
+[[annotation]]
+id    = "de-ignored-0006"
+file  = "src/de/ignored_any.rs"
+lines = "229-238"
+title = "The Deserialize impl — ten lines that connect it to everything"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "inlining"]
+prereqs = ["de-mod-0040", "de-ignored-0005"]
+body = """
+`deserializer.deserialize_ignored_any(IgnoredAny)` — the hint from `de/mod.rs`
+meeting the visitor that pairs with it, and the type passing itself as its own
+visitor one more time.
+
+This is what makes `IgnoredAny` usable anywhere a type is expected:
+`next_element::<IgnoredAny>()`, `next_value::<IgnoredAny>()`, a struct field
+declared as one. It is also how derived code skips unknown fields — the generated
+visitor calls `next_value::<IgnoredAny>()` for a key it does not recognize, and
+lands here.
+
+Note the hint it sends. Not `deserialize_any`, which would ask a self-describing
+format to identify what is there, but `deserialize_ignored_any`, which asks it to
+*skip*. A format that can measure a value without parsing it — a length-prefixed
+binary format — can honour the second far more cheaply than the first. Having a
+separate hint for "I do not care" is what makes skipping fast rather than merely
+possible.
+
+`impl<'de> Deserialize<'de> for IgnoredAny` with no bound on `'de`, so it also
+satisfies `DeserializeOwned`: it borrows nothing, because it keeps nothing.
+"""

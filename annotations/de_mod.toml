@@ -1684,3 +1684,485 @@ commitment.
 
 That closes the `Visitor` trait: twenty-eight methods, one of them required.
 """
+
+[[annotation]]
+id    = "de-mod-0060"
+file  = "src/de/mod.rs"
+lines = "1721-1748"
+title = "SeqAccess — the cursor a visitor is handed"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["traits", "lifetime-de"]
+prereqs = ["de-mod-0058"]
+body = """
+*"This is a trait that a `Deserializer` passes to a `Visitor` implementation."*
+One sentence, and it names the direction of control that makes this module
+work — the format does not iterate, it hands over something that can be
+iterated and waits.
+
+`'de` gets its fifth definition in this file, this time as the lifetime of data
+that may be borrowed **by deserialized sequence elements**. Still the same
+lifetime. Each trait describes it in terms of what that trait can do with it.
+
+There is no `# Example` here beyond a link to the website. Between the flattening
+doctest earlier in this file and the four traits below, the module has run out of
+things to show that are small enough to inline.
+"""
+
+[[annotation]]
+id    = "de-mod-0061"
+file  = "src/de/mod.rs"
+lines = "1749-1782"
+title = "Three methods, one of which you implement"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types", "default-methods", "marker-types"]
+prereqs = ["de-mod-0026", "de-mod-0060"]
+body = """
+Note what is absent from the declaration: **no `Sized` supertrait**. Unlike
+`Deserializer` and `Visitor`, whose methods consume `self`, these take
+`&mut self` — a sequence cursor is used repeatedly, so it is borrowed rather
+than moved, and there is no reason to forbid `dyn SeqAccess`.
+
+`next_element_seed` is the one to implement. `next_element` is a convenience
+whose default is `self.next_element_seed(PhantomData)` — the bridge from the
+`DeserializeSeed for PhantomData` impl paying off exactly as promised. The
+stateless call is the stateful call with a zero-sized seed, so a format author
+writes one method and callers get both.
+
+The docs make it a rule: *"`SeqAccess` implementations should not override the
+default behavior."* Overriding it would let the two entry points disagree, and
+nothing would catch that.
+
+`size_hint` defaults to `None` and means "I do not know", which is honest for a
+streaming format. A visitor should treat it as an optimization and never as a
+count — the flattening doctest gets this right, using it only to `reserve`.
+"""
+
+[[annotation]]
+id    = "de-mod-0062"
+file  = "src/de/mod.rs"
+lines = "1783-1810"
+title = "SeqAccess for &mut A — forwarding, and an apparent rule violation"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["blanket-impls", "borrowing", "sized-bound", "inlining"]
+prereqs = ["de-mod-0061"]
+body = """
+A blanket impl making `&mut A` a `SeqAccess` whenever `A` is one. It exists so a
+visitor holding an access object can pass `&mut seq` into a helper function
+without giving up ownership — the same reason `&mut W` is the `Serializer` in
+`ser/fmt.rs`, arrived at from the other direction.
+
+`A: ?Sized` admits `&mut dyn SeqAccess`, which is only possible because this
+trait has no `Sized` supertrait.
+
+Now notice that this impl **overrides `next_element`**, which the documentation
+one screen up says implementations should not do. It is not a contradiction: the
+prohibition is about changing behaviour, and this forwards to the inner
+`next_element` rather than reimplementing it, so whatever `A` does is exactly
+what `&mut A` does. Going through the default would route a direct call into
+`next_element_seed`, adding a `PhantomData` round trip for nothing. `#[inline]`
+on all three makes the wrapper free.
+"""
+
+[[annotation]]
+id    = "de-mod-0063"
+file  = "src/de/mod.rs"
+lines = "1811-1836"
+title = "MapAccess — the same idea, with twice the surface"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["traits", "lifetime-de"]
+prereqs = ["de-mod-0060"]
+body = """
+The map counterpart to `SeqAccess`, and structurally the same: created by the
+deserializer, driven by the visitor, parameterized by `'de` for what the entries
+may borrow.
+
+It has seven methods to `SeqAccess`'s three, and the extra four are all
+consequences of one fact — a map entry is two things arriving separately, so
+there are two ways to ask for them and both need a seeded and a stateless form.
+"""
+
+[[annotation]]
+id    = "de-mod-0064"
+file  = "src/de/mod.rs"
+lines = "1837-1863"
+title = "next_key_seed and next_value_seed — a state machine with a panic clause"
+kind  = "trait-item"
+tracks = ["reference", "course"]
+course_unit = "03-associated-types"
+rust_features = ["traits", "associated-types", "borrowing"]
+prereqs = ["de-mod-0063", "ser-mod-0045"]
+body = """
+The two required methods, and the asymmetry between their return types is the
+design: `next_key_seed` returns `Option`, `next_value_seed` does not. Keys can run
+out; a value cannot, because you only ask for one after a key told you it exists.
+
+Which produces the contract in the `# Panics` section: *"Calling
+`next_value_seed` before `next_key_seed` is incorrect and is allowed to panic or
+return bogus results."*
+
+Read that as a state machine with two states and no enforcement. The type system
+could have prevented it — `next_key` returning a token that `next_value`
+consumes — and serde chose not to, because that token would have to thread
+through every derived visitor and every hand-written one for a mistake that is
+hard to make and easy to notice.
+
+This is the exact counterpart of `SerializeMap`'s `serialize_key`/`serialize_value`
+split on the serialization side, including the same latitude for implementations
+to misbehave when called out of order. Both halves of the crate have one place
+where correctness is documented rather than checked, and it is the same place.
+"""
+
+[[annotation]]
+id    = "de-mod-0065"
+file  = "src/de/mod.rs"
+lines = "1864-1890"
+title = "next_entry_seed — the only default here that does real work"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["default-methods", "result", "pattern-matching"]
+prereqs = ["de-mod-0064"]
+body = """
+Every other convenience method in these traits forwards with a `PhantomData`.
+This one has a body: call `next_key_seed`, and if it produced a key, call
+`next_value_seed` and pair them.
+
+Which makes its doc note different from all the others. The rest say
+implementations *should not* override; this one says they **should** override *"if
+a more efficient implementation is possible"*. A format that stores entries
+adjacently can read both in one pass, and the door is deliberately left open.
+
+That is the distinction between a convenience and a genuine operation, spelled
+out in the documentation rather than in the type system: forward-only methods are
+frozen, methods with real bodies are hints.
+"""
+
+[[annotation]]
+id    = "de-mod-0066"
+file  = "src/de/mod.rs"
+lines = "1891-1941"
+title = "next_key, next_value, next_entry, size_hint — four conveniences"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["default-methods", "marker-types", "inlining"]
+prereqs = ["de-mod-0065"]
+body = """
+Three `PhantomData` forwards and a `size_hint` that returns `None`, closing the
+trait.
+
+`next_entry` forwards two seeds at once — `self.next_entry_seed(PhantomData,
+PhantomData)` — which is the stateless case of a two-seed method, and reads
+slightly absurdly while being exactly right.
+
+The `# Panics` note is repeated verbatim on `next_value`, because a caller using
+the convenient API can make the same ordering mistake as one using the seeded
+API. Duplicating the warning rather than linking to it is the correct call for
+something people will hit at three in the morning.
+
+`#[inline]` on every one of them: each body is a single call, and without it the
+seeded/stateless split would cost a function call per map entry.
+"""
+
+[[annotation]]
+id    = "de-mod-0067"
+file  = "src/de/mod.rs"
+lines = "1942-2007"
+title = "MapAccess for &mut A — the same forwarding, six methods deep"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["blanket-impls", "borrowing", "inlining"]
+prereqs = ["de-mod-0062"]
+body = """
+Sixty-six lines to do for `MapAccess` what twenty-eight did for `SeqAccess`:
+forward every method through the reference, `#[inline]` throughout, `A: ?Sized`
+so trait objects work.
+
+Every method is forwarded, including the ones with default bodies, for the same
+reason as before — going through a default would re-derive `next_entry` from
+`next_key`/`next_value` and discard whatever optimization `A` implemented.
+
+There is no macro here, and it is the same judgement as `ser/impossible.rs`: six
+methods with six different signatures, where a matcher able to accept them all
+would be longer than the code it replaced.
+"""
+
+[[annotation]]
+id    = "de-mod-0068"
+file  = "src/de/mod.rs"
+lines = "2008-2034"
+title = "EnumAccess — the two-step that enums require"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["traits", "lifetime-de"]
+prereqs = ["de-mod-0063"]
+body = """
+*"created by the `Deserializer` and passed to the `Visitor` in order to identify
+which variant of an enum to deserialize."*
+
+Identify first, then read. An enum cannot be deserialized in one step, because
+what to read depends on which variant is present, and that has to be discovered
+before anything else can happen. `EnumAccess` is step one; `VariantAccess`, the
+trait immediately below, is step two.
+
+Nothing on the serialization side needs this. Writing an enum, you already know
+the variant.
+"""
+
+[[annotation]]
+id    = "de-mod-0069"
+file  = "src/de/mod.rs"
+lines = "2035-2063"
+title = "variant_seed — the method that returns the next trait object to talk to"
+kind  = "trait-item"
+tracks = ["reference", "course"]
+course_unit = "03-associated-types"
+rust_features = ["associated-types", "traits", "sized-bound"]
+prereqs = ["de-mod-0068"]
+body = """
+Two associated types, and the second one carries the interesting constraint:
+
+```rust
+type Variant: VariantAccess<'de, Error = Self::Error>;
+```
+
+An associated type bounded by another trait, *with that trait's own associated
+type pinned to this one's*. The two halves of reading an enum must agree on their
+error type, and this is how you say that in Rust. Without the `Error =` clause a
+visitor would have two unrelated error types to reconcile mid-way through
+deserializing one value.
+
+`variant_seed` returns `(V::Value, Self::Variant)` — the identified variant *and*
+the object for reading its contents. That pairing is the whole two-step handoff
+in one return type: you learn which variant it is and simultaneously receive
+permission to read it.
+
+`Sized` is back on this trait, unlike the two access traits above, because
+`variant_seed` takes `self` by value. Identification happens once, so the object
+is consumed.
+"""
+
+[[annotation]]
+id    = "de-mod-0070"
+file  = "src/de/mod.rs"
+lines = "2064-2092"
+title = "VariantAccess — step two, and a doc comment that calls it a visitor"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types"]
+prereqs = ["de-mod-0069"]
+body = """
+The receiving half of the handoff: four methods, one per variant shape — unit,
+newtype, tuple, struct — matching the four `serialize_*_variant` methods on the
+other side exactly.
+
+The opening sentence is slightly off, and worth flagging because it can mislead:
+*"`VariantAccess` is a visitor that is created by the `Deserializer`."* It is not
+a `Visitor`. It is an access object, in the same family as `SeqAccess` and
+`MapAccess`, and two of its methods *take* a visitor. The word is being used
+loosely in the older sense of "the thing that walks the data", and reading it as
+the trait name sends you looking for a `Visitor` impl that does not exist.
+
+`type Error: Error`, documented as *"Must match the error type of our
+`EnumAccess`"* — which the `Error = Self::Error` bound above already enforces, so
+the comment is describing a guarantee rather than asking for cooperation.
+"""
+
+[[annotation]]
+id    = "de-mod-0071"
+file  = "src/de/mod.rs"
+lines = "2093-2128"
+title = "unit_variant — and thirty lines of doctest showing how to refuse"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "custom-errors"]
+prereqs = ["de-mod-0070", "ser-mod-0030"]
+body = """
+The signature is three words long: `fn unit_variant(self) -> Result<(),
+Self::Error>`. There is nothing to read, so nothing comes back — the method
+exists to consume whatever the format wrote and to confirm the shape was right.
+
+The thirty lines above it are a complete worked example of the *failure* path,
+and all four methods in this trait carry one. They show precisely which
+`invalid_type` error to construct when the input holds a different variant shape
+than expected — `Unexpected::UnitVariant`, `&"tuple variant"`, and so on.
+
+That is unusual documentation. Serde is not describing what the method does; it
+is prescribing the exact error a correct implementation must produce, because
+these are the messages users see when an enum does not match, and four format
+authors inventing four phrasings would be four different debugging experiences
+for the same mistake.
+"""
+
+[[annotation]]
+id    = "de-mod-0072"
+file  = "src/de/mod.rs"
+lines = "2129-2186"
+title = "newtype_variant_seed and newtype_variant — the pattern once more"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["default-methods", "marker-types", "inlining"]
+prereqs = ["de-mod-0071"]
+body = """
+Seeded method required, stateless convenience defaulting to
+`self.newtype_variant_seed(PhantomData)`, and the docs repeating that
+implementations should not override the default.
+
+That is the fourth trait in this file built on exactly this pattern —
+`SeqAccess`, `MapAccess`, `EnumAccess`, and now `VariantAccess`. Once you have
+read one you have read all of them, which is the payoff for serde having applied
+the idea uniformly instead of only where it was first needed.
+
+Its own `invalid_type` doctest, prescribing the error for a variant that turned
+out not to be a newtype.
+"""
+
+[[annotation]]
+id    = "de-mod-0073"
+file  = "src/de/mod.rs"
+lines = "2187-2229"
+title = "tuple_variant — where a visitor arrives instead of a seed"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "generic-params"]
+prereqs = ["de-mod-0072", "de-mod-0038"]
+body = """
+This one breaks the pattern, and the break is informative. It takes a `len` and a
+**`Visitor`**, not a seed, and there is no stateless convenience beside it.
+
+The reason is that a tuple variant's contents are a sequence, and sequences are
+read by visitors driving a `SeqAccess`, not by seeds producing single values. So
+the method hands the problem back to the machinery that already handles it: call
+this, get your visitor's `visit_seq` invoked, loop as usual.
+
+`len` is present for the same reason `deserialize_tuple` takes one — a
+non-self-describing format has no other way to know where the variant's fields
+stop.
+"""
+
+[[annotation]]
+id    = "de-mod-0074"
+file  = "src/de/mod.rs"
+lines = "2230-2281"
+title = "struct_variant — the last method, and the last static string list"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "proc-macro-boundary"]
+prereqs = ["de-mod-0073", "de-mod-0039"]
+body = """
+`fields: &'static [&'static str]` and a visitor — the same pair
+`deserialize_struct` takes, for the same reason. A struct variant is a struct
+that happens to live inside an enum, and everything true of one is true of the
+other.
+
+That closes `VariantAccess`, and with it the four access traits. Between them,
+`SeqAccess`, `MapAccess`, `EnumAccess`, and `VariantAccess` cover every compound
+shape in the data model, and every one of them works the same way: the
+deserializer hands the visitor an object, and the visitor drives.
+"""
+
+[[annotation]]
+id    = "de-mod-0075"
+file  = "src/de/mod.rs"
+lines = "2282-2323"
+title = "IntoDeserializer — turning a value you already have into a format"
+kind  = "trait-item"
+tracks = ["reference", "course"]
+course_unit = "09-blanket-impls-and-coherence"
+rust_features = ["traits", "associated-types", "generic-params"]
+prereqs = ["de-mod-0029"]
+body = """
+Six lines of trait, and it inverts everything the module has been doing.
+Everywhere else a deserializer reads bytes. Here a value *becomes* a
+deserializer, so that machinery expecting a format can be pointed at data already
+in memory.
+
+The doctest is the reason most people meet it. A `#[derive(Deserialize)]` enum
+gets a `FromStr` impl in three lines:
+
+```rust
+Self::deserialize(s.into_deserializer())
+```
+
+A `&str` turns itself into a deserializer, the derived code reads a unit variant
+out of it, and the enum's `#[serde(rename)]` attributes govern the parsing —
+without a second list of strings anywhere. It is the deserialization mirror of
+the `&mut Formatter` trick in `ser/fmt.rs`, and just as useful.
+
+`E: Error = value::Error` is a **defaulted generic parameter on a trait**, which
+is rare enough to be worth naming. It lets `x.into_deserializer()` work with no
+turbofish in the common case, while a format that needs its own error type can
+still say `IntoDeserializer<'de, MyError>`.
+
+The implementations are in `de/value.rs`, the 1,895-line module this trait
+exists to anchor.
+"""
+
+[[annotation]]
+id    = "de-mod-0076"
+file  = "src/de/mod.rs"
+lines = "2324-2355"
+title = "OneOf — thirty lines so that error messages read like English"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings", "iterators", "pattern-matching"]
+prereqs = ["de-mod-0011"]
+body = """
+A private struct wrapping a slice of names, with a `Display` impl that handles
+three cases separately:
+
+- one name: `` `a` ``
+- two names: `` `a` or `b` ``
+- more: ``one of `a`, `b`, `c` ``
+
+That is the difference between an error message a person reads and one they
+parse. *"expected `on` or `off`"* is a sentence; *"expected one of ['on', 'off']"* is a
+debug dump.
+
+The zero case is `panic!()` with the comment `// special case elsewhere`, and the
+elsewhere is `unknown_field` and `unknown_variant` back at the top of the file,
+both of which check for an empty list before constructing a `OneOf`. The struct's
+own doc comment states the precondition — *"The slice of names must not be
+empty"* — so the panic is an assertion about a private invariant, not a
+user-reachable failure.
+
+`&'static [&'static str]` throughout: these are the derive's baked-in name lists,
+and rendering them costs no allocation at all.
+"""
+
+[[annotation]]
+id    = "de-mod-0077"
+file  = "src/de/mod.rs"
+lines = "2356-2392"
+title = "WithDecimalPoint — a formatter wrapping a formatter, to add one character"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "12-errors-iterators-closures"
+rust_features = ["traits", "strings", "no-std", "interior-mutability"]
+prereqs = ["de-mod-0016"]
+body = """
+The last thirty-six lines of the file, and they exist to stop *"floating point
+`1`"* from appearing in an error message about a float.
+
+The mechanism is worth studying. `LookForDecimalPoint` is a `fmt::Write` declared
+**inside** the `fmt` method that uses it, wrapping the real formatter. Every
+fragment passes through it on the way out, and it sets a flag if it sees a `.`.
+After the number has been written, if no decimal point went past, `.0` is
+appended.
+
+So the value is formatted exactly once, forwarded byte for byte, and inspected in
+flight. The obvious alternative — render to a `String`, check it, fix it up —
+would allocate, which is not available here.
+
+Both `write_str` and `write_char` are implemented, because `Display` for `f64`
+may use either and missing one would let a lone `.` through unnoticed.
+
+The `is_finite` branch skips all of it: `inf` and `NaN` have no decimal point and
+appending one would be worse than the problem being fixed.
+
+Thirty-six lines, one character of output, in the error path of a trait method
+most programs never reach. That ratio is a fair summary of the crate's attitude to
+its own error messages.
+"""
