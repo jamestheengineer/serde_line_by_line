@@ -1,0 +1,698 @@
+schema = 1
+source = "serde_core-1.0.229"
+
+[[annotation]]
+id    = "de-value-0001"
+file  = "src/de/value.rs"
+lines = "1-22"
+title = "The module that turns values you already have into deserializers"
+kind  = "doc-contract"
+tracks = ["reference", "course"]
+course_unit = "09-blanket-impls-and-coherence"
+rust_features = ["traits", "associated-types", "modules"]
+prereqs = ["de-mod-0075"]
+body = """
+Every other deserializer in the ecosystem reads bytes. The ones in this file read
+a value that is already sitting in a variable — a `u32`, a `&str`, an iterator of
+pairs — and present it to a `Visitor` as if it had just been parsed. That is the
+whole module.
+
+The doctest picks the smallest use that justifies it. `Setting` derives
+`Deserialize`, which means `serde_derive` has already written the code that turns
+the strings `"On"` and `"Off"` into variants. `FromStr` wants that same code but
+has only a `&str` and no format in sight. `s.into_deserializer()` manufactures
+one, and `Self::deserialize(...)` runs the derived logic against it. You get a
+`FromStr` impl that stays in sync with the `Deserialize` impl for free, including
+the `unknown_variant` error message listing the valid names.
+
+`type Err = value::Error` is the other half of the trade. There is no format
+here to own an error type, so the module supplies a minimal one — that is the
+first thing defined below.
+"""
+
+[[annotation]]
+id    = "de-value-0002"
+file  = "src/de/value.rs"
+lines = "23-30"
+title = "Imports, and the one that reveals this file serializes too"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["modules", "no-std"]
+prereqs = ["de-mod-0006"]
+body = """
+`crate::lib::*` is the `no_std` shim again: `PhantomData`, `fmt`, `Box`, `String`,
+`Cow`, and the collections all arrive from one glob whose contents depend on which
+of `std` / `alloc` is on.
+
+The line worth stopping at is `use crate::ser;`. This is a file in `de/`, and it
+imports the serialization half of the crate. The reason is one impl: the `Error`
+type defined below implements *both* `de::Error` and `ser::Error`, so that the
+same type can be the error of a round trip. Nothing else in this file goes near
+serialization.
+
+`self::private::{First, Second}` points at a module at the very bottom of the
+file — two traits used to destructure iterator items generically. They are the
+last thing here and the least obvious; forward-linking them at the top like this
+is how you find out they exist.
+"""
+
+[[annotation]]
+id    = "de-value-0003"
+file  = "src/de/value.rs"
+lines = "31-46"
+title = "impl_copy_clone! — a macro that exists because derive gets a bound wrong"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "macro-repetition", "marker-types", "generic-params"]
+prereqs = ["ser-impls-0002"]
+body = """
+Read the comment above it first, because it states a real Rust defect in two
+lines: *"For structs that contain a PhantomData. We do not want the trait bound
+`E: Clone` inferred by derive(Clone)."*
+
+`#[derive(Clone)]` on `struct U32Deserializer<E> { value: u32, marker:
+PhantomData<E> }` emits `impl<E: Clone> Clone for U32Deserializer<E>`. It adds a
+bound for every type parameter, mechanically, without checking whether any field
+actually needs it. Here `E` appears only inside `PhantomData<E>`, which is `Clone`
+no matter what `E` is — so the derived bound is pure noise, and it leaks: a user
+holding a `U32Deserializer<SomeNonCloneError>` cannot clone it, for no reason.
+
+The macro writes the bound-free version by hand:
+
+- `impl<E> Copy for $ty<E> {}` — no bound, and `Copy` requires `Clone`, which the
+  next impl supplies.
+- `impl<E> Clone for $ty<E> { fn clone(&self) -> Self { *self } }` — the body is a
+  dereference, legal precisely because the type is `Copy`.
+
+The matcher is `($ty:ident $(<$lifetime:tt>)*)`, and the optional repetition is
+how one macro serves both `impl_copy_clone!(UnitDeserializer)` and
+`impl_copy_clone!(StrDeserializer<'de>)`. `$(<$lifetime:tt>)*` matches zero or
+one bracketed lifetime in practice — `macro_rules!` has no "optional" operator,
+so `*` is the idiom for it. Each expansion site then repeats `$($lifetime,)*`,
+which produces either nothing or `'de,` at the front of the generic list.
+
+This trick recurs across Rust; the derive limitation it works around is
+long-standing and still unfixed.
+"""
+
+[[annotation]]
+id    = "de-value-0004"
+file  = "src/de/value.rs"
+lines = "47-59"
+title = "value::Error — one field, whose type is a cfg"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "11-no-std-and-cfg"
+rust_features = ["custom-errors", "cfg", "no-std"]
+prereqs = ["de-mod-0007"]
+body = """
+*"A minimal representation of all possible errors that can occur using the
+`IntoDeserializer` trait."* Minimal is exact: one private field.
+
+`type ErrorImpl` is where the `no_std` engineering shows. With `std` or `alloc`
+it is `Box<str>` — the message, heap-allocated, in the smallest box that can hold
+it (`Box<str>` is two words; `String` would be three, and this type never grows
+the message after construction). Without either, it is `()`: no allocator, so no
+message, and the struct becomes zero-sized.
+
+The public type is the same in both worlds. Every method below then has to be
+written twice, once per `cfg`, which is what the next several impls are doing.
+That is the cost of making the *type* rather than its *API* conditional, and it
+is the right trade — downstream code that names `value::Error` compiles either
+way.
+
+`#[derive(Clone, PartialEq)]` is safe here where `derive(Clone)` was not above:
+there are no type parameters, so there is no spurious bound to infer.
+"""
+
+[[annotation]]
+id    = "de-value-0005"
+file  = "src/de/value.rs"
+lines = "60-81"
+title = "de::Error::custom, written twice, and #[cold] both times"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "11-no-std-and-cfg"
+rust_features = ["custom-errors", "cfg", "trait-objects"]
+prereqs = ["de-mod-0008"]
+body = """
+`custom` is the one method `de::Error` cannot default, and here it appears in two
+`cfg`-gated copies inside a single impl block. Only one is compiled; the other
+does not exist as far as the type checker is concerned.
+
+The allocating version is `msg.to_string().into_boxed_str()` — format the
+`Display` value into a `String`, then shrink it to exactly its length. The
+non-allocating version is `let _ = msg; Error { err: () }`, and that `let _ =`
+line is not decoration: without it the parameter is unused and the crate's own
+`deny` settings would fail the build. Binding to `_` is the idiomatic way to say
+"deliberately discarded".
+
+`#[cold]` on both tells LLVM this function is unlikely to be called, so it gets
+laid out away from the hot path and is not inlined into the callers that check
+for errors. Every error constructor in serde carries it. The cost of an error is
+paid by the program that errors; the program that does not should not carry the
+code in its instruction cache.
+
+Note what is *lost* in the `no_std` build: `invalid_type`, `unknown_field`, and
+every other diagnostic funnel down into `custom`, so all of them collapse to the
+same empty value. Error messages are a feature you buy with an allocator.
+"""
+
+[[annotation]]
+id    = "de-value-0006"
+file  = "src/de/value.rs"
+lines = "82-93"
+title = "ser::Error for the same type — the round trip in eleven lines"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["custom-errors", "traits"]
+prereqs = ["de-value-0005"]
+body = """
+This is why `use crate::ser` is at the top of a file in `de/`. `value::Error`
+implements the serialization error trait as well, and the body just forwards:
+`de::Error::custom(msg)`.
+
+Both traits require the same single method with the same signature, so one type
+can satisfy both and code that serializes into an `IntoDeserializer` and reads
+back out never has to convert between two error types. The two traits stay
+separate at the trait level — `Serializer::Error: ser::Error` and
+`Deserializer::Error: de::Error` are unrelated bounds — but nothing stops one
+concrete type from wearing both hats.
+
+The explicit `de::Error::custom(msg)` call, rather than `Self::custom(msg)`,
+avoids an ambiguity the compiler would otherwise report: with both traits in
+scope and both defining `custom`, `Self::custom` names two candidates.
+"""
+
+[[annotation]]
+id    = "de-value-0007"
+file  = "src/de/value.rs"
+lines = "94-114"
+title = "Display and Debug, and the one line that shows the no_std split leaking"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg", "custom-errors"]
+prereqs = ["de-value-0004"]
+body = """
+`Display` again splits on `cfg`: print the stored message, or print the fixed
+string `"Serde deserialization error"` when there is no message to print. A
+caller formatting an error in a `no_std` build gets a sentence that is true but
+uninformative.
+
+`Debug` does something more interesting. It builds `debug_tuple("Error")` and
+then has `#[cfg(...)] debug.field(&self.err);` as a *statement* — an attribute on
+a single line of a function body, not on an item. That is legal and it is the
+tersest way to write this: with an allocator the output is `Error("bad
+value")`, without one it is `Error`. One function, one conditional line, instead
+of two whole `fmt` bodies.
+
+Notice the asymmetry with `Display` directly above, which *was* written twice.
+`Display`'s two bodies differ in their entire expression, so a per-statement
+`cfg` would not have helped. Choosing the granularity of the gate — item,
+method, or statement — is the whole craft of readable `cfg` code, and this
+twenty-line stretch shows two of the three.
+"""
+
+[[annotation]]
+id    = "de-value-0008"
+file  = "src/de/value.rs"
+lines = "115-122"
+title = "std::error::Error, and a method that has been deprecated for years"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "custom-errors", "msrv"]
+prereqs = ["de-mod-0006"]
+body = """
+Only under `feature = "std"`, because `error::Error` did not move to `core` until
+Rust 1.81 and serde supports much older compilers. `#[cfg_attr(docsrs,
+doc(cfg(feature = "std")))]` is what puts the little "Available on crate feature
+std only" banner on docs.rs.
+
+The impl overrides `description`, which the standard library deprecated in favor
+of `Display`. It is implemented here anyway and not marked deprecated, which
+would normally draw a warning — the crate suppresses that centrally. The reason
+to keep it is that some very old code still calls `description()` directly, and
+returning `&self.err` there is strictly better than the default implementation's
+`"description() is deprecated; use Display"`.
+
+This is the kind of detail worth reading twice when it shows up in a dependency:
+it is not a mistake, it is a compatibility promise that costs four lines.
+"""
+
+[[annotation]]
+id    = "de-value-0009"
+file  = "src/de/value.rs"
+lines = "123-134"
+title = "The first IntoDeserializer impl, and the shape all 30 of them share"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "03-associated-types"
+rust_features = ["traits", "associated-types", "generic-params"]
+prereqs = ["de-mod-0075"]
+body = """
+`impl<'de, E> IntoDeserializer<'de, E> for ()` — the unit type can become a
+deserializer, and the deserializer it becomes is `UnitDeserializer<E>`.
+
+Read the generics carefully, because this pattern repeats about thirty times
+below. `E` is chosen by the *caller*, not by this impl: whoever calls
+`().into_deserializer()` decides what error type comes out, and inference usually
+fills it in from the surrounding `Deserialize::deserialize` call. That is why
+`E: de::Error` is the only bound. `'de` is unconstrained here — nothing in `()`
+borrows — so the impl is generic over every `'de` at once, and the value can feed
+a `Deserialize` impl with any lifetime requirement it likes.
+
+`type Deserializer = UnitDeserializer<E>` is the associated type doing its usual
+job: the *input value* picks the deserializer type, one-to-one, at compile time.
+There is no dispatch here and nothing to look up at runtime.
+"""
+
+[[annotation]]
+id    = "de-value-0010"
+file  = "src/de/value.rs"
+lines = "135-140"
+title = "UnitDeserializer — a struct whose only field is a lie about ownership"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "08-phantomdata-and-variance"
+rust_features = ["marker-types", "generic-params", "zero-cost"]
+prereqs = ["de-value-0009"]
+body = """
+*"A deserializer holding a `()`."* It holds nothing. The single field is
+`marker: PhantomData<E>`, and `()` has no representation to store.
+
+`PhantomData<E>` is here because `E` appears in the type's signature but in none
+of its fields, and Rust rejects unused type parameters outright — the parameter
+has to be mentioned somewhere or the compiler cannot decide the type's variance
+or drop behavior. `PhantomData<E>` says "behave as though this struct owned an
+`E`", costs zero bytes, and makes `UnitDeserializer<E>` a distinct type for each
+`E`, which is exactly what `type Error = E` below needs.
+
+This struct is zero-sized. Constructing it, passing it, and dropping it all
+compile to nothing at all.
+"""
+
+[[annotation]]
+id    = "de-value-0011"
+file  = "src/de/value.rs"
+lines = "141-142"
+title = "UnitDeserializer — Copy and Clone with no E: Clone"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-rules", "marker-types"]
+macro_def = "de-value-0003"
+prereqs = ["de-value-0003"]
+body = """
+No lifetime argument, so the expansion is the simple arm: `impl<E> Copy` and
+`impl<E> Clone` with no bound on `E`.
+"""
+
+[[annotation]]
+id    = "de-value-0012"
+file  = "src/de/value.rs"
+lines = "143-151"
+title = "new() — and #[allow(missing_docs)] as a deliberate silence"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["visibility", "marker-types"]
+prereqs = ["de-value-0010"]
+body = """
+A public constructor taking nothing and returning the zero-sized struct with
+`marker: PhantomData`. `PhantomData` is a unit struct, so naming it is the whole
+construction.
+
+`#[allow(missing_docs)]` appears on this and on the `new` of every deserializer
+in the file. The crate denies missing documentation on public items; rather than
+write "Constructs a new UnitDeserializer" thirty times, dtolnay silences the lint
+at each site. That is a defensible call — a doc comment that only restates the
+signature is worse than none — but note what it costs: on docs.rs these
+constructors appear with no description at all.
+"""
+
+[[annotation]]
+id    = "de-value-0013"
+file  = "src/de/value.rs"
+lines = "152-178"
+title = "The Deserializer impl — every method forwarded, except the two that matter"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "05-default-methods"
+rust_features = ["traits", "associated-types", "macro-rules", "option"]
+prereqs = ["de-mod-0029", "de-mod-0036"]
+body = """
+This is the template for every self-describing deserializer in the file, and it
+is three parts.
+
+`type Error = E` — the error type is the caller's choice, threaded straight
+through from the type parameter.
+
+`forward_to_deserialize_any!` with 29 of the 30 hint methods listed. The macro
+(defined in `macros.rs`) generates a body for each name that ignores the hint and
+calls `deserialize_any`. This is what "self-describing" means mechanically: the
+data is already a `()`, so asking for it as a `u64` cannot change what it is —
+the hint is discarded and the visitor is told the truth. A visitor that wanted a
+`u64` will reject `visit_unit` with `invalid_type`, which is the correct outcome.
+
+`deserialize_any` calls `visitor.visit_unit()`. Two lines, and they are the
+entire semantic content of the type.
+
+`deserialize_option` is the one method deliberately left off the forwarding list,
+because forwarding it would be wrong. `Option`'s `Deserialize` impl calls
+`deserialize_option` and expects either `visit_none` or `visit_some`; routing it
+to `deserialize_any` would produce `visit_unit`, and `Option`'s visitor would
+report a type error. Instead this returns `visit_none`, so deserializing `()`
+into an `Option<T>` yields `None`. Whether that is *right* is a design judgment —
+it means unit and absent are the same thing to this deserializer — but it is
+deliberate, and it is why the forwarding list here is one name shorter than the
+one in the macro below.
+"""
+
+[[annotation]]
+id    = "de-value-0014"
+file  = "src/de/value.rs"
+lines = "179-195"
+title = "IntoDeserializer for the deserializer itself — the identity impl"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "09-blanket-impls-and-coherence"
+rust_features = ["traits", "associated-types"]
+prereqs = ["de-value-0009"]
+body = """
+`impl IntoDeserializer for UnitDeserializer` with `type Deserializer = Self` and
+`fn into_deserializer(self) -> Self { self }`. Every deserializer in this file
+has one.
+
+It looks like a no-op, and at runtime it is. Its job is at the type level:
+generic code written as `T: IntoDeserializer<'de, E>` should accept both a raw
+`u32` and an already-built `U32Deserializer`, without the caller having to know
+which they hold. Serde's derived code for `#[serde(other)]` and for flattened
+maps relies on exactly this — it calls `.into_deserializer()` on values whose
+origin varies.
+
+A blanket `impl<D: Deserializer<'de>> IntoDeserializer<'de, D::Error> for D`
+would cover all of these at once and delete thirty impls. It cannot be written:
+it would overlap with `impl IntoDeserializer for u32` the moment any downstream
+crate implemented `Deserializer` for `u32`, and coherence rejects a possible
+future overlap, not just an actual one. Thirty near-identical impls are the price
+of that rule.
+
+`Debug` closes the section, and it prints just the struct name — there is no
+value to show.
+"""
+
+[[annotation]]
+id    = "de-value-0015"
+file  = "src/de/value.rs"
+lines = "196-251"
+title = "NeverDeserializer — the ! type, still waiting after a decade"
+kind  = "cfg-gate"
+tracks = ["reference", "course"]
+course_unit = "11-no-std-and-cfg"
+rust_features = ["cfg", "traits", "marker-types", "pattern-matching"]
+prereqs = ["de-value-0013"]
+body = """
+Fifty-five lines gated on `feature = "unstable"`, which means nightly, which
+means almost nobody compiles them. They are here because the never type `!` — the
+type of an expression that does not return — has been almost-stable since 2015.
+
+The payoff is `struct NeverDeserializer<E> { never: !, marker: PhantomData<E> }`.
+A struct with a field of type `!` cannot be constructed, because you cannot
+produce a value of `!`. So the type is uninhabited, and every method on it is
+unreachable by construction.
+
+Which is why `deserialize_any` has the body `self.never`. Not `unreachable!()`,
+not a panic — an expression of type `!`, which coerces to *any* type, including
+the `Result<V::Value, Self::Error>` the signature demands. The compiler accepts
+it because a value of `!` cannot exist, so the function cannot return, so there
+is nothing to check. This is the never type's one trick and it is worth carrying
+around.
+
+`impl IntoDeserializer for !` is the entry point: if you have a value of `!` you
+have a contradiction, and the impl turns it into a deserializer that is equally
+impossible. `fn into_deserializer(self) -> Self::Deserializer { self }` returns
+`self` where a `NeverDeserializer<E>` is expected, which type-checks by the same
+coercion.
+
+Read this section as a language demo rather than a feature. The stabilization has
+been blocked for years on how `!` should fall back in inference, and serde keeps
+the impls behind a feature flag so they are ready the day it lands.
+"""
+
+[[annotation]]
+id    = "de-value-0016"
+file  = "src/de/value.rs"
+lines = "252-326"
+title = "primitive_deserializer! — one macro, six impls, fifteen types"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "macro-repetition", "generic-params", "marker-types"]
+prereqs = ["de-value-0013", "ser-impls-0002"]
+body = """
+Everything the previous 130 lines did by hand for `()`, generated. Each
+invocation produces six items: the struct, an `impl_copy_clone!` call, an
+`IntoDeserializer` impl for the primitive, an inherent `new`, a `Deserializer`
+impl, an `IntoDeserializer` identity impl, and a `Debug` impl. Fifteen
+invocations follow, so this 75-line body stands in for roughly a thousand lines.
+
+The matcher has four fixed fragments and a trailing catch-all:
+`($ty:ty, $doc:tt, $name:ident, $method:ident $($cast:tt)*)`.
+
+- `$ty:ty` is the primitive — `bool`, `i8`, `isize`.
+- `$doc:tt` is a string literal used as `#[doc = $doc]`. This is the trick for
+  building documentation from a macro parameter: `///` cannot interpolate, but
+  `#[doc = "..."]` is just an attribute taking a literal, and two `#[doc]`
+  attributes concatenate into consecutive lines. Hence the split into
+  `#[doc = "A deserializer holding"]` and `#[doc = $doc]`, with the invocation
+  passing `"a \\`bool\\`."` — the sentence is assembled across two attributes.
+- `$name:ident` is the generated type name, `BoolDeserializer`.
+- `$method:ident` is the `Visitor` method to call, `visit_bool`.
+- `$($cast:tt)*` is the reason this macro is not four parameters. It captures
+  *whatever tokens are left*, and the body splices them straight after
+  `self.value`: `visitor.$method(self.value $($cast)*)`. For `bool` it is empty.
+  For `isize` the invocation ends with `visit_i64 as i64`, so `$method` binds
+  `visit_i64` and `$cast` binds `as i64`, producing `visitor.visit_i64(self.value
+  as i64)`. A raw token sequence spliced into an expression — no fragment
+  specifier could express "an optional cast", so the macro takes tokens.
+
+Note that `$cast` cannot be `$ty:ty` or `$e:expr` for a subtle reason worth
+knowing: once a fragment is parsed as an `expr` or `ty` it becomes an opaque AST
+node, and `self.value as i64` could not then be reassembled from the pieces.
+`tt` fragments stay as tokens and can be pasted anywhere.
+
+The generated `Deserializer` impl forwards all 30 methods including `option` —
+unlike `UnitDeserializer`, which held `option` back. A `BoolDeserializer` asked
+for an `Option` calls `visit_bool`, and `Option`'s visitor reports a type error.
+That is the correct answer for a bool; `()` was the special case.
+"""
+
+[[annotation]]
+id    = "de-value-0017"
+file  = "src/de/value.rs"
+lines = "327-333"
+title = "bool, i8, i16, i32, i64, i128 — the direct cases"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-rules"]
+macro_def = "de-value-0016"
+prereqs = ["de-value-0016"]
+body = """
+Six invocations with an empty `$cast`: the value is handed to the matching
+`visit_` method unchanged.
+"""
+
+[[annotation]]
+id    = "de-value-0018"
+file  = "src/de/value.rs"
+lines = "334"
+title = "isize → visit_i64, widened"
+kind  = "macro-use"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules"]
+macro_def = "de-value-0016"
+prereqs = ["de-value-0016"]
+body = """
+The first invocation that uses `$cast`. There is no `visit_isize`, because the
+data model has no platform-dependent integer, so `isize` widens to `i64` on the
+way in. The widening is lossless on every target Rust supports, and it matches
+what `Serialize for isize` does in the other direction.
+"""
+
+[[annotation]]
+id    = "de-value-0019"
+file  = "src/de/value.rs"
+lines = "335-338"
+title = "u8, u16, u64, u128 — and the gap where u32 should be"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-rules"]
+macro_def = "de-value-0016"
+prereqs = ["de-value-0016"]
+body = """
+Four of the five unsigned types. `u32` is missing from this run and is written
+out longhand below, because it needs an impl the macro does not generate.
+"""
+
+[[annotation]]
+id    = "de-value-0020"
+file  = "src/de/value.rs"
+lines = "339"
+title = "usize → visit_u64, widened"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-rules"]
+macro_def = "de-value-0016"
+prereqs = ["de-value-0018"]
+body = """
+The unsigned mirror of `isize`, and the second and last use of `$cast`.
+"""
+
+[[annotation]]
+id    = "de-value-0021"
+file  = "src/de/value.rs"
+lines = "340-343"
+title = "f32, f64, char — the end of the generated stretch"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-rules"]
+macro_def = "de-value-0016"
+prereqs = ["de-value-0016"]
+body = """
+The last three. `char` is a `Deserializer` here but not a `Copy`-free special
+case — it fits the template exactly, which is why the run ends cleanly.
+"""
+
+[[annotation]]
+id    = "de-value-0022"
+file  = "src/de/value.rs"
+lines = "344-349"
+title = "U32Deserializer — written out by hand, for one extra impl"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "marker-types"]
+prereqs = ["de-value-0016"]
+body = """
+Ninety lines that reproduce, character for character, what
+`primitive_deserializer!(u32, "a \\`u32\\`.", U32Deserializer, visit_u32)` would
+have produced — plus one impl it would not have: `EnumAccess`.
+
+This is the recurring shape of the boundary between generated and hand-written
+code in serde. A macro pays for itself while every case is identical; the first
+case that needs one extra item either grows the macro a new optional arm or drops
+out of it entirely. dtolnay chose to drop `u32` out, and the cost is that any
+change to the macro body has to be mirrored here by hand.
+
+Why `u32` in particular: enum variants are identified by index, and the index
+type in serde's data model is `u32`. Deserializing an enum from a bare number —
+which is what a compact binary format does — means handing a `u32` to
+`deserialize_enum`, so `U32Deserializer` has to be able to act as the enum access
+itself.
+"""
+
+[[annotation]]
+id    = "de-value-0023"
+file  = "src/de/value.rs"
+lines = "350-351"
+title = "U32Deserializer — Copy and Clone"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-rules"]
+macro_def = "de-value-0003"
+prereqs = ["de-value-0003"]
+body = """
+Same simple arm as `UnitDeserializer`; `u32` is `Copy`, so the whole struct is.
+"""
+
+[[annotation]]
+id    = "de-value-0024"
+file  = "src/de/value.rs"
+lines = "352-372"
+title = "IntoDeserializer for u32, and new()"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types"]
+prereqs = ["de-value-0009"]
+body = """
+Identical in shape to the `()` pair above and to the fifteen the macro generated:
+the primitive names its deserializer through the associated type, and the
+constructor stores the value beside a `PhantomData<E>`.
+"""
+
+[[annotation]]
+id    = "de-value-0025"
+file  = "src/de/value.rs"
+lines = "373-406"
+title = "deserialize_enum — the method this whole type exists for"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "03-associated-types"
+rust_features = ["traits", "macro-rules"]
+prereqs = ["de-mod-0039", "de-mod-0068"]
+body = """
+Compare the `forward_to_deserialize_any!` list here with the one the macro
+generates: this one is missing `enum`. That is the single difference, and the
+next twenty lines are why.
+
+`deserialize_enum` receives the enum's name and the list of its variant names —
+both from the derive — and discards both with `let _ = name; let _ = variants;`.
+It cannot use them: it holds a number, and matching that number against the
+variant list is the *visitor's* job, not the deserializer's. Then it calls
+`visitor.visit_enum(self)`, handing itself over as the `EnumAccess`.
+
+That is the two-step from `de/mod.rs` playing out in the smallest possible case.
+The visitor asks its `EnumAccess` for a variant identifier, gets the `u32` back,
+and resolves it to a variant by index. Deserializing `2u32` into an enum with
+three variants gives you the third one.
+
+`deserialize_any` still calls `visit_u32`, so the same value read into a `u64`
+field is just a number. One type, two readings, chosen by which method the
+`Deserialize` impl calls.
+"""
+
+[[annotation]]
+id    = "de-value-0026"
+file  = "src/de/value.rs"
+lines = "407-417"
+title = "The identity impl again"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types"]
+prereqs = ["de-value-0014"]
+body = """
+Unchanged from every other one in the file.
+"""
+
+[[annotation]]
+id    = "de-value-0027"
+file  = "src/de/value.rs"
+lines = "418-441"
+title = "EnumAccess — variant_seed, and a Variant type that allows nothing"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "03-associated-types"
+rust_features = ["traits", "associated-types", "marker-types"]
+prereqs = ["de-mod-0069", "de-mod-0070"]
+body = """
+`type Variant = private::UnitOnly<E>`, and the body is one line:
+`seed.deserialize(self).map(private::unit_only)`.
+
+Read it right to left. `seed.deserialize(self)` runs the variant-identifier seed
+against this deserializer — the seed asks for a `u32`, gets one, and returns
+whichever variant that index names. Then `.map(private::unit_only)` pairs that
+answer with a `UnitOnly<E>`, the second half of the `(T::Value, Self::Variant)`
+tuple `variant_seed` must return.
+
+`UnitOnly` is defined in the private module at the bottom of the file and its
+name is its documentation: it implements `VariantAccess` such that `unit_variant`
+succeeds and `newtype_variant_seed`, `tuple_variant`, and `struct_variant` all
+fail with `invalid_type`. Which is exactly right — you handed over a number, and
+a number carries no payload. `Direction::North` can come out of `0u32`;
+`Message::Text(String)` cannot.
+
+Every non-composite deserializer in this file that supports enums — `u32`,
+`&str`, `String`, `Cow<str>` — uses `UnitOnly` for the same reason.
+
+`Debug` closes the section, printing the wrapped value.
+"""
