@@ -1349,3 +1349,289 @@ Identity and `Debug`, and the end of the single-value half of the file.
 Everything after this point holds an iterator or another access object, and the
 questions change from ownership to state.
 """
+
+[[annotation]]
+id    = "de-value-0059"
+file  = "src/de/value.rs"
+lines = "999-1007"
+title = "SeqDeserializer — an iterator, a counter, and a Fuse you should not skip"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "12-errors-iterators-closures"
+rust_features = ["iterators", "generic-params", "marker-types"]
+prereqs = ["de-mod-0060"]
+body = """
+Three fields, and the interesting one is the type of the first: `iter:
+iter::Fuse<I>`, not `I`.
+
+`Iterator` makes no promise about what happens after `next()` returns `None` — a
+badly behaved iterator may start yielding again. `Fuse` adds that promise, by
+latching a flag the first time it sees `None`. This matters here because a
+`Visitor` is in control of the loop and may call `next_element_seed` any number
+of times past the end, and because `end()` below calls `count()` on the same
+iterator after the visitor is done. Without `Fuse`, a resurrecting iterator could
+make the length check disagree with what the visitor saw.
+
+`count` tracks how many elements were handed out, purely so the error message in
+`end()` can say how many the `Deserialize` impl expected.
+
+`#[derive(Clone)]` here, three hundred lines after a macro was written
+specifically to avoid `derive(Clone)`. It infers `I: Clone, E: Clone`, and the
+second bound is exactly the spurious one `impl_copy_clone!` exists to prevent —
+`E` lives only in a `PhantomData`. Nobody has hit it, because cloning a
+`SeqDeserializer` is rare and `I: Clone` is the binding constraint anyway. The
+`MapDeserializer` below writes its `Clone` by hand and says why in a comment; this
+one did not. Inconsistency in a crate this careful is usually a sign that one path
+gets exercised and the other does not.
+"""
+
+[[annotation]]
+id    = "de-value-0060"
+file  = "src/de/value.rs"
+lines = "1008-1021"
+title = "new() — where the fuse gets attached"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["iterators", "generic-params"]
+prereqs = ["de-value-0059"]
+body = """
+`iter: iter.fuse()`. The caller passes any `I: Iterator`; the struct stores the
+wrapped version, so there is no way to construct a `SeqDeserializer` around an
+unfused iterator.
+
+The impl block is bounded `I: Iterator` and nothing more — `E` is unconstrained,
+because constructing does not need an error type. The next block adds `E:
+de::Error` for `end()`, which does. Splitting inherent impls by which bounds each
+method actually requires is a small courtesy that keeps `SeqDeserializer::new`
+callable in contexts where no error type has been chosen yet.
+"""
+
+[[annotation]]
+id    = "de-value-0061"
+file  = "src/de/value.rs"
+lines = "1022-1043"
+title = "end() — the check that turns a silent truncation into an error"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "12-errors-iterators-closures"
+rust_features = ["iterators", "custom-errors", "result"]
+prereqs = ["de-mod-0010"]
+body = """
+*"Check for remaining elements after passing a `SeqDeserializer` to
+`Visitor::visit_seq`."*
+
+Deserializing a three-element iterator into a `(u8, u8)` would otherwise succeed
+and drop the third element on the floor. `end()` consumes the rest of the
+iterator with `count()` and, if anything was left, reports `invalid_length`.
+
+The two arguments repay a careful read, and the source comment is there because
+they are easy to swap: the first is `self.count + remaining` — how many elements
+the *data* actually had — and the second is `ExpectedInSeq(self.count)` — how many
+the `Deserialize` impl asked for, which is however many it took before stopping.
+The resulting message reads *"invalid length 3, expected 2 elements in
+sequence"*.
+
+`end()` takes `self` by value, so calling it consumes the deserializer and the
+type system prevents using it afterward. It is public: a format that drives the
+`SeqAccess` itself, rather than through `deserialize_any`, has to call this or
+lose the check.
+"""
+
+[[annotation]]
+id    = "de-value-0062"
+file  = "src/de/value.rs"
+lines = "1044-1067"
+title = "deserialize_any — three lines, and a &mut self that needs a blanket impl"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "09-blanket-impls-and-coherence"
+rust_features = ["blanket-impls", "borrowing", "result", "macro-rules"]
+prereqs = ["de-mod-0062", "de-value-0061"]
+body = """
+```
+let v = tri!(visitor.visit_seq(&mut self));
+tri!(self.end());
+Ok(v)
+```
+
+`visit_seq` wants something implementing `SeqAccess`, and it takes it by value.
+Passing `&mut self` works because of the blanket `impl<'de, A> SeqAccess<'de> for
+&mut A where A: SeqAccess<'de>` back in `de/mod.rs` — the mutable reference is
+itself a `SeqAccess`, forwarding every call. That impl exists precisely so a
+deserializer can lend its access object out and get it back, which is what makes
+the second line possible: `self` is still owned here, so `self.end()` can run the
+length check after the visitor has finished.
+
+`tri!` is serde's own `?`. It is defined in `crate_root.rs` and expands to a plain
+`match` with `return Err(err)` — no `From::from` conversion, because no error
+type in this crate ever needs one. The commit that introduced it measured a 5.5%
+compile-time improvement over `try!` and 9% over `?`, which is the kind of number
+that only shows up in a crate compiled as often as this one.
+
+The forwarding list includes every name, `seq` and `tuple` among them: a
+`SeqDeserializer` is a sequence no matter what shape you ask it for, and asking
+for a `map` correctly fails with `invalid_type`.
+"""
+
+[[annotation]]
+id    = "de-value-0063"
+file  = "src/de/value.rs"
+lines = "1068-1081"
+title = "The identity impl, now with the iterator's bounds attached"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["where-clauses", "associated-types"]
+prereqs = ["de-value-0014"]
+body = """
+Same `type Deserializer = Self` as everywhere else, but the `where` clause now
+carries three bounds — `I: Iterator<Item = T>`, `T: IntoDeserializer<'de, E>`,
+`E: de::Error` — because the trait can only be implemented where the type is
+actually a `Deserializer`, and that is where those bounds hold.
+
+`T` is an extra type parameter on the impl that does not appear on the type. It
+is determined by `I::Item`, and naming it lets the bound `T: IntoDeserializer` be
+written without an associated-type path. `where I: Iterator, I::Item:
+IntoDeserializer<'de, E>` would say the same thing; the extra parameter is
+older style and reads slightly better.
+"""
+
+[[annotation]]
+id    = "de-value-0064"
+file  = "src/de/value.rs"
+lines = "1082-1106"
+title = "SeqAccess — where every element becomes a deserializer of its own"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "09-blanket-impls-and-coherence"
+rust_features = ["iterators", "traits", "option", "associated-types"]
+prereqs = ["de-mod-0061", "de-value-0009"]
+body = """
+This is the recursion at the center of the module, and it is four lines:
+
+```
+Some(value) => {
+    self.count += 1;
+    seed.deserialize(value.into_deserializer()).map(Some)
+}
+```
+
+Pull an item off the iterator, turn it into a deserializer with the very trait
+this file is about, and run the seed against it. `T: IntoDeserializer<'de, E>` is
+what makes `SeqDeserializer` work for `Vec<u32>`, `Vec<String>`, and
+`Vec<Vec<u32>>` alike — in the last case the inner `Vec` becomes another
+`SeqDeserializer`, and the nesting continues as deep as the data.
+
+`.map(Some)` is the idiom for `Result<V, E> -> Result<Option<V>, E>`, passing the
+constructor as a function.
+
+`size_hint` forwards to `size_hint::from_bounds`, which returns `Some(n)` only
+when the iterator's lower and upper bounds are equal — an exactly-known length —
+and `None` otherwise. That is deliberately conservative: a `Deserialize` impl uses
+this hint to pre-allocate, so an over-estimate from an unbounded iterator would
+be a memory-exhaustion vector. Serde would rather reallocate than trust a guess.
+"""
+
+[[annotation]]
+id    = "de-value-0065"
+file  = "src/de/value.rs"
+lines = "1107-1118"
+title = "ExpectedInSeq — a private struct so one error message can say \"1 element\""
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "12-errors-iterators-closures"
+rust_features = ["traits", "custom-errors", "trait-objects"]
+prereqs = ["de-mod-0017"]
+body = """
+A newtype around a `usize` whose only purpose is to implement `Expected`, the
+trait that exists because `Display` was already taken.
+
+The body is an English-grammar special case: `"1 element in sequence"` singular,
+`"{} elements in sequence"` plural. Twelve lines of code so that an error message
+does not read "1 elements".
+
+Note the `if` arm uses `write_str` with a literal while the `else` uses `write!`.
+`write_str` skips the formatting machinery entirely — no argument list, no
+`Arguments` struct — which for a fixed string is both faster and smaller. Serde
+does this consistently, and it is the reason `Unexpected`'s `Display` impl in
+`de/mod.rs` looks the way it does.
+"""
+
+[[annotation]]
+id    = "de-value-0066"
+file  = "src/de/value.rs"
+lines = "1119-1132"
+title = "Debug — bounded on I: Debug, and silently absent otherwise"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["where-clauses", "generic-params"]
+prereqs = ["de-value-0059"]
+body = """
+`impl<I, E> Debug for SeqDeserializer<I, E> where I: Debug`. No bound on `E`,
+which is the same care `impl_copy_clone!` takes, applied by hand.
+
+The consequence is that a `SeqDeserializer` over an iterator that is not `Debug`
+— a `Map` with a closure, for instance — simply has no `Debug` impl, and the
+failure shows up as "the trait bound is not satisfied" at the call site rather
+than anywhere near here. That is the normal cost of conditional impls, and it is
+why the bound is kept as weak as it can be.
+"""
+
+[[annotation]]
+id    = "de-value-0067"
+file  = "src/de/value.rs"
+lines = "1133-1147"
+title = "Vec<T> → SeqDeserializer, and the associated-type path that names its iterator"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "03-associated-types"
+rust_features = ["associated-types", "iterators", "cfg"]
+prereqs = ["de-value-0064"]
+body = """
+`type Deserializer = SeqDeserializer<<Self as IntoIterator>::IntoIter, E>`.
+
+Read the associated-type path: "whatever `Vec<T>`'s `IntoIterator` impl says its
+iterator type is". Writing `vec::IntoIter<T>` would have worked too, but the
+qualified path is immune to the concrete type's name changing and does not
+require importing it. `<Self as IntoIterator>` is the fully-disambiguated form,
+needed because `Self` might implement several traits with an `IntoIter`
+associated type.
+
+`T: IntoDeserializer<'de, E>` propagates the recursion: `Vec<Vec<String>>` works
+because `Vec<String>` implements the trait via this same impl.
+
+This is also the impl that catches `Vec<u8>` and makes it a sequence rather than
+a byte blob — see the `&[u8]` section above for why that asymmetry cannot be
+fixed without specialization.
+"""
+
+[[annotation]]
+id    = "de-value-0068"
+file  = "src/de/value.rs"
+lines = "1148-1177"
+title = "BTreeSet and HashSet — the same body, with the bounds their containers demand"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "04-generic-bounds"
+rust_features = ["where-clauses", "cfg", "iterators"]
+prereqs = ["de-value-0067"]
+body = """
+Two more sequence sources, and the differences between them are entirely in the
+`where` clauses.
+
+`BTreeSet<T>` needs `T: Eq + Ord`, because that is what the container requires
+to exist. `HashSet<T, S>` needs `T: Eq + Hash` plus `S: BuildHasher` — the
+hasher parameter has to be named and bounded even though the impl never touches
+it, since `HashSet<T, S>` is not a valid type otherwise. These bounds are not
+needed to *iterate*; they are needed to *mention the type*, and forgetting that
+distinction is a common source of confusion when writing generic impls over
+collections.
+
+The `cfg` gates differ too: `BTreeSet` lives in `alloc`, `HashSet` only in `std`.
+That split runs through the whole crate.
+
+One consequence worth stating plainly: deserializing a struct from a set means
+the element order is whatever the container's iteration order is. For `BTreeSet`
+that is sorted and deterministic; for `HashSet` it is neither. Feeding a
+`HashSet` to a `Deserialize` that cares about position — a tuple, say — gives a
+different answer on different runs.
+"""
