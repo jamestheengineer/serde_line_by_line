@@ -8,8 +8,10 @@ Along the way it teaches Rust: lifetimes, trait design, associated types,
 generic bounds, `macro_rules!`, and `no_std` engineering, using one of the most
 carefully written crates in the ecosystem as the worked example.
 
-> **Status: `ser/mod.rs` complete** — all 2,010 lines annotated, and the coverage
-> gate now hard-fails on any regression in that file. See **[PLAN.md](PLAN.md)** for the roadmap and
+> **Status: phase 4 complete — `ser/` and `de/value.rs` done, the crate is
+> two-thirds annotated.** Seven files are at 100% and the coverage gate
+> hard-fails on any regression in them. Remaining: `de/impls.rs` and the
+> plumbing files. See **[PLAN.md](PLAN.md)** for the roadmap and
 > **[docs/decisions.md](docs/decisions.md)** for the architecture calls.
 >
 > ```
@@ -21,7 +23,7 @@ carefully written crates in the ecosystem as the worked example.
 >
 > ```
 > $ cargo xtask coverage
-> TOTAL                        12037       29       2   0.2%
+> TOTAL                        12037     7966     310  66.2%
 > ```
 
 ---

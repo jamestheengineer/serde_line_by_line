@@ -464,7 +464,7 @@ The matcher has four fixed fragments and a trailing catch-all:
   `#[doc = "..."]` is just an attribute taking a literal, and two `#[doc]`
   attributes concatenate into consecutive lines. Hence the split into
   `#[doc = "A deserializer holding"]` and `#[doc = $doc]`, with the invocation
-  passing `"a \\`bool\\`."` — the sentence is assembled across two attributes.
+  passing ``"a `bool`."`` — the sentence is assembled across two attributes.
 - `$name:ident` is the generated type name, `BoolDeserializer`.
 - `$method:ident` is the `Visitor` method to call, `visit_bool`.
 - `$($cast:tt)*` is the reason this macro is not four parameters. It captures
@@ -575,7 +575,7 @@ rust_features = ["macro-rules", "marker-types"]
 prereqs = ["de-value-0016"]
 body = """
 Ninety lines that reproduce, character for character, what
-`primitive_deserializer!(u32, "a \\`u32\\`.", U32Deserializer, visit_u32)` would
+``primitive_deserializer!(u32, "a `u32`.", U32Deserializer, visit_u32)`` would
 have produced — plus one impl it would not have: `EnumAccess`.
 
 This is the recurring shape of the boundary between generated and hand-written
@@ -2132,4 +2132,362 @@ body = """
 `"1 element in map"` / `"{} elements in map"`. A copy of `ExpectedInSeq` with the
 noun replaced — twelve more lines to keep error messages grammatical, and the
 second of the two private `Expected` impls in this file.
+"""
+
+[[annotation]]
+id    = "de-value-0088"
+file  = "src/de/value.rs"
+lines = "1574-1605"
+title = "BTreeMap and HashMap → MapDeserializer"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["where-clauses", "associated-types", "cfg"]
+prereqs = ["de-value-0072", "de-value-0068"]
+body = """
+The map counterparts of the `Vec`/`BTreeSet`/`HashSet` impls, and the same
+pattern: `<Self as IntoIterator>::IntoIter` names the iterator type, and both `K`
+and `V` must themselves be convertible.
+
+The bounds tell you which requirements come from where. `K: Eq + Ord` for
+`BTreeMap` and `K: Eq + Hash`, `S: BuildHasher` for `HashMap` are the containers'
+own requirements — needed to name the type, not to iterate it. `K:
+IntoDeserializer` and `V: IntoDeserializer` are this module's.
+
+`MapDeserializer<'de, ...>` carries the lifetime in its type, so unlike the
+`SeqDeserializer` impls above, these projections are pinned to one `'de`. It is
+inferred at the call site from whatever `Deserialize` the result feeds.
+
+This is the impl behind the common trick of deserializing a struct out of a
+`HashMap<String, String>` you built from query parameters or environment
+variables — build the map, call `.into_deserializer()`, call
+`T::deserialize`. Note the caveat from the set impls applies here too: with
+`HashMap` the entry order is not deterministic, which matters if the target
+`Deserialize` is order-sensitive.
+"""
+
+[[annotation]]
+id    = "de-value-0089"
+file  = "src/de/value.rs"
+lines = "1606-1620"
+title = "MapAccessDeserializer — the map half of the access adapters"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "generic-params"]
+prereqs = ["de-value-0069"]
+body = """
+The same one-field wrapper as `SeqAccessDeserializer`, for `MapAccess`. You are
+inside `visit_map`, you hold the cursor, and something wants a `Deserializer`.
+
+This is the more heavily used of the two, because it is what makes untagged and
+internally tagged enums work: those need to hand the same map to several
+candidate `Deserialize` impls, and each attempt needs a `Deserializer` to start
+from.
+"""
+
+[[annotation]]
+id    = "de-value-0090"
+file  = "src/de/value.rs"
+lines = "1621-1652"
+title = "deserialize_enum on a map — the externally tagged representation"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "03-associated-types"
+rust_features = ["traits", "associated-types"]
+prereqs = ["de-value-0070", "de-mod-0068"]
+body = """
+`SeqAccessDeserializer` had one method. This one has two, and the extra is
+`deserialize_enum` — which is the whole reason to reach for this type.
+
+An externally tagged enum in JSON is a map with exactly one entry:
+`{"Move": {"x": 1, "y": 2}}`. The key is the variant name, the value is the
+payload. So when a `Deserialize` impl asks a map-shaped deserializer for an enum,
+the sensible answer is not "type error" but "here, read the key as the variant
+and the value as its contents" — and that is `visitor.visit_enum(self)`, with
+`self` acting as the `EnumAccess` below.
+
+Note the underscore parameter names, `_name` and `_variants`, where the string
+deserializers used `let _ = name;` inside the body. Same effect, different
+spelling — the file is not consistent, and neither convention is wrong.
+
+`enum` is duly absent from the forwarding list.
+"""
+
+[[annotation]]
+id    = "de-value-0091"
+file  = "src/de/value.rs"
+lines = "1653-1663"
+title = "Identity, with A::Error again"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["associated-types"]
+prereqs = ["de-value-0071"]
+body = """
+Unchanged from `SeqAccessDeserializer`'s.
+"""
+
+[[annotation]]
+id    = "de-value-0092"
+file  = "src/de/value.rs"
+lines = "1664-1682"
+title = "variant_seed — the first key is the variant, the rest of the map is the payload"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "03-associated-types"
+rust_features = ["traits", "associated-types", "pattern-matching", "custom-errors"]
+prereqs = ["de-value-0090", "de-mod-0069"]
+body = """
+Five lines that implement externally tagged enum decoding:
+
+```
+match tri!(self.map.next_key_seed(seed)) {
+    Some(key) => Ok((key, private::map_as_enum(self.map))),
+    None => Err(de::Error::invalid_type(de::Unexpected::Map, &"enum")),
+}
+```
+
+`next_key_seed(seed)` runs the variant-identifier seed against the map's first
+key, producing the variant. Then `self.map` — advanced past the key, sitting on
+the value — is wrapped in `MapAsEnum` and returned as the `VariantAccess`, so
+that whatever reads the payload reads the map's value.
+
+The `None` arm is the empty-map case, and the error it produces is exactly right:
+*"invalid type: map, expected enum"*. An empty map is not a variant of anything.
+
+`type Variant = private::MapAsEnum<A>` rather than `UnitOnly`, and that is the
+difference between the string deserializers and this one. A string names a
+variant and carries nothing; a map entry names a variant *and* carries its
+value, so all four `VariantAccess` methods can succeed.
+
+Note this consumes only the *first* entry. A two-entry map handed to an enum
+reads the first as the variant and never looks at the second — the value
+deserializer will see the payload it expects and stop. Formats are expected to
+reject that upstream, and `serde_json` does.
+"""
+
+[[annotation]]
+id    = "de-value-0093"
+file  = "src/de/value.rs"
+lines = "1683-1696"
+title = "EnumAccessDeserializer — the third and simplest adapter"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits"]
+prereqs = ["de-value-0089"]
+body = """
+`SeqAccess`, `MapAccess`, and now `EnumAccess`, each with a wrapper turning it
+into a `Deserializer`. The set is complete, and this is the smallest of the
+three.
+
+`VariantAccess` gets no wrapper, which is worth noticing. It is the only access
+trait that is not a cursor over a collection — it is a single value in a known
+shape — so there is nothing to hand along.
+"""
+
+[[annotation]]
+id    = "de-value-0094"
+file  = "src/de/value.rs"
+lines = "1697-1716"
+title = "One method, no special cases"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "macro-rules"]
+prereqs = ["de-value-0093"]
+body = """
+`visitor.visit_enum(self.access)` and a forwarding list containing every name,
+`enum` included — because the wrapped value already *is* an enum access, so the
+hint needs no interception. Ask this deserializer for a `u32` and you get
+`visit_enum`, and the visitor reports the type mismatch.
+"""
+
+[[annotation]]
+id    = "de-value-0095"
+file  = "src/de/value.rs"
+lines = "1717-1728"
+title = "The last identity impl in the file"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["associated-types"]
+prereqs = ["de-value-0091"]
+body = """
+The thirtieth or so `fn into_deserializer(self) -> Self { self }`. Every one of
+them exists because a blanket impl over `Deserializer` would violate coherence —
+which is the single most consequential language rule shaping this file.
+"""
+
+[[annotation]]
+id    = "de-value-0096"
+file  = "src/de/value.rs"
+lines = "1729-1749"
+title = "mod private — the same visibility trick as the rest of the crate"
+kind  = "plumbing"
+tracks = ["reference", "course"]
+course_unit = "11-no-std-and-cfg"
+rust_features = ["visibility", "modules", "marker-types"]
+prereqs = ["de-value-0027"]
+body = """
+A private module inside a public one. The items in it are `pub`, so the enclosing
+module can name them in public signatures — `type Variant = private::UnitOnly<E>`
+— but the module itself is not reachable from outside the crate, so downstream
+code can see the types exist and can never name them.
+
+That is deliberate. `UnitOnly` and `MapAsEnum` appear in the public API as
+associated types, which means users' code will pass values of them around, but
+nobody outside this file should construct one or match on one. The pattern is the
+standard Rust answer to "public but unnameable", and serde uses it everywhere.
+
+`UnitOnly<E>` is the now-familiar zero-sized `PhantomData` holder, and
+`unit_only` is a free function returning `(t, UnitOnly { .. })` — the exact tuple
+shape `variant_seed` must return, which is why every call site reads
+`.map(private::unit_only)`.
+"""
+
+[[annotation]]
+id    = "de-value-0097"
+file  = "src/de/value.rs"
+lines = "1750-1794"
+title = "VariantAccess for UnitOnly — one Ok and three refusals"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "02-traits-and-supertraits"
+rust_features = ["traits", "custom-errors"]
+prereqs = ["de-mod-0070", "de-value-0096"]
+body = """
+The type whose name is its behavior, spelled out. `unit_variant` returns
+`Ok(())`. The other three return `invalid_type(Unexpected::UnitVariant, &"...")`
+with the expected shape named: `"newtype variant"`, `"tuple variant"`,
+`"struct variant"`.
+
+This is what backs every `EnumAccess` impl earlier in the file whose input was a
+bare scalar. `#[derive(Deserialize)] enum Direction { North, South }` deserialized
+from `"North"` goes: `deserialize_enum` → `visit_enum` → `variant_seed` returns
+the variant plus a `UnitOnly` → the derived code calls `unit_variant()` → `Ok`.
+
+The same code against `enum Message { Text(String) }` deserialized from `"Text"`
+goes as far as `newtype_variant_seed` and produces *"invalid type: unit variant,
+expected newtype variant"*. A precise message for a real mistake — you gave a
+name where a name-and-payload was needed — assembled from a zero-sized type and
+three constant strings.
+
+Every seed and visitor parameter is named with a leading underscore because none
+of them is used. The methods still have to take them; the trait's signature is
+fixed.
+"""
+
+[[annotation]]
+id    = "de-value-0098"
+file  = "src/de/value.rs"
+lines = "1795-1838"
+title = "MapAsEnum — where the payload actually gets read"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "03-associated-types"
+rust_features = ["traits", "associated-types"]
+prereqs = ["de-value-0092", "de-value-0097"]
+body = """
+`UnitOnly`'s opposite: all four methods succeed, and every one of them reads the
+map's pending value.
+
+- `unit_variant` → `self.map.next_value()`, with the value deserialized as `()`.
+  So `{"North": null}` works, and `{"North": 5}` fails with a type error from
+  `()`'s own `Deserialize` impl. The check comes for free.
+- `newtype_variant_seed` → `next_value_seed(seed)`. The payload is one value; the
+  seed reads it directly.
+- `tuple_variant` → `next_value_seed(SeedTupleVariant { len, visitor })`.
+- `struct_variant` → `next_value_seed(SeedStructVariant { visitor })`, with the
+  field-name list discarded — the visitor already has it.
+
+The last two are the interesting ones, and the next two structs are why. A
+`VariantAccess` receives a `Visitor` but `next_value_seed` requires a
+`DeserializeSeed`; the two seeds bridge that gap.
+
+`mut self` on every method, because reading a value advances the map. Taking
+`self` by value and declaring the binding mutable — rather than taking `&mut
+self` — is what enforces that a `VariantAccess` is used exactly once.
+"""
+
+[[annotation]]
+id    = "de-value-0099"
+file  = "src/de/value.rs"
+lines = "1839-1857"
+title = "SeedTupleVariant — a seed whose state is the visitor it will call"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "03-associated-types"
+rust_features = ["traits", "associated-types"]
+prereqs = ["de-mod-0023", "de-value-0098"]
+body = """
+`DeserializeSeed` is the trait for "deserialization that needs something carried
+in", and here the thing carried in is a `Visitor` and a length.
+
+`type Value = V::Value` — the seed produces whatever the visitor produces.
+`deserialize` does one thing: `deserializer.deserialize_tuple(self.len,
+self.visitor)`.
+
+Read it as an adapter. `MapAsEnum::tuple_variant` has a visitor and needs a seed;
+this type *is* a seed and *has* a visitor; the conversion is one method call
+deferred by one struct. Nine lines, no allocation, no dispatch — the closure you
+would write in a language with closures over the right types, spelled as a struct
+because the trait method is generic over `D` and closures cannot be.
+
+This is the clearest small example in the crate of why `DeserializeSeed` exists
+at all.
+"""
+
+[[annotation]]
+id    = "de-value-0100"
+file  = "src/de/value.rs"
+lines = "1858-1875"
+title = "SeedStructVariant — the same adapter, minus the length"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types"]
+prereqs = ["de-value-0099"]
+body = """
+Identical to `SeedTupleVariant` with the `len` field removed and
+`deserialize_map` in place of `deserialize_tuple`.
+
+Note it calls `deserialize_map`, not `deserialize_struct` — the field-name list
+that `deserialize_struct` would want was discarded back in `MapAsEnum`, and the
+visitor holds it anyway. A struct variant's payload is read as a plain map, and
+the visitor sorts the fields out.
+"""
+
+[[annotation]]
+id    = "de-value-0101"
+file  = "src/de/value.rs"
+lines = "1876-1895"
+title = "Pair — twenty lines that removed two type parameters from a public API"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "03-associated-types"
+rust_features = ["traits", "associated-types", "generic-params", "zero-cost"]
+prereqs = ["de-value-0072"]
+body = """
+The last item in the file, and the one referenced from its second import line.
+
+*"Avoid having to restate the generic types on `MapDeserializer`. The
+`Iterator::Item` contains enough information to figure out K and V."*
+
+Without it, `MapDeserializer` would have to be `MapDeserializer<'de, I, K, V, E>`
+with a `where I: Iterator<Item = (K, V)>` bound, and every user naming the type
+would repeat all five. With it, the key and value types are *computed* from
+`I::Item` by trait resolution, and the public type has three parameters.
+
+The mechanism is three items:
+
+- `trait Pair { type First; type Second; fn split(self) -> (First, Second); }`
+- `impl<A, B> Pair for (A, B)` — the only impl, and `split` is the identity.
+- `pub type First<T> = <T as Pair>::First;` and the same for `Second`.
+
+The aliases are what make the bounds readable. `First<I::Item>:
+IntoDeserializer<'de, E>` in a `where` clause is a projection through a
+projection, and writing it out longhand — `<<I as Iterator>::Item as
+Pair>::First: IntoDeserializer<'de, E>` — is how it would look without them. The
+type aliases are pure notation; they generate nothing.
+
+At runtime none of this exists. `split` on a tuple compiles to nothing, the
+associated types are resolved during type checking, and a `MapDeserializer` over
+a `HashMap<String, u32>` has the same machine code it would have had with the
+parameters written out. That is what "zero-cost abstraction" means concretely,
+and it is a good note to end the file on.
 """
