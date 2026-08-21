@@ -696,3 +696,656 @@ Every non-composite deserializer in this file that supports enums — `u32`,
 
 `Debug` closes the section, printing the wrapped value.
 """
+
+[[annotation]]
+id    = "de-value-0028"
+file  = "src/de/value.rs"
+lines = "442-449"
+title = "StrDeserializer<'a, E> — the lifetime that is not 'de"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["lifetimes", "lifetime-de", "marker-types", "borrowing"]
+prereqs = ["de-mod-0050", "de-mod-0051"]
+body = """
+Stop on the lifetime name. This struct borrows a `&'a str`, and `'a` is a fresh
+parameter with no relationship to `'de` — the impl below reads `impl<'de, 'a, E>
+Deserializer<'de> for StrDeserializer<'a, E>`, two independent lifetimes.
+
+That is the whole design decision of this type, and it dictates everything else
+about it. Because `'a` and `'de` are unrelated, the compiler must assume the
+borrowed string could die before `'de` ends. So the data cannot be handed out as
+`&'de str`, so `deserialize_any` must call `visit_str` and not
+`visit_borrowed_str` — the transient flavor, which promises the visitor nothing
+beyond the duration of the call and forces it to copy if it wants to keep the
+data.
+
+The next section defines `BorrowedStrDeserializer<'de, E>`, which is the same
+struct with the two lifetimes unified. Reading them back to back is the clearest
+demonstration in the crate of what `'de` actually buys, because everything else
+about the two types is identical.
+"""
+
+[[annotation]]
+id    = "de-value-0029"
+file  = "src/de/value.rs"
+lines = "450-451"
+title = "impl_copy_clone!(StrDeserializer<'de>) — the token that is not the lifetime"
+kind  = "macro-use"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "macro-hygiene", "lifetimes"]
+macro_def = "de-value-0003"
+prereqs = ["de-value-0003"]
+body = """
+The lifetime arm, and worth a second look: the struct is declared with `'a`, but
+the macro is called with `'de`. Neither name survives — `$lifetime:tt` captures
+one token and the transcriber re-emits it as the impl's own binder, so the
+expansion declares `impl<'de, E> Copy for StrDeserializer<'de, E>`, which is the
+same impl as `impl<'a, E> Copy for StrDeserializer<'a, E>`. Lifetime parameter
+names are local to the item that binds them.
+
+It reads like a bug and is not one. Compare `impl_copy_clone!(BytesDeserializer<'a>)`
+below, which passes `'a` for a struct that also declares `'a`; the file is
+inconsistent about which name it passes precisely because it cannot matter.
+"""
+
+[[annotation]]
+id    = "de-value-0030"
+file  = "src/de/value.rs"
+lines = "452-472"
+title = "IntoDeserializer for &'a str — where 'a comes from"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["lifetimes", "associated-types", "borrowing"]
+prereqs = ["de-value-0028"]
+body = """
+`type Deserializer = StrDeserializer<'a, E>` — the lifetime of the input
+reference becomes the lifetime of the deserializer, threaded through the
+associated type. This is the impl that runs in the module's opening doctest when
+`s.into_deserializer()` is called on a `&str` inside `from_str`.
+
+And it is the reason `'a` cannot be `'de`. `FromStr::from_str` receives a `&str`
+borrowed for some caller-chosen region and must return a `Setting` that outlives
+it. If this impl produced a `'de`-borrowing deserializer, the derived
+`Deserialize` impl would be free to keep references into that string, and
+`from_str` could return a value pointing at freed memory. The transient
+`visit_str` path is what makes the doctest sound.
+"""
+
+[[annotation]]
+id    = "de-value-0031"
+file  = "src/de/value.rs"
+lines = "473-505"
+title = "visit_str, and the same enum trapdoor as u32"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["traits", "lifetime-de", "macro-rules"]
+prereqs = ["de-value-0025", "de-mod-0050"]
+body = """
+`deserialize_any` calls `visit_str(self.value)`. Passing a `&'a str` to a method
+that takes `&str` — with the shortest lifetime the call needs — is what makes this
+compile despite `'a` and `'de` being unrelated. A visitor that wants to keep the
+string will have to allocate.
+
+`deserialize_enum` is the `u32` story again, and it is why every string
+deserializer in this file is written longhand rather than generated: identify a
+variant by name instead of index. `serde_json` reaching an externally tagged
+enum ends up here in spirit — the variant name is a string, the visitor matches
+it against the `variants` list it already knows, and this deserializer never sees
+that list, discarding it with `let _ =`.
+
+Note the ordering difference from `U32Deserializer`: here the
+`forward_to_deserialize_any!` block comes *last*, after both real methods, where
+in the `u32` section it came first. Nothing depends on it — a macro invocation in
+item position expands wherever it sits — and the inconsistency is just how the
+file grew.
+"""
+
+[[annotation]]
+id    = "de-value-0032"
+file  = "src/de/value.rs"
+lines = "506-541"
+title = "Identity, EnumAccess, Debug — the tail every section repeats"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types"]
+prereqs = ["de-value-0027"]
+body = """
+Three impls that are, modulo the type name, exactly the ones from the `u32`
+section: `into_deserializer` returning `self`, `variant_seed` pairing the
+identifier with `UnitOnly`, and a `Debug` printing the value.
+
+`UnitOnly` is right here for the same reason as before. A variant named by a
+bare string has no payload, so `Direction::North` works and `Message::Text(String)`
+gets `invalid_type`.
+"""
+
+[[annotation]]
+id    = "de-value-0033"
+file  = "src/de/value.rs"
+lines = "542-550"
+title = "BorrowedStrDeserializer<'de, E> — the same struct, with the lifetimes joined"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["lifetime-de", "lifetimes", "borrowing", "zero-cost"]
+prereqs = ["de-value-0028"]
+body = """
+*"A deserializer holding a `&str` with a lifetime tied to another
+deserializer."* One field of type `&'de str` — the same shape as
+`StrDeserializer`, with `'a` replaced by `'de`, and that substitution is the
+entire difference between the two types.
+
+"Tied to another deserializer" is the doc comment naming the real use. You are
+inside a format implementation, you hold a `&'de str` that points into the input
+buffer the caller lent you for `'de`, and you need to pass it on to a nested
+`Deserialize` without copying. Handing it to this type preserves the borrow;
+handing it to `StrDeserializer` would throw it away.
+
+Compare the two `Deserializer` impls directly: `for StrDeserializer<'a, E>` binds
+`'de` freshly, `for BorrowedStrDeserializer<'de, E>` reuses the struct's own.
+When the struct's lifetime *is* `'de`, `visit_borrowed_str` becomes typeable, and
+a `Deserialize` impl can return a `&'de str` that borrows the input rather than
+owning a copy. That is zero-copy deserialization, in the smallest example the
+crate contains.
+"""
+
+[[annotation]]
+id    = "de-value-0034"
+file  = "src/de/value.rs"
+lines = "551-552"
+title = "BorrowedStrDeserializer — Copy and Clone"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-rules"]
+macro_def = "de-value-0003"
+prereqs = ["de-value-0029"]
+body = """
+The lifetime arm again, this time with the token matching the struct's own name.
+"""
+
+[[annotation]]
+id    = "de-value-0035"
+file  = "src/de/value.rs"
+lines = "553-562"
+title = "new() — documented, and the only way to get one of these"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "09-blanket-impls-and-coherence"
+rust_features = ["lifetime-de", "visibility", "blanket-impls"]
+prereqs = ["de-value-0030"]
+body = """
+Two things are different here from every other `new` in the file, and the second
+is the important one.
+
+First, this constructor has a real doc comment instead of
+`#[allow(missing_docs)]`. It is a constructor a format author is expected to call
+deliberately, not an incidental part of a generated block.
+
+Second — look for `impl IntoDeserializer for &'de str` producing a
+`BorrowedStrDeserializer`. It does not exist, and it cannot. The impl above
+already claims `&'a str` for `StrDeserializer`, and a second impl of the same
+trait for the same type is a coherence error no matter how the lifetimes are
+written; lifetimes are erased before overlap checking, so the two would be
+indistinguishable.
+
+The consequence is a real asymmetry in the API. `"hello".into_deserializer()`
+always gives you the transient one. To get the borrowing one you must name it:
+`BorrowedStrDeserializer::new(s)`. Zero-copy is opt-in here, and the opt-in is a
+constructor call, because the trait slot was already taken.
+"""
+
+[[annotation]]
+id    = "de-value-0036"
+file  = "src/de/value.rs"
+lines = "563-595"
+title = "visit_borrowed_str — one method name, and the whole point of 'de"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["lifetime-de", "borrowing", "zero-cost"]
+prereqs = ["de-value-0031", "de-mod-0051"]
+body = """
+Set this beside the `StrDeserializer` impl thirty lines up. Same `type Error`,
+same `deserialize_enum`, same forwarding list. One token differs:
+`visit_borrowed_str` instead of `visit_str`.
+
+`visit_borrowed_str` takes `&'de str` and is the promise "this reference lives as
+long as the deserialization, keep it if you want". `Deserialize for &'de str`
+implements exactly one method — that one — which is why `#[derive(Deserialize)]`
+on a struct with a `&'a str` field works against `serde_json::from_str` and fails
+against `from_reader`. The reader has no buffer to lend.
+
+The default `visit_borrowed_str` in `Visitor` forwards to `visit_str`, so a
+visitor that does not care about borrowing sees no difference and pays nothing.
+The borrow is offered, not imposed. That default is what lets serde have both
+behaviors without doubling every visitor.
+"""
+
+[[annotation]]
+id    = "de-value-0037"
+file  = "src/de/value.rs"
+lines = "596-631"
+title = "The same three closing impls"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits"]
+prereqs = ["de-value-0032"]
+body = """
+Identity `IntoDeserializer`, `EnumAccess` via `UnitOnly`, `Debug`. Identical to
+the `StrDeserializer` tail; borrowing changes what the visitor may keep, not how
+enums are accessed.
+"""
+
+[[annotation]]
+id    = "de-value-0038"
+file  = "src/de/value.rs"
+lines = "632-641"
+title = "StringDeserializer — the owned string, and the first cfg-gated type"
+kind  = "cfg-gate"
+tracks = ["reference", "course"]
+course_unit = "11-no-std-and-cfg"
+rust_features = ["cfg", "no-std", "ownership"]
+prereqs = ["de-value-0028"]
+body = """
+`String` requires an allocator, so the type and every impl on it carry
+`#[cfg(any(feature = "std", feature = "alloc"))]`. Eight separate items below
+repeat that attribute; there is no way to gate a group of items in Rust short of
+wrapping them in a module, which would change their paths.
+
+The third string deserializer, and the three now cover the full ownership
+spectrum the data model recognizes: `StrDeserializer` lends briefly,
+`BorrowedStrDeserializer` lends for `'de`, `StringDeserializer` gives away. They
+map one-to-one onto `visit_str`, `visit_borrowed_str`, and `visit_string`, which
+is not a coincidence — the trio of visitor methods exists to name exactly these
+three situations.
+"""
+
+[[annotation]]
+id    = "de-value-0039"
+file  = "src/de/value.rs"
+lines = "642-651"
+title = "Clone written by hand — because this one really does need to clone"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["ownership", "marker-types"]
+prereqs = ["de-value-0003"]
+body = """
+No `impl_copy_clone!` here. `String` owns a heap allocation, so the struct is not
+`Copy`, so the `*self` body that macro emits would not compile.
+
+But the bound problem the macro was written to solve is still present, so the
+impl is still written by hand rather than derived: `impl<E> Clone for
+StringDeserializer<E>` with no `E: Clone`, cloning the `String` and constructing
+a fresh `PhantomData`. `#[derive(Clone)]` would have produced the same body with
+a bound nobody needs.
+
+Two different reasons to avoid `derive`, one type apart. The macro handles the
+`Copy` case; this handles the owning case; both exist because `derive(Clone)`
+infers bounds from type parameters instead of from fields.
+"""
+
+[[annotation]]
+id    = "de-value-0040"
+file  = "src/de/value.rs"
+lines = "652-675"
+title = "IntoDeserializer for String, and new()"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["ownership", "associated-types", "cfg"]
+prereqs = ["de-value-0009"]
+body = """
+`fn into_deserializer(self)` takes the `String` by value and moves it into the
+struct — no lifetime parameter anywhere, because there is nothing borrowed. This
+is the impl that makes `map.into_iter()` over a `HashMap<String, _>` usable as a
+`MapDeserializer` later in the file.
+"""
+
+[[annotation]]
+id    = "de-value-0041"
+file  = "src/de/value.rs"
+lines = "676-709"
+title = "visit_string — handing over the allocation instead of a view of it"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["ownership", "traits"]
+prereqs = ["de-mod-0052", "de-value-0036"]
+body = """
+The third of the three, and the one that gives away ownership.
+`visitor.visit_string(self.value)` moves the `String` out of `self` — legal
+because `deserialize_any` takes `self` by value, so the deserializer is consumed
+and there is nothing left to invalidate.
+
+The payoff is a `Deserialize for String` that takes the allocation as-is rather
+than copying out of a `&str`. `Visitor::visit_string`'s default forwards to
+`visit_str` and drops the `String`, so a visitor that only wants a view still
+works; a visitor that wants ownership overrides it and saves a memcpy plus a
+malloc.
+
+`deserialize_enum` and the forwarding list are unchanged from the two sections
+above.
+"""
+
+[[annotation]]
+id    = "de-value-0042"
+file  = "src/de/value.rs"
+lines = "710-749"
+title = "The closing three, cfg-gated one at a time"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "cfg"]
+prereqs = ["de-value-0037"]
+body = """
+Identity, `EnumAccess` with `UnitOnly`, `Debug` — each carrying its own
+`#[cfg(any(feature = "std", feature = "alloc"))]`. Eight attributes in this
+section say the same thing, which is what gating a type rather than a method
+costs.
+"""
+
+[[annotation]]
+id    = "de-value-0043"
+file  = "src/de/value.rs"
+lines = "750-758"
+title = "CowStrDeserializer — one type for both halves of the ownership question"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["ownership", "borrowing", "cfg", "pattern-matching"]
+prereqs = ["de-value-0038"]
+body = """
+`Cow<'a, str>` is "either a borrow or an allocation, decided at runtime", and the
+deserializer holding one has to defer the same decision to runtime. Every other
+type in this file knows statically which visitor method it will call; this one
+picks with a `match`.
+
+The reason it exists is escaping: a JSON parser reading `"a\\nb"` cannot hand out
+a borrow of the input, because the input contains a backslash and an `n` where
+the value contains a newline. The same parser reading `"ab"` can. A format that
+wants zero-copy where possible and allocation only where necessary returns a
+`Cow`, and this is the deserializer that consumes it.
+"""
+
+[[annotation]]
+id    = "de-value-0044"
+file  = "src/de/value.rs"
+lines = "759-768"
+title = "Clone, hand-written again"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["ownership", "marker-types"]
+prereqs = ["de-value-0039"]
+body = """
+Same reasoning as `StringDeserializer`: cloning a `Cow` may allocate, so the
+`*self` macro does not apply, and `derive` would add `E: Clone`. Cloning a
+`Cow::Borrowed` copies the pointer; cloning a `Cow::Owned` copies the string.
+"""
+
+[[annotation]]
+id    = "de-value-0045"
+file  = "src/de/value.rs"
+lines = "769-792"
+title = "IntoDeserializer for Cow<'a, str>, and new()"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["associated-types", "lifetimes", "cfg"]
+prereqs = ["de-value-0030"]
+body = """
+The borrow lifetime rides through into the deserializer type, exactly as it did
+for `&'a str`. Note there is no coherence conflict with the `&'a str` impl —
+`Cow<'a, str>` is a different type — so unlike the borrowed-string case, this one
+does get a trait entry point.
+"""
+
+[[annotation]]
+id    = "de-value-0046"
+file  = "src/de/value.rs"
+lines = "793-829"
+title = "The match that picks a visitor method — and the one it cannot pick"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["pattern-matching", "lifetime-de", "ownership"]
+prereqs = ["de-value-0041", "de-value-0036"]
+body = """
+Four lines that are the only runtime branch over ownership in the file:
+
+```
+Cow::Borrowed(string) => visitor.visit_str(string),
+Cow::Owned(string)    => visitor.visit_string(string),
+```
+
+`match self.value` moves out of `self`, which is fine because `self` was taken by
+value and is being consumed. Each arm binds the payload and hands it to the
+visitor method that matches its ownership.
+
+Now the part worth fifteen minutes: the `Borrowed` arm calls `visit_str`, not
+`visit_borrowed_str`. The type has a lifetime and the data really is borrowed —
+so why the transient method? Because the lifetime is `'a`, and `'a` is not `'de`.
+The impl header reads `impl<'de, 'a, E> Deserializer<'de> for
+CowStrDeserializer<'a, E>`, two unrelated binders, and `visit_borrowed_str`
+demands `&'de str`. The compiler will not let this type make the borrow promise.
+
+So `CowStrDeserializer` saves the *allocation* when the input was already
+borrowed, but it cannot pass the *borrow* through to the visitor. A format that
+wants true zero-copy has to hold a `Cow<'de, str>` and match on it itself,
+routing the borrowed arm to `visit_borrowed_str`. That is precisely what
+`serde_json`'s string handling does, and it is why this convenience type is not
+enough for it.
+"""
+
+[[annotation]]
+id    = "de-value-0047"
+file  = "src/de/value.rs"
+lines = "830-868"
+title = "Identity, EnumAccess, Debug — the last of the string trio"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "cfg"]
+prereqs = ["de-value-0042"]
+body = """
+Unchanged. `Cow<str>` names a variant the same way an owned or borrowed string
+does, so `UnitOnly` applies with the same restriction: no payload.
+"""
+
+[[annotation]]
+id    = "de-value-0048"
+file  = "src/de/value.rs"
+lines = "869-876"
+title = "BytesDeserializer — and a doc comment that makes a promise"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["borrowing", "lifetimes"]
+prereqs = ["de-mod-0053"]
+body = """
+*"A deserializer holding a `&[u8]`. Always calls [`Visitor::visit_bytes`]."*
+
+That second sentence is a documented behavioral guarantee, and it is the only one
+of its kind among these types. It is here because `&[u8]` is genuinely ambiguous
+— it could plausibly be offered as a sequence of `u8` values instead of as a
+blob — and callers need to know which. The answer is: always bytes, never a seq.
+
+Structurally identical to `StrDeserializer`, `'a` unrelated to `'de`, and no
+`cfg` gate: `&[u8]` needs no allocator.
+"""
+
+[[annotation]]
+id    = "de-value-0049"
+file  = "src/de/value.rs"
+lines = "877-886"
+title = "new() — documented here, unlike its string counterpart"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["visibility"]
+prereqs = ["de-value-0012"]
+body = """
+`/// Create a new deserializer from the given bytes.` instead of
+`#[allow(missing_docs)]`, and the inherent impl sits *before* the
+`impl_copy_clone!` line rather than after it. Both differences are cosmetic
+drift; the bytes deserializers were added years after the string ones, by which
+point the house style had shifted toward documenting constructors.
+"""
+
+[[annotation]]
+id    = "de-value-0050"
+file  = "src/de/value.rs"
+lines = "887-888"
+title = "BytesDeserializer — Copy and Clone"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-rules"]
+macro_def = "de-value-0003"
+prereqs = ["de-value-0029"]
+body = """
+The lifetime arm, here passing `'a` — the name the struct actually uses, unlike
+the `StrDeserializer` invocation above. Same expansion either way.
+"""
+
+[[annotation]]
+id    = "de-value-0051"
+file  = "src/de/value.rs"
+lines = "889-899"
+title = "IntoDeserializer for &'a [u8] — and what it means for Vec<u8>"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "09-blanket-impls-and-coherence"
+rust_features = ["associated-types", "blanket-impls"]
+prereqs = ["de-value-0030"]
+body = """
+`&'a [u8]` becomes a `BytesDeserializer`. Note the asymmetry this sets up with
+the owned case: further down, `impl<T> IntoDeserializer for Vec<T>` produces a
+`SeqDeserializer`, and that impl covers `Vec<u8>` along with every other element
+type.
+
+So `(&[1u8, 2, 3][..]).into_deserializer()` calls `visit_bytes`, while
+`vec![1u8, 2, 3].into_deserializer()` calls `visit_seq`. The same three bytes,
+two different data-model shapes, decided by which container you happen to be
+holding. There is no `ByteBufDeserializer` to correct it — a specialized impl for
+`Vec<u8>` would overlap the generic one, and Rust has no stable specialization.
+If you need the blob reading from an owned buffer, wrap it in `serde_bytes` or
+construct `BytesDeserializer::new(&v)` yourself.
+"""
+
+[[annotation]]
+id    = "de-value-0052"
+file  = "src/de/value.rs"
+lines = "900-919"
+title = "visit_bytes, and a forwarding list with enum back in it"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "macro-rules"]
+prereqs = ["de-value-0031"]
+body = """
+Count the names in `forward_to_deserialize_any!` and compare with the string
+sections: `enum` is present again. There is no `EnumAccess` impl for
+`BytesDeserializer`, because a variant is identified by name or by index and a
+byte blob is neither. Asking this deserializer for an enum routes to
+`deserialize_any`, produces `visit_bytes`, and the visitor reports
+`invalid_type`. The right error, for free, from the forwarding macro.
+
+Also note `Deserializer<'de>` and `Visitor<'de>` unqualified here where the
+sections above wrote `de::Deserializer<'de>`. Both are imported at the top; the
+file simply is not consistent about which spelling it uses.
+"""
+
+[[annotation]]
+id    = "de-value-0053"
+file  = "src/de/value.rs"
+lines = "920-939"
+title = "Identity and Debug — no EnumAccess to close with"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits"]
+prereqs = ["de-value-0052"]
+body = """
+Two impls instead of three. `Debug` prints the byte slice, which for a long blob
+produces a long line — there is no truncation here.
+"""
+
+[[annotation]]
+id    = "de-value-0054"
+file  = "src/de/value.rs"
+lines = "940-946"
+title = "BorrowedBytesDeserializer — the same lifetime unification, for bytes"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["lifetime-de", "borrowing", "zero-cost"]
+prereqs = ["de-value-0033"]
+body = """
+`&'de [u8]`, and *"Always calls [`Visitor::visit_borrowed_bytes`]"*. The exact
+counterpart of `BorrowedStrDeserializer`, and it exists for the same reason: a
+binary format holding a slice of its own input buffer can pass the borrow
+through, and `Deserialize for &'de [u8]` will take it.
+
+This is where zero-copy actually pays in binary formats. A `&'de str` has to be
+UTF-8 validated on the way out; a `&'de [u8]` is handed over as-is, so the whole
+field costs a pointer and a length.
+"""
+
+[[annotation]]
+id    = "de-value-0055"
+file  = "src/de/value.rs"
+lines = "947-956"
+title = "new() — again the only way in"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["lifetime-de", "visibility"]
+prereqs = ["de-value-0035"]
+body = """
+No `IntoDeserializer for &'de [u8]`, for the same coherence reason as the
+borrowed string: `&'a [u8]` already claims that slot. Explicit construction is
+the opt-in.
+"""
+
+[[annotation]]
+id    = "de-value-0056"
+file  = "src/de/value.rs"
+lines = "957-958"
+title = "BorrowedBytesDeserializer — Copy and Clone"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-rules"]
+macro_def = "de-value-0003"
+prereqs = ["de-value-0050"]
+body = """
+The lifetime arm, fourth and last invocation of the macro in this file.
+"""
+
+[[annotation]]
+id    = "de-value-0057"
+file  = "src/de/value.rs"
+lines = "959-978"
+title = "visit_borrowed_bytes — the pair completed"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["lifetime-de", "borrowing"]
+prereqs = ["de-value-0036", "de-mod-0054"]
+body = """
+One token different from `BytesDeserializer`, exactly as `BorrowedStrDeserializer`
+was one token different from `StrDeserializer`. Four types, two pairs, and the
+whole distinction between them is which lifetime the struct's field is tied to.
+
+If you read only one stretch of this file to understand `'de`, read these four
+types in order. They are the same code four times with the lifetimes varied, which
+is as close to a controlled experiment as source code gets.
+"""
+
+[[annotation]]
+id    = "de-value-0058"
+file  = "src/de/value.rs"
+lines = "979-998"
+title = "The last of the scalar deserializers"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits"]
+prereqs = ["de-value-0053"]
+body = """
+Identity and `Debug`, and the end of the single-value half of the file.
+Everything after this point holds an iterator or another access object, and the
+questions change from ownership to state.
+"""
