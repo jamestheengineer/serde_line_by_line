@@ -1635,3 +1635,501 @@ that is sorted and deterministic; for `HashSet` it is neither. Feeding a
 `HashSet` to a `Deserialize` that cares about position — a tuple, say — gives a
 different answer on different runs.
 """
+
+[[annotation]]
+id    = "de-value-0069"
+file  = "src/de/value.rs"
+lines = "1178-1191"
+title = "SeqAccessDeserializer — adapting the other direction"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "03-associated-types"
+rust_features = ["traits", "generic-params"]
+prereqs = ["de-mod-0060"]
+body = """
+Everything above this point turns *data* into a deserializer. This turns an
+*access object* into one.
+
+The situation it solves: you are inside `Visitor::visit_seq`, holding a
+`SeqAccess`, and you need to hand the whole remaining sequence to something that
+wants a `Deserializer` — a nested `Deserialize` impl, a `#[serde(untagged)]`
+attempt, a `Value` type. `SeqAccess` and `Deserializer` are different traits with
+no conversion between them. This one-field wrapper is the conversion.
+
+`#[derive(Clone, Debug)]` is safe here without ceremony: there is exactly one
+field and one type parameter, so the bounds `derive` infers are the ones you
+want.
+"""
+
+[[annotation]]
+id    = "de-value-0070"
+file  = "src/de/value.rs"
+lines = "1192-1211"
+title = "type Error = A::Error — the error comes from the wrapped access"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "03-associated-types"
+rust_features = ["associated-types", "where-clauses"]
+prereqs = ["de-value-0069"]
+body = """
+The first `Deserializer` impl in this file whose `Error` is not a free type
+parameter. It is `A::Error`, projected out of the `SeqAccess` being wrapped —
+which is right, because the wrapped access is what will actually produce the
+errors, and inventing a second error type would mean converting between them.
+
+`deserialize_any` is one line: `visitor.visit_seq(self.seq)`, handing the
+`SeqAccess` straight through by value. No `end()` call and no length check —
+this deserializer does not own the sequence, it is passing along someone else's
+cursor, and the outer format is responsible for what remains.
+
+Every hint forwards, so asking this for a map fails with `invalid_type` naming a
+sequence.
+"""
+
+[[annotation]]
+id    = "de-value-0071"
+file  = "src/de/value.rs"
+lines = "1212-1223"
+title = "IntoDeserializer<'de, A::Error> — an associated type in the trait's own parameter"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["associated-types", "generic-params"]
+prereqs = ["de-value-0070"]
+body = """
+`impl<'de, A> IntoDeserializer<'de, A::Error> for SeqAccessDeserializer<A>`. The
+error parameter of the trait is filled in with a projection from `A` rather than
+left as a free parameter, which is the only sensible choice once `A` fixes it.
+
+Small thing worth noticing: this makes the impl *less* general than the others in
+the file. `u32` can become a deserializer for any error type; a
+`SeqAccessDeserializer` can only be one for `A::Error`.
+"""
+
+[[annotation]]
+id    = "de-value-0072"
+file  = "src/de/value.rs"
+lines = "1224-1237"
+title = "MapDeserializer — five fields, and a trait invented to avoid two type parameters"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "08-phantomdata-and-variance"
+rust_features = ["marker-types", "variance", "associated-types", "iterators"]
+prereqs = ["de-value-0059"]
+body = """
+The most complicated type in the file, and every field is here for a reason.
+
+`iter: iter::Fuse<I>` — the same fusing as `SeqDeserializer`, for the same
+reason.
+
+`value: Option<Second<I::Item>>` — the stash. `MapAccess` hands out keys and
+values in separate calls, so the value from the pair just pulled has to be held
+somewhere until it is asked for. `Second<I::Item>` is a type alias for `<I::Item
+as Pair>::Second`, and the `Pair` trait exists solely so this struct does not
+need `K` and `V` parameters. The comment on its definition at the bottom of the
+file states it exactly: *"Avoid having to restate the generic types on
+`MapDeserializer`. The `Iterator::Item` contains enough information to figure out
+K and V."* `MapDeserializer<'de, I, E>` instead of `MapDeserializer<'de, I, K, V,
+E>`, at the cost of one trait and two aliases.
+
+`count` — for the error message, as before.
+
+Then two `PhantomData` fields where every other type in this file has one, and
+they are different shapes on purpose. `error: PhantomData<E>` is the familiar
+"this parameter appears nowhere in the fields". `lifetime: PhantomData<&'de ()>`
+is holding a *lifetime* parameter alive, and the choice of `&'de ()` over other
+spellings decides variance: it makes the struct covariant in `'de`, so a
+`MapDeserializer<'long, ..>` can be used where a `MapDeserializer<'short, ..>` is
+wanted. `PhantomData<fn(&'de ())>` would have made it contravariant and
+`PhantomData<*mut &'de ()>` invariant, and either would rule out ordinary uses.
+Covariance is what you want for a lifetime you only read through.
+
+The deeper question is why `'de` is on the struct at all — `SeqDeserializer` has
+no lifetime parameter and manages fine. The consequence is visible in the impls
+below: `impl<'de, I, E> Deserializer<'de> for MapDeserializer<'de, I, E>` ties the
+two together, so one of these values is a deserializer for exactly one `'de`,
+where a `SeqDeserializer` is one for all of them at once.
+"""
+
+[[annotation]]
+id    = "de-value-0073"
+file  = "src/de/value.rs"
+lines = "1238-1254"
+title = "new() — and the bounds it does not need"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["iterators", "where-clauses"]
+prereqs = ["de-value-0072"]
+body = """
+`I: Iterator, I::Item: private::Pair` and nothing more. Note that
+`private::Pair` is only implemented for `(A, B)`, so in practice this bound reads
+"an iterator of pairs" — which is exactly what `HashMap::into_iter`,
+`BTreeMap::into_iter`, and `Vec<(K, V)>::into_iter` all produce.
+
+Both `PhantomData` fields are initialized by naming them, the value stash starts
+`None`, and the iterator is fused on the way in.
+"""
+
+[[annotation]]
+id    = "de-value-0074"
+file  = "src/de/value.rs"
+lines = "1255-1277"
+title = "end() — the same trailing-element check, for maps"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["iterators", "custom-errors"]
+prereqs = ["de-value-0061"]
+body = """
+Line for line the `SeqDeserializer` version with `ExpectedInMap` substituted for
+`ExpectedInSeq`. Deserializing a four-entry map into a struct that took two
+fields reports *"invalid length 4, expected 2 elements in map"*.
+
+The bound `E: de::Error` appears on this impl block and not the previous one, the
+same split as before: constructing needs no error type, erroring does.
+"""
+
+[[annotation]]
+id    = "de-value-0075"
+file  = "src/de/value.rs"
+lines = "1278-1293"
+title = "next_pair — one private method, three public callers"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["iterators", "option", "traits"]
+prereqs = ["de-value-0072"]
+body = """
+Pull the next item, bump the count, and split it into a key and a value with
+`private::Pair::split(kv)` — which for a tuple is the identity function, so this
+compiles to nothing at runtime.
+
+The point of routing everything through here is that `count` is maintained in
+exactly one place. Three different trait methods below consume the iterator —
+`next_key_seed`, `next_entry_seed`, and `next_element_seed` — and if any of them
+forgot to increment, the length error would silently report a wrong number.
+
+A third inherent impl block with a third set of bounds, for a method that is not
+even public. Rust makes you repeat the generics and the `where` clause on each
+one; grouping by required bounds rather than by visibility is the convention this
+file follows.
+"""
+
+[[annotation]]
+id    = "de-value-0076"
+file  = "src/de/value.rs"
+lines = "1294-1312"
+title = "The where clause that says \"a map of things that can each become a deserializer\""
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "04-generic-bounds"
+rust_features = ["where-clauses", "associated-types", "blanket-impls"]
+prereqs = ["de-value-0062"]
+body = """
+Five bounds, and read as a sentence they say: `I` is an iterator, its items are
+pairs, both halves of the pair can become deserializers, and `E` is an error
+type.
+
+```
+I: Iterator,
+I::Item: private::Pair,
+First<I::Item>: IntoDeserializer<'de, E>,
+Second<I::Item>: IntoDeserializer<'de, E>,
+E: de::Error,
+```
+
+`First<I::Item>` and `Second<I::Item>` are aliases for associated-type
+projections, and using them in bound position like this is what makes the
+`K`-and-`V`-free design work. The compiler resolves `First<(String, u32)>` to
+`String` and checks `String: IntoDeserializer` — all at compile time, with no
+runtime trace.
+
+`deserialize_any` is the `SeqDeserializer` body again: `visit_map(&mut self)`,
+then `end()`, relying on the blanket `MapAccess for &mut A` impl in `de/mod.rs`
+to lend the access object and get it back.
+"""
+
+[[annotation]]
+id    = "de-value-0077"
+file  = "src/de/value.rs"
+lines = "1313-1336"
+title = "deserialize_seq and deserialize_tuple — a map read as a list of pairs"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "05-default-methods"
+rust_features = ["traits", "macro-rules"]
+prereqs = ["de-value-0076"]
+body = """
+Two names are missing from the forwarding list here — `seq` and `tuple` — and
+these are what replaces them.
+
+`deserialize_seq` calls `visit_seq(&mut self)` instead of `visit_map`, which
+works because `MapDeserializer` implements *both* access traits. Asking a map for
+a sequence gives you its entries as two-element sequences, which is precisely what
+`Vec<(K, V)>` wants: `HashMap<String, u32>` and `Vec<(String, u32)>` round-trip
+through the same deserializer.
+
+`deserialize_tuple` discards the requested length and forwards to
+`deserialize_seq`. Note this is *not* the same choice `PairDeserializer` makes
+below, which checks the length and errors when it is not 2. Here the length
+refers to the number of entries in the map, which this method has no business
+validating — `end()` will catch a mismatch after the visitor has finished.
+
+`deserialize_any` still produces a map. So the shape you get depends on the hint
+the `Deserialize` impl sends, which is the data model doing its job: the same
+bytes, read as a map or as a sequence of pairs, at the reader's request.
+"""
+
+[[annotation]]
+id    = "de-value-0078"
+file  = "src/de/value.rs"
+lines = "1337-1351"
+title = "The identity impl, all five bounds repeated"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["where-clauses"]
+prereqs = ["de-value-0063"]
+body = """
+The same `where` clause a third time. Rust has no way to name a set of bounds and
+reuse it — trait aliases remain unstable — so a type with a complicated
+requirement pays for it once per impl. This file repeats these five bounds five
+times.
+"""
+
+[[annotation]]
+id    = "de-value-0079"
+file  = "src/de/value.rs"
+lines = "1352-1385"
+title = "next_key_seed and next_value_seed — a two-call protocol with a stash between"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "12-errors-iterators-closures"
+rust_features = ["option", "traits", "pattern-matching"]
+prereqs = ["de-mod-0064", "de-value-0075"]
+body = """
+`MapAccess` splits each entry across two calls, and this is where the seam shows.
+
+`next_key_seed` pulls a whole pair, stores the value half in `self.value`, and
+deserializes only the key. `next_value_seed` does `self.value.take()` and
+deserializes what it finds. `take()` leaves `None` behind, so the stash is empty
+again for the next entry — an `Option` field used as a one-slot mailbox, which is
+the standard shape for "I have to produce this later".
+
+Then the line that a lot of people meet the hard way:
+
+```
+let value = value.expect("MapAccess::next_value called before next_key");
+```
+
+with the comment *"Panic because this indicates a bug in the program rather than
+an expected failure."* This is serde drawing the line between the two kinds of
+wrong. Malformed *input* is a `Result::Err` — it comes from outside and the
+program must handle it. A `Deserialize` impl calling `next_value` without a
+preceding `next_key` is a bug in code, discoverable by testing, and returning an
+error for it would push a permanent runtime check onto every correct caller. So
+it panics, with a message that names the exact mistake.
+
+`de/mod.rs` documents this in `MapAccess`'s own contract, and every `MapAccess`
+implementation in the ecosystem is entitled to the same assumption.
+"""
+
+[[annotation]]
+id    = "de-value-0080"
+file  = "src/de/value.rs"
+lines = "1386-1409"
+title = "next_entry_seed — the override that skips the stash entirely"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "05-default-methods"
+rust_features = ["default-methods", "traits"]
+prereqs = ["de-mod-0065"]
+body = """
+`MapAccess` provides a default `next_entry_seed` that calls `next_key_seed` and
+then `next_value_seed`. Overriding it here saves the round trip through
+`self.value`: one `next_pair()`, both halves deserialized on the spot, no
+`Option` written and no `take` performed.
+
+This is the concrete answer to "when is overriding a default method worth it?" —
+when the default has to route through state that your implementation does not
+need. The saving is small but it is on the hottest path in the module, and
+`#[derive(Deserialize)]` emits `next_entry_seed` calls where it can.
+
+`size_hint` is the conservative `from_bounds` again, `Some` only for
+exactly-sized iterators.
+"""
+
+[[annotation]]
+id    = "de-value-0081"
+file  = "src/de/value.rs"
+lines = "1410-1437"
+title = "SeqAccess for the same type — where PairDeserializer earns its existence"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "09-blanket-impls-and-coherence"
+rust_features = ["traits", "marker-types"]
+prereqs = ["de-value-0077"]
+body = """
+One type implementing two access traits, which is what made `deserialize_seq`
+possible above.
+
+Each "element" of this sequence is a whole map entry, so `next_element_seed`
+cannot just hand over a key or a value — it needs a deserializer that presents
+the pair as a two-element sequence. It builds `PairDeserializer(k, v,
+PhantomData)` and passes that to the seed. That type is defined thirty lines
+down and exists only for this call.
+
+Note the two `size_hint` implementations — one in the `MapAccess` impl, one here
+— have identical bodies. They cannot be shared: they are methods of different
+traits with different self types in the eyes of the resolver, and Rust has no
+mechanism to write one body for both.
+"""
+
+[[annotation]]
+id    = "de-value-0082"
+file  = "src/de/value.rs"
+lines = "1438-1455"
+title = "Clone, hand-written, with the comment SeqDeserializer should have had"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "04-generic-bounds"
+rust_features = ["where-clauses", "ownership", "marker-types"]
+prereqs = ["de-value-0059"]
+body = """
+*"Cannot `#[derive(Clone)]` because of the bound `Second<I::Item>: Clone`."*
+
+Read the derived bounds that would result: `I: Clone`, `E: Clone`, and — because
+the `value` field has type `Option<Second<I::Item>>` — nothing at all about
+`Second<I::Item>`, since `derive` only adds bounds for type *parameters*, and
+that is a projection. So the derive would produce an impl that does not compile
+for any type at all: it requires `E: Clone` needlessly and fails to require the
+one bound the body actually needs.
+
+The hand-written version gets it exactly right: `I: Iterator + Clone`,
+`I::Item: Pair`, `Second<I::Item>: Clone`, and no mention of `E`.
+
+This is the same lesson as `impl_copy_clone!` at the top of the file, in its
+sharpest form, and it is worth remembering as a rule: `derive` reasons about type
+parameters, borrow checkers reason about fields, and the two disagree exactly
+when a field's type is a projection or a `PhantomData`. Both cases are in this
+file, three hundred lines apart, and one of them — `SeqDeserializer` — still uses
+`derive`.
+
+The `PhantomData` fields are copied with plain assignment rather than `.clone()`,
+which works because `PhantomData` is `Copy` unconditionally.
+"""
+
+[[annotation]]
+id    = "de-value-0083"
+file  = "src/de/value.rs"
+lines = "1456-1471"
+title = "Debug — the same three bounds, for the same reason"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["where-clauses"]
+prereqs = ["de-value-0082"]
+body = """
+`I: Iterator + Debug`, `Second<I::Item>: Debug`, nothing about `E`. Prints the
+iterator, the stashed value, and the count — the stash is included because
+whether a value is pending is exactly the state you want to see when debugging a
+`MapAccess` protocol violation.
+"""
+
+[[annotation]]
+id    = "de-value-0084"
+file  = "src/de/value.rs"
+lines = "1472-1496"
+title = "PairDeserializer — a private tuple struct that turns one entry into a sequence"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["marker-types", "traits", "visibility"]
+prereqs = ["de-value-0081"]
+body = """
+`struct PairDeserializer<A, B, E>(A, B, PhantomData<E>);` — a tuple struct with
+positional fields, and the source comment above it says exactly where it is used:
+*"Used in the `impl SeqAccess for MapDeserializer` to visit the map as a sequence
+of pairs."*
+
+Private, so no `#[allow(missing_docs)]`, no `Debug`, no `Clone`, no
+`IntoDeserializer` identity impl. Compare the ceremony every public type in this
+file carries. Visibility buys you the right to omit things.
+
+`deserialize_any` forwards to `deserialize_seq`: a pair is a sequence, always,
+with no other reading available. The forwarding list is missing `seq` and `tuple`
+for the same reason as `MapDeserializer`'s.
+"""
+
+[[annotation]]
+id    = "de-value-0085"
+file  = "src/de/value.rs"
+lines = "1497-1526"
+title = "Two length checks, and an unwrap that is provably safe"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "12-errors-iterators-closures"
+rust_features = ["option", "custom-errors", "result"]
+prereqs = ["de-value-0084"]
+body = """
+`deserialize_seq` builds a `PairVisitor` holding both halves as `Some`, lets the
+visitor pull from it, and then checks what is left. If `pair_visitor.1` is still
+`Some`, the visitor stopped after the key and the value would be silently
+dropped — so it errors.
+
+The error arithmetic is worth stepping through, because it looks backwards.
+`invalid_length(2, &ExpectedInSeq(2 - remaining))`: the data had 2 elements
+always, and `remaining` is how many the visitor did *not* take, so `2 -
+remaining` is how many it did — which is what it expected. A visitor that took
+only the key produces *"invalid length 2, expected 1 element in sequence"*.
+
+`pair_visitor.size_hint().unwrap()` is an unwrap that cannot panic, and it is
+worth knowing why: `PairVisitor::size_hint` below returns `Some` in all three of
+its branches. The type says `Option` because the trait says `Option`; this
+particular implementation is total. That is the acceptable kind of `unwrap` — one
+whose safety is established by a function ten lines away, not by an assumption
+about the input.
+
+`deserialize_tuple` here *does* check the length, unlike `MapDeserializer`'s. A
+tuple of anything other than 2 cannot be read out of a pair, so the request is
+rejected before the visitor ever runs.
+"""
+
+[[annotation]]
+id    = "de-value-0086"
+file  = "src/de/value.rs"
+lines = "1527-1560"
+title = "PairVisitor — a two-state machine built out of Option::take"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "12-errors-iterators-closures"
+rust_features = ["option", "pattern-matching", "ownership"]
+prereqs = ["de-value-0085"]
+body = """
+Despite the name it is a `SeqAccess`, not a `Visitor`. The name is a slip that
+has been in the crate for years.
+
+`next_element_seed` is an `if let ... else if let ... else` chain over
+`Option::take`: hand out the key if it is still there, otherwise the value,
+otherwise `None`. Each `take` moves the value out and leaves `None`, so the
+sequence of calls is key, value, end, end, end — and the state is the two
+`Option`s themselves rather than a separate cursor field.
+
+This is the idiomatic Rust encoding of "yield each of these once". A `usize`
+index would need a `match` with unreachable arms; two `Option`s make the
+impossible states unrepresentable and let the borrow checker verify that nothing
+is handed out twice.
+
+`size_hint` returns `Some(2)`, `Some(1)`, or `Some(0)` depending on how much is
+left — always `Some`, which is what makes the `unwrap` in `deserialize_seq`
+sound.
+"""
+
+[[annotation]]
+id    = "de-value-0087"
+file  = "src/de/value.rs"
+lines = "1561-1573"
+title = "ExpectedInMap — the same singular special case, one word changed"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "custom-errors"]
+prereqs = ["de-value-0065"]
+body = """
+`"1 element in map"` / `"{} elements in map"`. A copy of `ExpectedInSeq` with the
+noun replaced — twelve more lines to keep error messages grammatical, and the
+second of the two private `Expected` impls in this file.
+"""
