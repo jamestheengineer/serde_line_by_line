@@ -1,0 +1,270 @@
+schema = 1
+source = "serde_core-1.0.229"
+
+[[annotation]]
+id    = "crate-root-0001"
+file  = "src/crate_root.rs"
+lines = "1-6"
+title = "The entire crate, wrapped in a macro"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "11-no-std-and-cfg"
+rust_features = ["macro-rules", "modules", "cfg"]
+prereqs = ["de-impls-0120"]
+body = """
+`macro_rules! crate_root` takes no arguments and expands to every module
+declaration, every re-export and the `tri!` macro — the whole shape of the
+crate. `lib.rs` invokes it once, on a line by itself.
+
+Wrapping a crate root in a macro that is expanded once would be pointless, and
+the reason it is not lies in the attributes further down:
+
+    #[cfg_attr(all(docsrs, if_docsrs_then_no_serde_core), path = "core/de/mod.rs")]
+
+A `path` attribute pointing into a `core/` subdirectory, under a cfg named
+`if_docsrs_then_no_serde_core`. Neither the directory nor a second invocation
+exists in this crate — which is the evidence that the second caller is the
+`serde` facade crate, expanding this same macro to build a mirror of the module
+tree from its own copy of the sources when documenting. That crate is not
+vendored here, so treat this as the reading the file supports rather than
+something confirmed in front of you.
+
+The doc comment on `mod lib` states the goal of the next hundred and fourteen
+lines plainly: *"This avoids elaborate import wrangling having to happen in
+every module."*
+"""
+
+[[annotation]]
+id    = "crate-root-0002"
+file  = "src/crate_root.rs"
+lines = "7-28"
+title = "A module named core that is sometimes std"
+kind  = "cfg-gate"
+tracks = ["reference", "course"]
+course_unit = "11-no-std-and-cfg"
+rust_features = ["no-std", "modules", "cfg", "visibility"]
+prereqs = ["crate-root-0001"]
+body = """
+Six lines that make the rest of the crate `no_std`-agnostic:
+
+    mod core {
+        #[cfg(not(feature = "std"))]
+        pub use core::*;
+        #[cfg(feature = "std")]
+        pub use std::*;
+    }
+
+A private module *named* `core` which re-exports either the real `core` or all
+of `std`. Every later line writes `self::core::something`, and `self::` is what
+makes it unambiguous — without it, `core::fmt` inside this module would be
+ambiguous between the crate and the module shadowing it.
+
+Why route through `std` at all when `core` is always available? Because `std`
+re-exports everything in `core` plus more, so one path prefix serves both
+configurations, and the `#[cfg]` appears once here instead of on every import
+below it.
+
+The imports that follow are the ones present in every configuration:
+`PhantomData`, `fmt`, `Duration`, the range types, `Cell`, `Wrapping`. Nothing
+here needs an allocator. `cmp` and `mem` are the exception, gated because their
+only users are `size_hint::cautious` and the collection impls.
+"""
+
+[[annotation]]
+id    = "crate-root-0003"
+file  = "src/crate_root.rs"
+lines = "29-63"
+title = "The alloc-or-std pairs, seven times over"
+kind  = "cfg-gate"
+tracks = ["reference", "course"]
+course_unit = "11-no-std-and-cfg"
+rust_features = ["no-std", "cfg", "feature-unification", "smart-pointers"]
+prereqs = ["crate-root-0002"]
+body = """
+Seven types that need an allocator, each imported twice under mirrored
+conditions: `alloc::` when `alloc` is on and `std` is off, `std::` when `std` is
+on. `Cow`, `String`, `Vec`, `Box`, `Rc`, `Arc`, and the five ordered
+collections.
+
+The asymmetry in the conditions is deliberate and is the thing to understand
+here. The `alloc` arm requires `not(feature = "std")` while the `std` arm does
+not exclude `alloc`, because Cargo features are additive: some crate in the
+dependency graph may enable `alloc` while another enables `std`, and both will
+be on. Without the exclusion both `pub use` lines would fire and the names would
+collide. The `std` arm wins because `std`'s re-exports are the same types.
+
+`Weak as RcWeak` and `Weak as ArcWeak` are renamed on import, since two types
+with the same name cannot both be `pub use`d into one module. That rename is why
+`de/impls.rs` writes two nearly identical `Weak` impls under two different
+names.
+
+The `rc` gate rides on top of the `alloc`/`std` split for `Rc` and `Arc`, which
+is what makes those two four-condition cfgs rather than two.
+"""
+
+[[annotation]]
+id    = "crate-root-0004"
+file  = "src/crate_root.rs"
+lines = "64-96"
+title = "The imports gated on a compiler version, and the std-only block"
+kind  = "cfg-gate"
+tracks = ["reference", "course"]
+course_unit = "11-no-std-and-cfg"
+rust_features = ["cfg", "msrv", "no-std"]
+prereqs = ["crate-root-0003"]
+body = """
+`CStr`, `CString` and `net` carry a third condition — `not(no_core_cstr)`,
+`not(no_core_net)` — set by `build.rs` from the detected compiler version.
+These are the types that *moved* into `core` or `alloc` at a known release:
+`CStr` in 1.64, `core::net` in 1.77. On an older compiler the `no_std` path
+does not exist and only the `std` import remains, which is exactly why the impls
+that use them carry the same conditions.
+
+Below that, fourteen imports gated on `std` alone with no alternative: `HashMap`,
+`OsString`, `Path`, `Mutex`, `SystemTime`, `io::Write`, `error`. These are the
+crate's honest boundary — types that have never existed outside `std`, so a
+`no_std` build simply has no `Deserialize` impl for them.
+
+Reading this block tells you the feature matrix faster than reading the impls
+does. Every `#[cfg]` in `de/impls.rs` and `ser/impls.rs` is downstream of a
+decision made here.
+"""
+
+[[annotation]]
+id    = "crate-root-0005"
+file  = "src/crate_root.rs"
+lines = "97-120"
+title = "The atomics, imported twice under two different mechanisms"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "msrv", "interior-mutability"]
+prereqs = ["crate-root-0004", "de-impls-0120"]
+body = """
+Twenty lines to import eleven types, because the question "does this target have
+an atomic of this width" has two different answers depending on the compiler.
+
+The first block, under `no_target_has_atomic`, is the fallback for compilers
+older than 1.60: `build.rs` decided the answer from an architecture allowlist,
+and everything comes in as one group split only at 64 bits.
+
+The second block, under `not(no_target_has_atomic)`, asks the compiler directly
+with `target_has_atomic = "8"` and so on, one import per width. This is the
+precise version — a target with 8- and 16-bit atomics but no 32-bit ones gets
+exactly the right subset.
+
+`Ordering` appears in both because it is needed whenever any atomic is, and
+`Saturating` closes the module under its own version gate. Note that
+`Ordering` is imported but never used by any `Deserialize` impl — it is here for
+the serialize side, which reads atomics with `load(Ordering::Relaxed)`.
+"""
+
+[[annotation]]
+id    = "crate-root-0006"
+file  = "src/crate_root.rs"
+lines = "121-134"
+title = "tri! — and the measurement that justifies it"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "12-errors-iterators-closures"
+rust_features = ["macro-rules", "result", "monomorphization"]
+prereqs = ["de-impls-0035"]
+body = """
+Every `tri!` in the crate expands here, and the comment above it is the whole
+justification, with numbers:
+
+    // None of this crate's error handling needs the `From::from` error conversion
+    // performed implicitly by the `?` operator or the standard library's `try!`
+    // macro. This simplified macro gives a 5.5% improvement in compile time
+    // compared to standard `try!`, and 9% improvement compared to `?`.
+
+Nine percent of compile time for a three-line macro. `?` desugars through the
+`Try` trait and inserts a `From::from` on the error path; here the error types
+are always already identical, so that conversion is the identity and the
+machinery around it is pure cost — paid once per fallible call site, in a crate
+with hundreds of them, monomorphised per format.
+
+`lib.rs` enforces the choice rather than trusting it: `#![deny(clippy::question_mark_used)]`
+makes a stray `?` a compile error, which is how a rule like this survives
+contact with contributors.
+
+The macro is defined inside `crate_root!`, so it is available to every module
+declared below it — the same "textually scoped, definition before use" rule that
+governed `num_128!`, applied at crate scale.
+"""
+
+[[annotation]]
+id    = "crate-root-0007"
+file  = "src/crate_root.rs"
+lines = "135-147"
+title = "Four modules, two re-exports, and the docsrs path override"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["modules", "cfg", "visibility"]
+prereqs = ["crate-root-0001"]
+body = """
+The crate is four modules: `de`, `ser`, `format`, and `private` below. Only the
+first two are public.
+
+`#[doc(inline)] pub use crate::de::{Deserialize, Deserializer}` lifts the four
+central names to the crate root so that `serde_core::Deserialize` works and
+rustdoc renders the item at the top level rather than as a link into a
+submodule. Everything else stays behind its module.
+
+The `path = "core/de/mod.rs"` overrides are the mechanism described at the top
+of this file: when the `serde` facade expands this macro while documenting, its
+modules come from a different directory than they would in a normal build. A
+`path` attribute on a `mod` declaration is the only way to say that, and
+`cfg_attr` is what keeps it out of every other build.
+"""
+
+[[annotation]]
+id    = "crate-root-0008"
+file  = "src/crate_root.rs"
+lines = "148-166"
+title = "Two __private modules, one of them named after the version"
+kind  = "plumbing"
+tracks = ["reference", "course"]
+course_unit = "11-no-std-and-cfg"
+rust_features = ["visibility", "proc-macro-boundary", "modules"]
+prereqs = ["crate-root-0007"]
+body = """
+There are two hidden modules here and they serve different generators.
+
+`pub mod __private` is hand-written and tiny: `private::doc` and
+`core::result::Result`. Its users are this crate's own exported macros —
+`forward_to_deserialize_any!` writes `$crate::__private::Result` rather than
+`Result`, because at the expansion site in a user's crate the plain name might
+have been shadowed. That is macro hygiene's blind spot for paths, worked around
+by hand.
+
+The line after it is the interesting one:
+
+    include!(concat!(env!("OUT_DIR"), "/private.rs"));
+
+`build.rs` writes that file, and what it contains is a module whose *name
+carries the patch version*: `pub mod __private229 { pub use crate::private::*; }`.
+
+`serde_derive` emits references to `__private229`. If a build somehow pairs a
+derive that expects one version with a `serde_core` that provides another, the
+generated code names a module that does not exist and the build fails
+immediately with a missing-item error, instead of failing later and stranger on
+a changed private API. It is a version check implemented as a name.
+"""
+
+[[annotation]]
+id    = "crate-root-0009"
+file  = "src/crate_root.rs"
+lines = "167-171"
+title = "std_error — the module that only exists when nothing else provides Error"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "msrv", "custom-errors"]
+prereqs = ["crate-root-0004"]
+body = """
+`#[cfg(all(not(feature = "std"), no_core_error))]` — compiled only when there is
+no `std` *and* the compiler predates `core::error::Error`, stabilized in 1.81.
+In every other configuration an `Error` trait already exists and this module
+would be a duplicate.
+
+Three closing braces end the macro, the crate skeleton, and this file.
+"""

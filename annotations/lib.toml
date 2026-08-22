@@ -1,0 +1,189 @@
+schema = 1
+source = "serde_core-1.0.229"
+
+[[annotation]]
+id    = "lib-0001"
+file  = "src/lib.rs"
+lines = "1-34"
+title = "Why this crate exists at all: a build-time argument"
+kind  = "doc-contract"
+tracks = ["reference", "course"]
+course_unit = "01-why-a-data-model"
+rust_features = ["modules", "proc-macro-boundary"]
+body = """
+`serde_core` is not a subset of `serde` for tidiness. The doc header states the
+one reason it was split out, and it is about wall-clock build time.
+
+`serde` with its `derive` feature depends on `serde_derive`, a proc macro that
+depends on `syn` and `quote`. Anything depending on `serde` therefore cannot
+begin compiling until that whole chain has finished. Splitting the trait
+definitions into a crate with no proc-macro dependency lets `serde_json` — and
+any other crate that only needs the traits — compile *in parallel* with
+`serde_derive` instead of after it. The two screenshots embedded here are Cargo
+build timing graphs showing exactly that: the same dependency set, one
+serialised and one overlapping.
+
+The advice attached is unusually direct: *"If in doubt, disregard `serde_core`
+and always use `serde`."* This crate is for library authors who hand-write impls
+or only use the traits as bounds. Anyone reaching for `#[derive(Deserialize)]`
+needs `serde`, and the last item in this file is the compile error they get if
+they do not.
+"""
+
+[[annotation]]
+id    = "lib-0002"
+file  = "src/lib.rs"
+lines = "35-49"
+title = "The crate attributes, including the one that makes no_std work"
+kind  = "cfg-gate"
+tracks = ["reference", "course"]
+course_unit = "11-no-std-and-cfg"
+rust_features = ["no-std", "cfg", "msrv"]
+prereqs = ["lib-0001"]
+body = """
+`#![cfg_attr(not(feature = "std"), no_std)]` is the line the whole `no_std`
+story hangs on, and it is written as a `cfg_attr` rather than a plain `no_std`
+because the crate must be able to *not* be `no_std` — enabling `std` has to add
+the standard library back, and there is no negative form of the attribute.
+
+`#![cfg_attr(docsrs, feature(doc_cfg, rustdoc_internals))]` opts into two
+nightly rustdoc features under the cfg docs.rs sets. `doc_cfg` renders the
+"Available on crate feature std only" badges; `rustdoc_internals` is what makes
+`doc(fake_variadic)` legal, the attribute that collapsed sixteen tuple impls
+into one entry. The `allow(internal_features)` on the next line is the price of
+the second one.
+
+`feature(never_type)` appears only under the `unstable` feature, which is what
+gates the `impl Deserialize for !` back in `de/impls.rs`. The comment points at
+issue 812 rather than explaining, which is the right call for something that has
+been unresolved for a decade.
+
+`bare_trait_objects` and `deprecated` are allowed crate-wide because the code
+must compile on 1.56, where some of today's spellings did not exist yet.
+"""
+
+[[annotation]]
+id    = "lib-0003"
+file  = "src/lib.rs"
+lines = "50-95"
+title = "Forty-five lines of clippy allows, sorted by why"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["msrv", "cfg"]
+prereqs = ["lib-0002"]
+body = """
+The most quietly instructive block in the crate, because the comments group the
+suppressions by *reason* rather than listing them alphabetically:
+
+- **clippy bug** — two lints with issue links, to be removed when fixed.
+- **not available in our oldest supported compiler** — the suggested
+  replacement does not exist on 1.56.
+- **integer and float ser/de requires these sorts of casts** — the four
+  `cast_*` lints, silenced because `de/impls.rs`'s conversion macros are made
+  of exactly the casts clippy is warning about. Every one of them is
+  range-checked by the surrounding code.
+- **things are often more readable this way** — a taste disagreement, stated
+  as one.
+- **correctly used** — the lint is right in general and wrong here.
+- **not practical**, **preference**, **false positive**, **noisy** — the rest.
+
+That taxonomy is worth stealing wholesale. A bare `#![allow(...)]` list decays
+into something nobody dares remove from; this one tells a future maintainer
+which entries have expiry conditions, and two of them name the issue that will
+end them.
+"""
+
+[[annotation]]
+id    = "lib-0004"
+file  = "src/lib.rs"
+lines = "96-100"
+title = "deny(question_mark_used) — the rule that makes tri! stick"
+kind  = "cfg-gate"
+tracks = ["reference", "course"]
+course_unit = "12-errors-iterators-closures"
+rust_features = ["result", "macro-rules"]
+prereqs = ["crate-root-0006"]
+body = """
+Three denies, and the first is the unusual one:
+
+    #![deny(clippy::question_mark_used)]
+
+`?` is a compile error in this crate. Not discouraged in a style guide, not
+caught in review — rejected by the linter. That is the enforcement half of the
+`tri!` decision measured in `crate_root.rs`: a 9% compile-time improvement is
+only worth having if it holds everywhere, and a rule this counterintuitive would
+otherwise erode with every contribution.
+
+`deny(missing_docs)` explains the shape of the crate's documentation: every
+public item carries a doc comment because it must. It also explains why
+`de/impls.rs` has 52 doc comments in 3,173 lines — trait impls are not covered
+by the lint, so the two files with the most public surface carry nearly all the
+prose.
+
+`deny(unused_imports)` is what makes the `#[cfg]` gymnastics in `crate_root.rs`
+mandatory rather than optional: an import that is dead in one feature
+combination fails the build in that combination.
+"""
+
+[[annotation]]
+id    = "lib-0005"
+file  = "src/lib.rs"
+lines = "101-112"
+title = "Twelve lines that are the whole crate"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["modules", "macro-rules", "no-std"]
+prereqs = ["crate-root-0001"]
+body = """
+`extern crate alloc;` is still required in edition 2021 for `alloc`
+specifically — it is not a normal dependency but a compiler-provided crate, and
+nothing links it unless asked. Under `#[cfg(feature = "alloc")]`, because
+pulling it in unconditionally would break targets without an allocator.
+
+Then two `#[macro_use] mod` declarations and one invocation:
+
+    #[macro_use] mod crate_root;
+    #[macro_use] mod macros;
+    crate_root!();
+
+`#[macro_use]` on a module makes its `macro_rules!` visible to the rest of the
+crate from that point on — the textual scoping rule again, at file level.
+`crate_root!()` then expands into every module declaration, the `lib` facade and
+`tri!`.
+
+The ordering is load-bearing: `crate_root` must be declared before it is
+invoked, and both `#[macro_use]` modules must precede the expansion that uses
+what they define.
+"""
+
+[[annotation]]
+id    = "lib-0006"
+file  = "src/lib.rs"
+lines = "113-121"
+title = "__require_serde_not_serde_core! — an error message, exported as a macro"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "proc-macro-boundary", "visibility"]
+prereqs = ["lib-0001", "crate-root-0008"]
+body = """
+The last item in the crate does nothing but fail:
+
+    ::core::compile_error!(
+        "Serde derive requires a dependency on the serde crate, not serde_core"
+    );
+
+`#[macro_export]` puts it at the root of the public macro namespace;
+`#[doc(hidden)]` keeps it out of the documentation. It exists so that
+`serde_derive`'s output can name it, and get a sentence instead of a puzzle.
+
+Consider what happens without it. Someone adds `serde_core` to `Cargo.toml`,
+writes `#[derive(Deserialize)]`, and the generated code reaches for items that
+only the `serde` facade re-exports. The error would be a wall of unresolved
+paths through `_serde::__private229`, naming nothing the user wrote. With it,
+the derive can detect the situation and expand to one line of English.
+
+It is the same technique as the version-stamped `__private229` module — make the
+failure happen at a name you control, so you get to choose what the compiler
+prints. Two mechanisms, one idea, at opposite ends of the crate.
+"""

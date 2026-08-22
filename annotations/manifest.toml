@@ -13,4 +13,6 @@ complete = [
     "src/de/ignored_any.rs",
     "src/de/value.rs",
     "src/de/impls.rs",
+    "src/crate_root.rs",
+    "src/lib.rs",
 ]
