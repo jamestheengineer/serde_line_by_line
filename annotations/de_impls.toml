@@ -2366,3 +2366,274 @@ impls can be written without a `use` collision on `Weak`.
 A macro could have covered both, and `box_forwarded_impl!` immediately below
 does exactly that for `Rc` and `Arc`. These two were left written out.
 """
+
+[[annotation]]
+id    = "de-impls-0093"
+file  = "src/de/impls.rs"
+lines = "2039-2061"
+title = "box_forwarded_impl! — a bound on Box<T> rather than on T"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "04-generic-bounds"
+rust_features = ["macro-rules", "where-clauses", "sized-bound", "smart-pointers"]
+prereqs = ["de-impls-0038", "de-impls-0089"]
+body = """
+Two lines of `where` clause do the interesting work:
+
+    T: ?Sized,
+    Box<T>: Deserialize<'de>,
+
+The bound is on `Box<T>`, not on `T`. That is what makes `Rc<str>` and
+`Rc<[u8]>` deserializable: `str` and `[u8]` are unsized and have no
+`Deserialize` impl of their own, but `Box<str>` and `Box<[T]>` both got one from
+`forwarded_impl!` a hundred lines above. Requiring `T: Deserialize` would have
+excluded exactly the cases this macro exists to cover.
+
+The body is then `Box::deserialize(deserializer).map(Into::into)`, relying on
+`impl From<Box<T>> for Rc<T>` — which the standard library provides for unsized
+`T` as well, by moving the allocation rather than copying it.
+
+This is the third macro in the file to pick its inner type by inference, and the
+most useful example of the technique: the deserialization strategy for every
+`Rc<T>` is inherited from whatever `Box<T>` already knew how to do.
+"""
+
+[[annotation]]
+id    = "de-impls-0094"
+file  = "src/de/impls.rs"
+lines = "2062-2074"
+title = "Rc — and the sharing that does not survive"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition", "smart-pointers", "cfg"]
+macro_def = "de-impls-0093"
+body = """
+The doc comment is the annotation: *"Deserializing a data structure containing
+`Rc` will not attempt to deduplicate `Rc` references to the same data. Every
+deserialized `Rc` will end up with a strong count of 1."*
+
+Serialize ten `Rc<String>` clones pointing at one allocation and you get ten
+copies of the string on the wire and ten separate allocations back. The graph
+structure is not preserved, because the data model has no way to express "this
+is the same value you already saw" — there is no reference or pointer in the
+twenty-nine types.
+
+That is also why the `rc` feature is off by default. Turning it on should be a
+decision, not a default, since the impls quietly change the shape of your data.
+"""
+
+[[annotation]]
+id    = "de-impls-0095"
+file  = "src/de/impls.rs"
+lines = "2075-2087"
+title = "Arc — the same, with an atomic count"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition", "smart-pointers"]
+macro_def = "de-impls-0093"
+body = """
+Identical text, identical caveat. The macro that covers both is four lines
+shorter than the two `Weak` impls that were written out by hand a page above —
+a small inconsistency in a file that is otherwise ruthless about factoring.
+"""
+
+[[annotation]]
+id    = "de-impls-0096"
+file  = "src/de/impls.rs"
+lines = "2088-2101"
+title = "Cell<T> — a Copy bound inherited from the other direction"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "04-generic-bounds"
+rust_features = ["interior-mutability", "where-clauses", "ownership"]
+prereqs = ["de-impls-0093"]
+body = """
+`T: Deserialize<'de> + Copy`, and the `Copy` is not needed by anything in this
+function. `Cell::new` accepts any `T`; the deserialization would work fine
+without it.
+
+It is here for symmetry with the other half. `ser/impls.rs` writes `impl<T>
+Serialize for Cell<T> where T: Serialize + Copy`, and there the bound is
+load-bearing — reading a `Cell` means calling `self.get()`, which requires
+`Copy` because it copies the value out. A type that could be deserialized into a
+`Cell` but never serialized back out would be a strange asymmetry, so the bound
+is mirrored.
+
+Worth recognising as a category: a bound that documents a constraint from
+elsewhere rather than one this code enforces.
+"""
+
+[[annotation]]
+id    = "de-impls-0097"
+file  = "src/de/impls.rs"
+lines = "2102-2118"
+title = "RefCell, Mutex, RwLock — three locks, never locked"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition", "interior-mutability", "smart-pointers"]
+macro_def = "de-impls-0038"
+body = """
+Each deserializes its inner type and calls `new`, which takes the value by move
+— so no lock is ever acquired and no `unwrap` on a poisoned mutex can happen
+here. Constructing a `Mutex` is not a synchronized operation.
+
+`RefCell` needs no `Copy`, unlike `Cell`, because its serialize side uses
+`borrow()` rather than `get()`. That side *can* panic, if the value is mutably
+borrowed while being serialized — a hazard that has no counterpart on this side.
+"""
+
+[[annotation]]
+id    = "de-impls-0098"
+file  = "src/de/impls.rs"
+lines = "2119-2141"
+title = "Duration — the derive, written out and cleaned up"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["proc-macro-boundary", "modules", "visibility"]
+prereqs = ["de-impls-0086", "de-mod-0039"]
+body = """
+The most valuable hundred and forty lines in the file, and the comment on top
+says why:
+
+    // This is a cleaned-up version of the impl generated by:
+    //
+    //     #[derive(Deserialize)]
+    //     #[serde(deny_unknown_fields)]
+    //     struct Duration { secs: u64, nanos: u32 }
+
+Everything `serde_derive` emits for an ordinary two-field struct is here in
+readable form — no `__private` paths, no underscore-prefixed identifiers, no
+hygiene gymnastics. If you have ever wanted to know what `#[derive(Deserialize)]`
+actually does, read this instead of `cargo expand`.
+
+The second comment names the piece being replaced first: a *field identifier*.
+`#[serde(field_identifier, rename_all = "lowercase")]` would generate this
+`Field` enum, and the derive's field-name matching is the same match statement
+you are about to read.
+
+`enum Field { Secs, Nanos }` is declared inside `fn deserialize`, the same
+function-local item scoping every macro-generated visitor in this file uses.
+"""
+
+[[annotation]]
+id    = "de-impls-0099"
+file  = "src/de/impls.rs"
+lines = "2142-2185"
+title = "The field identifier, and a helper with two return types"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "strings", "no-std", "custom-errors"]
+prereqs = ["de-impls-0098", "de-mod-0011"]
+body = """
+A `Deserialize` impl whose `Value` is which-field-is-this rather than a value.
+`deserialize_identifier` is the hint, and the two visit methods mirror
+`variant_identifier!`: match the string, match the bytes, otherwise
+`unknown_field` with the `FIELDS` list.
+
+The interesting line is the byte fallback:
+
+    let value = private::string::from_utf8_lossy(value);
+    Err(Error::unknown_field(&*value, FIELDS))
+
+`from_utf8_lossy` is a shim with *two different return types*. With `alloc` it
+returns `Cow<str>` from the standard library. Without, it returns `&str` — and
+when the bytes are not UTF-8 at all it returns three replacement characters,
+with a comment saying the user will recognise them as invalid UTF-8.
+
+That only works because of the `&*value` at the call site: `&*` derefs a `Cow`
+to `&str` and derefs a `&str` to itself, so one expression compiles against both
+signatures. The shim's own comment says as much. It is an unusual and legitimate
+use of deref coercion to paper over a `cfg`-dependent type.
+
+Note there is no `visit_u64`. `variant_identifier!` accepted a numeric index for
+enum variants; struct fields are matched by name only.
+"""
+
+[[annotation]]
+id    = "de-impls-0100"
+file  = "src/de/impls.rs"
+lines = "2186-2196"
+title = "check_overflow — turning a panic into an error"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "12-errors-iterators-closures"
+rust_features = ["result", "custom-errors", "option"]
+prereqs = ["de-impls-0098"]
+body = """
+`Duration::new` panics if the carry from `nanos` overflows `secs`. Panicking on
+malformed input is not acceptable in a deserializer — the input is untrusted, and
+the caller asked for a `Result` — so this function performs the same arithmetic
+with `checked_add` first and returns an error instead.
+
+That is a pattern worth naming: when a constructor's contract is "panics on bad
+input", a deserializer must check the contract itself before calling it. The
+standard library types in this file that have no such constructor simply do not
+need the equivalent.
+
+`static NANOS_PER_SEC` declared inside the function keeps a constant next to its
+only use. `static` rather than `const` here means one copy in the binary rather
+than one inlined at each use, which for a single use is a distinction without a
+difference.
+"""
+
+[[annotation]]
+id    = "de-impls-0101"
+file  = "src/de/impls.rs"
+lines = "2197-2225"
+title = "visit_seq — a struct read positionally"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "result"]
+prereqs = ["de-impls-0100", "de-mod-0038"]
+body = """
+Every derived struct impl handles two shapes, and this is the first: the fields
+arriving in declaration order with no names, which is what a compact binary
+format writes and what a JSON array would look like.
+
+`invalid_length(0, &self)` and `invalid_length(1, &self)` report *how many
+elements were successfully read*, not which field is missing — so a truncated
+`Duration` reports `invalid length 1, expected struct Duration` rather than
+naming `nanos`. The names are simply not available on this path; the format
+never sent them.
+
+`check_overflow` runs before `Duration::new`, exactly as on the map path. Two
+call sites, one function, which is why it was factored out at all.
+"""
+
+[[annotation]]
+id    = "de-impls-0102"
+file  = "src/de/impls.rs"
+lines = "2226-2265"
+title = "visit_map — the accumulator pattern every derived struct uses"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["option", "pattern-matching", "custom-errors", "proc-macro-boundary"]
+prereqs = ["de-impls-0101", "de-mod-0012"]
+body = """
+This is the shape `serde_derive` generates for every struct you have ever
+derived, and it is worth memorising:
+
+1. One `Option<FieldType>` local per field, all starting `None`.
+2. Loop over `next_key`, matching the field identifier.
+3. On a repeat, `duplicate_field`. Which is why the same duplicate key that a
+   `HashMap` silently accepts is an error in a struct.
+4. After the loop, unwrap each local or report `missing_field`.
+
+Fields can therefore arrive in any order, and absence is distinguished from a
+present-but-null value — `#[serde(default)]` changes step 4 to a fallback
+instead of an error, and nothing else.
+
+`<A::Error as Error>::duplicate_field("secs")` is fully qualified where
+`visit_seq` above wrote plain `Error::invalid_length`. Inference would resolve
+both. The qualification is a fossil of generated code: the derive emits fully
+qualified paths everywhere because it cannot know what names are in scope in the
+user's module, and this hand-written copy kept the habit in the places the
+generator would have.
+
+`deny_unknown_fields` is visible in what the `Field` enum does with an
+unrecognised name — it errors rather than returning an ignore marker. Without
+that attribute the derive generates a third variant, `Field::Ignore`, and the
+loop calls `next_value::<IgnoredAny>()` for it.
+"""
