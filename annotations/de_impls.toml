@@ -1066,3 +1066,418 @@ Deserialize<'de> for Reverse<T>`, and `Reverse` as the function value both names
 the constructor and pins the inner type to `T`. The whole impl for a wrapper the
 standard library uses to invert an `Ord`.
 """
+
+[[annotation]]
+id    = "de-impls-0041"
+file  = "src/de/impls.rs"
+lines = "867-882"
+title = "OptionVisitor — and the first PhantomData in the file"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "08-phantomdata-and-variance"
+rust_features = ["marker-types", "generic-params", "variance"]
+prereqs = ["de-impls-0002"]
+body = """
+The visitor is generic over `T` and has no field of type `T`. Rust rejects that:
+an unconstrained type parameter on a struct is an error, because the compiler
+cannot decide the type's variance or drop behaviour without knowing where `T`
+appears. `PhantomData<T>` is the answer — a zero-sized field that says "behave as
+though this struct owns a `T`".
+
+`PhantomData<T>` specifically, not `PhantomData<fn() -> T>`. The two differ in
+what they claim: the first says this struct owns a `T` and is covariant in it,
+the second says it merely produces one. serde uses the owning form throughout,
+which is the conservative choice — it can cause a `T: Drop` to affect
+drop-checking for a type that never holds one, but it never permits an unsound
+variance.
+
+`expecting` writes `"option"`, not `"an option"`. The article convention slips
+again.
+"""
+
+[[annotation]]
+id    = "de-impls-0042"
+file  = "src/de/impls.rs"
+lines = "883-899"
+title = "visit_unit and visit_none — two spellings of absence"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["option", "default-methods"]
+prereqs = ["de-mod-0056", "de-impls-0041"]
+body = """
+Both return `None`, and the reason there are two is that formats disagree about
+what "nothing" looks like.
+
+`visit_none` is what a format calls when it asked itself whether a value is
+present and the answer was no — JSON reaching `null` after `deserialize_option`.
+`visit_unit` is for formats whose data model has no null at all and represent an
+absent value as the unit value. Accepting both means an `Option<T>` field
+round-trips through either kind of format.
+
+This is also why `Option<Option<T>>` is ambiguous in most formats and serde
+documents it as such: there is one representation of absence and two levels
+asking for it.
+"""
+
+[[annotation]]
+id    = "de-impls-0043"
+file  = "src/de/impls.rs"
+lines = "900-914"
+title = "visit_some, and the probe that turns an error into None"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["option", "result", "visibility"]
+prereqs = ["de-mod-0059", "de-impls-0042"]
+body = """
+`visit_some` receives a `Deserializer` rather than a value — the format has
+determined something is present but has not decoded it, so the inner type gets
+to drive. `T::deserialize(deserializer).map(Some)` is the recursion, and it is
+where a nested `Option<Vec<Option<u32>>>` unwinds one layer at a time.
+
+`__private_visit_untagged_option` is the second body, and its signature is
+`Result<Self::Value, ()>` — an error type carrying no information, because a
+failure here is not an error. The body says it plainly:
+`Ok(T::deserialize(deserializer).ok())`. Whatever went wrong is discarded and
+the answer is `None`.
+
+That is what an untagged enum or a flattened field needs: it is trying variants
+in order, and "this one did not parse" is the normal path, not a fault. The
+method is hidden and double-underscored because a public API that swallows all
+errors would be a support burden — and because `serde_derive` is the only
+intended caller.
+"""
+
+[[annotation]]
+id    = "de-impls-0044"
+file  = "src/de/impls.rs"
+lines = "915-934"
+title = "Deserialize for Option, and a FIXME left in the source"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["option", "borrowing"]
+prereqs = ["de-impls-0030", "de-impls-0043"]
+body = """
+The impl itself is four lines. The six lines of comment after it are the
+interesting part, and they are upstream's, not this project's.
+
+`String` overrode `deserialize_in_place` because it could reuse a buffer.
+`Option<T>` does not, and the comment says why: the `Some` variant's
+representation is opaque, so there is no way to hand a visitor a `&mut T`
+pointing into an existing `Some` without matching on it first — and if the place
+currently holds `None` there is nothing to reuse anyway. The `FIXME` proposes
+branching on the old value and admits the answer is probably data-dependent.
+
+It is still there several years later, which is the honest signal: the
+optimisation is not obviously worth the branch. Leaving the reasoning in the
+source instead of silently omitting the impl is why this comment is worth
+reading.
+"""
+
+[[annotation]]
+id    = "de-impls-0045"
+file  = "src/de/impls.rs"
+lines = "935-959"
+title = "PhantomDataVisitor — deserializing the type that holds nothing"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "08-phantomdata-and-variance"
+rust_features = ["marker-types", "sized-bound", "generic-params"]
+prereqs = ["de-impls-0041"]
+body = """
+`PhantomData<T>` is zero bytes and carries no information, so deserializing one
+means reading nothing and producing the only value it has. `visit_unit` returns
+`Ok(PhantomData)`.
+
+`T: ?Sized` is what makes this general. Without it the impl would not cover
+`PhantomData<dyn Error>` or `PhantomData<[u8]>`, both of which are legitimate
+markers on a struct that a derive might need to deserialize. The relaxed bound
+costs nothing because no `T` is ever touched.
+
+Note the visitor struct itself needs `T: ?Sized` on its declaration too — a
+struct's `PhantomData<T>` field requires `T: Sized` by default like any other
+field position.
+"""
+
+[[annotation]]
+id    = "de-impls-0046"
+file  = "src/de/impls.rs"
+lines = "960-974"
+title = "The hint is deserialize_unit_struct, and it carries a name"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "marker-types"]
+prereqs = ["de-impls-0045", "de-mod-0037"]
+body = """
+`deserializer.deserialize_unit_struct("PhantomData", visitor)` rather than
+`deserialize_unit`. The difference is the string: a format that records type
+names — a self-describing binary format, or a schema generator — sees
+`"PhantomData"` in the stream and can round-trip it.
+
+The mismatch is worth noticing: `expecting` says `"unit"`, so an error message
+reads `expected unit` while the hint asked for a unit struct. Neither is wrong,
+but they describe the same request differently.
+"""
+
+[[annotation]]
+id    = "de-impls-0047"
+file  = "src/de/impls.rs"
+lines = "975-993"
+title = "seq_impl! — parsing a generic parameter list by hand"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "macro-repetition", "generic-params", "where-clauses"]
+prereqs = ["de-impls-0038"]
+body = """
+Five collection types share one impl, and the matcher is most of the work. Read
+just this fragment:
+
+    $ty:ident <T $(: $tbound1:ident $(+ $tbound2:ident)*)* $(, $typaram:ident : $bound1:ident $(+ $bound2:ident)*)*>
+
+That is a hand-written parser for a Rust generic parameter list. It has to be
+hand-written because `macro_rules!` has no fragment specifier for one — `$t:ty`
+would match `BinaryHeap<T: Ord>` as a single opaque token tree, and this macro
+needs the pieces separately: `$ty` goes in three places, `T`'s bounds go in two
+`where` clauses, and the extra parameters go in five.
+
+The bounds use `$(...)*` where the intent is "optional". A repetition matches
+zero or more, so `BinaryHeap<T: Ord: Ord>` would technically parse; nothing
+invokes it that way, and using `*` for an optional group is common enough in
+older macros that it reads as idiomatic rather than as a bug.
+
+The bounds are then re-emitted twice — once on the outer `Deserialize` impl and
+once on the visitor inside it. That duplication is unavoidable: the visitor is a
+separate type, so it needs its own copy of every bound the body requires.
+"""
+
+[[annotation]]
+id    = "de-impls-0048"
+file  = "src/de/impls.rs"
+lines = "994-1030"
+title = "The deserialize half — and why $access is a parameter"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "macro-hygiene", "collections"]
+prereqs = ["de-impls-0047", "de-impls-0035"]
+body = """
+The body is the `visit_seq` template from `CStringVisitor`, with three holes:
+`$with_capacity` to build the collection, `$insert` to add one element,
+and `$access` to name the `SeqAccess`.
+
+`$access:ident` is the subtle one, and it is a deliberate defeat of macro
+hygiene. Look at what an invocation passes for `$with_capacity`:
+
+    BinaryHeap::with_capacity(size_hint::cautious::<T>(seq.size_hint()))
+
+That expression mentions `seq`, a variable which does not exist at the
+invocation site. It works because the same invocation passes `seq` as
+`$access`, and the macro writes `fn visit_seq<A>(self, mut $access: A)` — so
+the parameter is literally named `seq`, and the expression finds it.
+
+`macro_rules!` hygiene would normally prevent exactly this: an identifier the
+macro invents cannot be seen by code passed in from outside. Identifiers passed
+*in* as parameters keep their call-site identity, so routing the binding through
+`$access` is how the macro lets its caller supply an expression that reads its
+local state. Every one of the five invocations passes the same name, which makes
+the parameter look pointless until you notice what it enables.
+
+`$insert(&mut values, value)` calls a method as a function value — `BinaryHeap::push`,
+`BTreeSet::insert` and `VecDeque::push_back` all have the shape `fn(&mut Self, T)`,
+which is what lets one call site serve four different collections.
+"""
+
+[[annotation]]
+id    = "de-impls-0049"
+file  = "src/de/impls.rs"
+lines = "1031-1070"
+title = "The in-place half — clear, reserve, refill, and a FIXME"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "borrowing", "lifetimes", "collections"]
+prereqs = ["de-impls-0048", "de-impls-0029"]
+body = """
+Unlike `forwarded_impl!`, this macro does generate `deserialize_in_place`, and
+the strategy is the crude one: `$clear` the existing collection, `$reserve`
+enough room for what is coming, then refill it exactly as the by-value path
+would.
+
+That recovers the collection's own allocation — a `Vec<T>` keeps its buffer — but
+throws away every element's allocation. Refilling a cleared `Vec<String>`
+allocates a fresh `String` per element even though the old ones were just
+dropped. The `FIXME` on the line before the loop names precisely this, listing
+the three collections where overwriting in place would be possible.
+
+`SeqInPlaceVisitor<'a, T: 'a $(, $typaram: 'a)*>` spells out `T: 'a` because the
+struct holds `&'a mut $ty<T, ...>` and a reference cannot outlive what it points
+at. The bound is redundant today — the compiler has inferred outlives
+requirements on struct definitions since 1.31, well below this crate's 1.56
+minimum — and it survives because the code predates that and removing it changes
+nothing.
+
+`&mut *self.0` rather than `self.0` at each call site is a reborrow. `self.0` is
+already a `&mut`, and passing it directly would move it out of `self`, making the
+second call fail. The explicit reborrow creates a shorter-lived `&mut` and leaves
+the original in place.
+"""
+
+[[annotation]]
+id    = "de-impls-0050"
+file  = "src/de/impls.rs"
+lines = "1071-1074"
+title = "nop_reserve — a real function standing in for a missing method"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["generic-params", "cfg"]
+prereqs = ["de-impls-0049"]
+body = """
+`BTreeSet` and `LinkedList` have no `reserve`. Rather than give the macro a
+branch, the two invocations that need nothing pass this — a generic function
+with an empty body, which the optimiser deletes entirely.
+
+It takes `_seq: T` by value, and the value passed is a `&mut` collection. Taking
+the reference by value is what makes one signature accept every collection type
+without naming any of them.
+"""
+
+[[annotation]]
+id    = "de-impls-0051"
+file  = "src/de/impls.rs"
+lines = "1075-1085"
+title = "BinaryHeap<T: Ord> — capacity, push"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition", "collections"]
+macro_def = "de-impls-0047"
+body = """
+The `Ord` bound rides through the matcher into both `where` clauses. `with_capacity`
+takes the cautious hint, and `push` maintains the heap invariant on every
+insertion — so a heap deserialized from a sequence is ordered by construction,
+not by a sort afterwards.
+"""
+
+[[annotation]]
+id    = "de-impls-0052"
+file  = "src/de/impls.rs"
+lines = "1086-1096"
+title = "BTreeSet<T: Eq + Ord> — no capacity to reserve"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition", "collections"]
+macro_def = "de-impls-0047"
+body = """
+The first invocation to use both bound slots of the matcher, and the first to
+pass `BTreeSet::new()` and `nop_reserve` — a tree has no contiguous buffer, so
+the size hint has nothing to preallocate. Duplicate elements in the input are
+silently collapsed, since `insert` returns a `bool` that nothing reads.
+"""
+
+[[annotation]]
+id    = "de-impls-0053"
+file  = "src/de/impls.rs"
+lines = "1097-1107"
+title = "LinkedList<T> — no bounds at all"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition", "collections"]
+macro_def = "de-impls-0047"
+body = """
+The degenerate case of the matcher: no bounds on `T`, no extra parameters, so
+both optional groups match zero times. `push_back` keeps input order, which a
+list built with `push_front` would reverse.
+"""
+
+[[annotation]]
+id    = "de-impls-0054"
+file  = "src/de/impls.rs"
+lines = "1108-1118"
+title = "HashSet<T: Eq + Hash, S: BuildHasher + Default> — the second parameter"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition", "collections", "cfg"]
+macro_def = "de-impls-0047"
+body = """
+The only invocation that exercises the `$typaram` slot, and the reason the
+matcher has one. The hasher parameter is what lets a `HashSet<T, FxBuildHasher>`
+deserialize, and `S: Default` is the bound that makes it constructible — the
+macro can call `S::default()` without ever knowing what `S` is.
+
+Gated on `std` alone, not `std` or `alloc`: `HashSet` lives in `std`.
+"""
+
+[[annotation]]
+id    = "de-impls-0055"
+file  = "src/de/impls.rs"
+lines = "1119-1129"
+title = "VecDeque<T> — the last of the five"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition", "collections"]
+macro_def = "de-impls-0047"
+body = """
+Contiguous enough to preallocate and reserve, ordered by `push_back`. It is the
+closest of the five to `Vec`, which makes the next impl — forty-eight lines of
+hand-written code for a type this macro could almost have generated — the
+interesting comparison.
+"""
+
+[[annotation]]
+id    = "de-impls-0056"
+file  = "src/de/impls.rs"
+lines = "1130-1176"
+title = "Vec — the by-value half, identical to what the macro would emit"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["collections", "marker-types"]
+prereqs = ["de-impls-0048"]
+body = """
+Read this against `seq_impl!` and there is nothing new: a local visitor carrying
+`PhantomData<T>`, `expecting` writing `"a sequence"`, `visit_seq` preallocating
+with `size_hint::cautious` and pushing in a loop. `Vec` could have been a sixth
+invocation of the macro and this half would be unchanged.
+
+The reason it is written out is entirely in the other half, below. The macro's
+in-place strategy is clear-and-refill; `Vec` can do better, and expressing that
+in the macro would have meant a sixth callback that four of the five callers pass
+a no-op for.
+"""
+
+[[annotation]]
+id    = "de-impls-0057"
+file  = "src/de/impls.rs"
+lines = "1177-1224"
+title = "Vec in place — the deepest reuse in the crate"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["borrowing", "collections", "smart-pointers", "iterators"]
+prereqs = ["de-impls-0056", "de-mod-0023"]
+body = """
+Forty-eight lines that reuse not just the `Vec`'s buffer but every element's,
+and the mechanism is `InPlaceSeed`.
+
+The reservation comes first and is guarded: `hint.checked_sub(self.0.len())`
+returns `None` when the incoming sequence is shorter than what is already
+there, and the `if let` skips the reserve rather than underflowing. Written as
+`hint - self.0.len()` this would panic in a debug build on any input that
+shrinks the vector.
+
+Then the loop over existing indices. `InPlaceSeed(&mut self.0[i])` is a
+`DeserializeSeed` whose `deserialize` calls `T::deserialize_in_place` on the
+element it wraps — so for a `Vec<String>`, element *i* is deserialized into the
+`String` already sitting at index *i*, reusing its buffer. This is where the
+`deserialize_in_place` override on `String` finally pays off, several hundred
+lines from where it was written.
+
+`next_element_seed` returning `None` means the input ran out before the existing
+elements did, so the vector is truncated to what was actually filled and the
+function returns. Anything left in the input after the existing elements are
+exhausted falls through to the ordinary push loop.
+
+The `let next = { ... }` block is a fossil. It was written to end the borrow of
+`self.0[i]` before `truncate` touches `self.0` again, which the pre-NLL borrow
+checker required. Under NLL it is unnecessary: `InPlaceSeed`'s `Value` is `()`,
+so `next` is an `Option<()>` holding no borrow at all, and the reference dies
+when the call returns. The braces are harmless and they document the intent.
+"""
