@@ -2637,3 +2637,210 @@ unrecognised name — it errors rather than returning an ignore marker. Without
 that attribute the derive generates a third variant, `Field::Ignore`, and the
 loop calls `next_value::<IgnoredAny>()` for it.
 """
+
+[[annotation]]
+id    = "de-impls-0103"
+file  = "src/de/impls.rs"
+lines = "2266-2325"
+title = "SystemTime — Duration's block again, with std guaranteed"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg", "strings", "no-std"]
+prereqs = ["de-impls-0099"]
+body = """
+A near-copy of the `Duration` block with the field names changed to
+`secs_since_epoch` and `nanos_since_epoch`. The `// Reuse duration` comment
+tells you the intent; the duplication tells you the crate would rather repeat
+sixty lines than build an abstraction over two types that happen to have the
+same shape.
+
+One line differs in a way worth catching. Where `Duration` called
+`private::string::from_utf8_lossy` — the shim with two return types — this block
+calls `String::from_utf8_lossy` from the standard library directly, and takes
+`&value` rather than `&*value`.
+
+It can, because this impl is `#[cfg(feature = "std")]`. `SystemTime` does not
+exist without `std`, so there is no configuration where the shim would be
+needed. The two spellings are a precise record of which code has to survive
+`no_std` and which does not.
+"""
+
+[[annotation]]
+id    = "de-impls-0104"
+file  = "src/de/impls.rs"
+lines = "2326-2403"
+title = "A visitor named DurationVisitor, inside SystemTime"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["result", "custom-errors"]
+prereqs = ["de-impls-0102", "de-impls-0100"]
+body = """
+The visitor is called `DurationVisitor` and its `type Value` is `Duration`, in
+the middle of `SystemTime`'s impl. That is not a copy-paste slip: what is being
+read off the wire genuinely is a duration — the offset from the epoch — and the
+conversion to a `SystemTime` happens after the visitor returns.
+
+`expecting` still writes `"struct SystemTime"`, so error messages name the type
+the user asked for rather than the one being parsed.
+
+Everything else is the accumulator pattern from `Duration`, with the field-name
+strings changed and the overflow message rewritten to say "SystemTime epoch
+offset". Read it as confirmation that the pattern really is mechanical — this is
+what `serde_derive` would have produced for both types.
+"""
+
+[[annotation]]
+id    = "de-impls-0105"
+file  = "src/de/impls.rs"
+lines = "2404-2411"
+title = "The epoch offset, and the times this type cannot represent"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["result", "option", "custom-errors"]
+prereqs = ["de-impls-0104"]
+body = """
+`UNIX_EPOCH.checked_add(duration)` is the actual construction, and the second
+overflow check of the block — the first guarded `Duration::new`, this one guards
+a `SystemTime` far enough in the future to exceed the platform's representation.
+
+The design decision is in what is being added to. A `SystemTime` is serialized
+as a non-negative offset from 1970, which means **no time before 1970 can be
+serialized at all**. The other half of the crate says so out loud:
+`ser/impls.rs` calls `self.duration_since(UNIX_EPOCH)` and returns
+`Error::custom("SystemTime must be later than UNIX_EPOCH")` when that fails.
+
+So a birthday in 1969 is not a serde-representable `SystemTime`. This is a
+limitation of the encoding serde chose, not of the type — `SystemTime` itself
+handles pre-epoch times fine.
+
+`D::Error::custom` here where the inner functions wrote `E::custom`: same trait
+method, different type parameter in scope. Outside a visitor the error type is
+the deserializer's, not the visitor's.
+"""
+
+[[annotation]]
+id    = "de-impls-0106"
+file  = "src/de/impls.rs"
+lines = "2412-2441"
+title = "Range — where the file starts sharing visitors between types"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "marker-types", "modules"]
+prereqs = ["de-impls-0102"]
+body = """
+The comment says *"Similar to"* rather than `Duration`'s *"cleaned-up version
+of"*, and the difference is real: this is no longer just the derive's output.
+The visitor lives in a module below, it is shared with `RangeInclusive`, and it
+returns a tuple rather than the final type.
+
+`deserialize_struct("Range", range::FIELDS, range::RangeVisitor { ... })` then
+`Ok(start..end)`. The visitor produced `(Idx, Idx)` and this line turns it into
+a range, which is why one visitor can serve two types whose construction differs.
+
+`expecting: "struct Range"` is passed *as data*. Every visitor before this one
+hardcoded its expectation string in the `expecting` method; this one takes it as
+a field so that two different types can share the implementation and still
+produce their own error messages.
+"""
+
+[[annotation]]
+id    = "de-impls-0107"
+file  = "src/de/impls.rs"
+lines = "2442-2461"
+title = "RangeInclusive — the same visitor, a different constructor"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "visibility"]
+prereqs = ["de-impls-0106"]
+body = """
+Identical but for two strings and the last line: `RangeInclusive::new(start,
+end)` instead of `start..=end`.
+
+Either would work here. The `new` constructor exists because
+`RangeInclusive`'s fields are private — it carries an extra `exhausted` flag
+that `Range` does not have, so it cannot be built with a struct literal — and
+using it makes that visible at a glance.
+
+Worth noting what the shared visitor costs: `RangeInclusive` is deserialized
+from exactly the same two fields as `Range`, so the `exhausted` state of a
+partially-iterated `RangeInclusive` does not survive a round trip. The type is
+serialized as its bounds, and comes back fresh.
+"""
+
+[[annotation]]
+id    = "de-impls-0108"
+file  = "src/de/impls.rs"
+lines = "2462-2478"
+title = "mod range — a private module as a namespace, not a file"
+kind  = "plumbing"
+tracks = ["reference", "course"]
+course_unit = "11-no-std-and-cfg"
+rust_features = ["modules", "visibility"]
+prereqs = ["de-impls-0106"]
+body = """
+An inline `mod` in the middle of a three-thousand-line file, and the reason is
+name collision rather than organisation. This block needs an `enum Field`, a
+`FIELDS` const and a `FieldVisitor` — and so did `Duration`, and so will
+`RangeFrom` and `RangeTo` below. Function-local items solved that for `Duration`
+because everything fitted inside one `fn`. Here the visitor must be shared
+between two impls, so it has to outlive any single function, and a private
+module is the smallest scope that holds it.
+
+`pub` on the items inside means "visible to the parent module", not public API —
+the module itself is private, so nothing escapes the crate. That two-level
+visibility is what lets `range::RangeVisitor` be named from the impls above
+while staying invisible to users.
+
+The imports repeat at the top because a `mod` is a fresh namespace: `use
+crate::lib::*` at the top of the file does not reach inside it.
+"""
+
+[[annotation]]
+id    = "de-impls-0109"
+file  = "src/de/impls.rs"
+lines = "2479-2522"
+title = "The field identifier, third instance"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "strings"]
+prereqs = ["de-impls-0099"]
+body = """
+Byte-for-byte the pattern from `Duration` and `SystemTime` with `start` and
+`end` in place of the field names, including the `&*value` deref that makes the
+`no_std` shim's return type work.
+
+Three near-identical copies in four hundred lines is the price of not being able
+to use the derive that would generate them. Counting them is a fair way to
+measure what `#[derive(Deserialize)]` is actually worth.
+"""
+
+[[annotation]]
+id    = "de-impls-0110"
+file  = "src/de/impls.rs"
+lines = "2523-2591"
+title = "RangeVisitor — the first visitor that returns something other than its type"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "03-associated-types"
+rust_features = ["associated-types", "generic-params", "marker-types"]
+prereqs = ["de-impls-0108", "de-impls-0102"]
+body = """
+`type Value = (Idx, Idx)`. Every visitor up to here produced the type its impl
+was written for; this one produces a tuple and lets the caller assemble the
+result.
+
+That indirection is the whole design. Four range types — `Range`,
+`RangeInclusive`, and `RangeFrom` and `RangeTo` below — read the same fields and
+build differently, so the shared part stops at "two values were read" and the
+divergence happens in the four callers. Making `Value` an intermediate rather
+than a destination is what makes the sharing possible.
+
+`expecting: &'static str` and `phantom: PhantomData<Idx>` are the two fields:
+the message so error text names the right type, and the marker because `Idx`
+appears only in the impl's bounds, not in any real field.
+
+Below that it is the familiar pair — `visit_seq` reading positionally with
+`invalid_length`, `visit_map` accumulating `Option`s with `duplicate_field` and
+`missing_field`. By the fourth appearance the shape should be predictable, which
+is itself the point: this is what derived code looks like, every time.
+"""
