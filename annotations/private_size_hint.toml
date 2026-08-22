@@ -1,0 +1,57 @@
+schema = 1
+source = "serde_core-1.0.229"
+
+[[annotation]]
+id    = "private-size-hint-0001"
+file  = "src/private/size_hint.rs"
+lines = "1-9"
+title = "from_bounds — trusting an iterator only when it is certain"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["iterators", "option", "generic-params"]
+prereqs = ["de-mod-0066"]
+body = """
+`Iterator::size_hint` returns a lower bound and an optional upper bound. This
+function forwards the pair to `helper` below, which returns `Some` only when the
+two agree — an exact count — and `None` otherwise.
+
+That is stricter than it looks. An iterator reporting "at least 3, at most 100"
+knows something, and this discards it. The value feeds `SeqAccess::size_hint`
+and thence a preallocation, where a wrong-but-plausible number is worse than no
+number: it either wastes memory or forces a realloc on top of the guess.
+"""
+
+[[annotation]]
+id    = "private-size-hint-0002"
+file  = "src/private/size_hint.rs"
+lines = "10-30"
+title = "cautious — the one-megabyte ceiling on attacker-controlled lengths"
+kind  = "plumbing"
+tracks = ["reference", "course"]
+course_unit = "12-errors-iterators-closures"
+rust_features = ["collections", "generic-params", "zero-cost"]
+prereqs = ["de-impls-0035"]
+body = """
+Called by every collection impl in `de/impls.rs`, and the reason none of them
+can be made to allocate gigabytes by a four-byte header.
+
+    cmp::min(hint.unwrap_or(0), MAX_PREALLOC_BYTES / mem::size_of::<Element>())
+
+`MAX_PREALLOC_BYTES` is 1 MiB. The division is what makes the cap uniform in
+*bytes* rather than in elements: a `Vec<u8>` may preallocate 1,048,576 slots and
+a `Vec<[u8; 64]>` only 16,384. Without it a large element type would multiply
+the ceiling by its own size.
+
+The zero-sized-type branch returns 0 rather than dividing, which would be a
+division by zero. `Vec<()>` with a claimed length of four billion allocates
+nothing, as it should — a `Vec` of ZSTs never allocates at all.
+
+Nothing here rejects a large length. A sequence genuinely containing ten million
+elements still deserializes; the `Vec` grows by doubling instead of being handed
+the right capacity up front. The cost of a hostile input is bounded work, not a
+refusal — which is the correct trade, since the format cannot know in advance
+which it is dealing with.
+
+`helper` at the bottom is the exact-bounds check `from_bounds` delegates to, kept
+private to this module.
+"""

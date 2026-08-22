@@ -1,0 +1,61 @@
+schema = 1
+source = "serde_core-1.0.229"
+
+[[annotation]]
+id    = "std-error-0001"
+file  = "src/std_error.rs"
+lines = "1-42"
+title = "Forty lines of documentation for a trait almost nobody compiles"
+kind  = "doc-contract"
+tracks = ["reference", "course"]
+course_unit = "11-no-std-and-cfg"
+rust_features = ["no-std", "cfg", "custom-errors", "supertraits"]
+prereqs = ["crate-root-0009", "de-mod-0007"]
+body = """
+This module is compiled only when `std` is off *and* the compiler predates
+`core::error::Error` — an increasingly rare corner. It carries forty lines of
+documentation anyway, because the problem it solves catches every format author
+exactly once.
+
+Serde's `ser::Error` and `de::Error` require `StdError` as a supertrait, and
+what `StdError` *is* depends on features: the real `std::error::Error` when
+`std` is on, this identical copy when it is not. A format author writing
+`impl std::error::Error for MyError {}` has therefore written something that
+compiles in one configuration and not the other.
+
+The doc gives three recipes rather than one, which is the right shape for this
+kind of problem:
+
+1. Do not support `no_std` — write the `std::error::Error` impl and say so in a
+   comment.
+2. Support it with your own `std` feature that forwards to `serde/std`.
+3. Sidestep the question entirely by implementing `serde::ser::StdError`, the
+   re-export, which is whichever trait is currently in play.
+
+The third is the one to reach for, and it is listed last because it only makes
+sense after the first two have explained why the question exists.
+"""
+
+[[annotation]]
+id    = "std-error-0002"
+file  = "src/std_error.rs"
+lines = "43-48"
+title = "The trait itself: six lines mirroring std"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["supertraits", "trait-objects", "default-methods"]
+prereqs = ["std-error-0001"]
+body = """
+`Debug + Display` as supertraits, and one method with a default returning
+`None`. That is `std::error::Error`'s shape, reproduced closely enough that
+downstream code cannot tell which one it got.
+
+`fn source(&self) -> Option<&(dyn Error + 'static)>` is one of the crate's ten
+appearances of `dyn`, and the `+ 'static` is required rather than decorative: a
+trait object's default lifetime bound in return position would not be `'static`,
+and error chains are walked long after the frames that produced them are gone.
+
+What is *not* copied is as informative as what is. No `description`, no `cause`
+— both deprecated in `std`. A compatibility shim is a chance to drop the parts
+of the original that should never have existed.
+"""

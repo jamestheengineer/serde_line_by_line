@@ -1,0 +1,61 @@
+schema = 1
+source = "serde_core-1.0.229"
+
+[[annotation]]
+id    = "format-0001"
+file  = "src/format.rs"
+lines = "1-18"
+title = "One of the crate's two unsafe blocks, and the argument it does not write down"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "12-errors-iterators-closures"
+rust_features = ["unsafe", "borrowing", "strings", "no-std"]
+prereqs = ["crate-root-0002"]
+body = """
+Twelve thousand lines of Rust contain exactly two `unsafe` blocks. This is one
+of them, and it is four words long:
+
+    unsafe { str::from_utf8_unchecked(slice) }
+
+`Buf` is a fixed byte array with a write offset, used to format a value into
+stack space with no allocator — which is why it exists at all, since `no_std`
+has no `String` to write into.
+
+The safety argument is sound and is not stated anywhere. `bytes[..offset]` can
+only have been written by the `Write` impl below, whose `write_str` takes a
+`&str` and copies `s.as_bytes()` wholesale. Every write therefore appends a
+complete, valid UTF-8 sequence, and a concatenation of valid sequences is valid.
+There is no path that writes a partial character.
+
+Modern Rust convention would put a `// SAFETY:` comment on that line spelling
+out the invariant and where it is maintained. This code predates the convention.
+Reconstructing the argument yourself is a good exercise precisely because the
+crate makes you do it — and it is worth noticing that the invariant depends
+entirely on `bytes` being private and `Write` being the only writer.
+"""
+
+[[annotation]]
+id    = "format-0002"
+file  = "src/format.rs"
+lines = "19-30"
+title = "The bounds check, and the caller that unwraps it"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["result", "no-std"]
+prereqs = ["format-0001"]
+body = """
+`write_str` checks `self.offset + s.len() > self.bytes.len()` and returns
+`fmt::Error` rather than growing — there is nothing to grow into.
+
+Follow the error and it disappears. `ser/impls.rs` formats IP and socket
+addresses through this buffer with `write!(&mut writer, "{}", $value).unwrap()`,
+so an overflow is a panic, not an error. That is why every caller carries a
+`debug_assert_eq!` pinning `MAX_LEN` against the longest possible rendering —
+`"[1001:1002:1003:1004:1005:1006:1007:1008%4294967295]:65000".len()` and
+similar. The correctness of the `unwrap` is guaranteed by a constant a human
+computed and a debug assertion that checks the arithmetic.
+
+`self.offset + s.len()` can in principle overflow rather than exceed the length.
+It cannot here: both are bounded by the size of a stack array that the same
+function refuses to exceed.
+"""

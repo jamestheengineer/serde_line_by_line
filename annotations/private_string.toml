@@ -1,0 +1,40 @@
+schema = 1
+source = "serde_core-1.0.229"
+
+[[annotation]]
+id    = "private-string-0001"
+file  = "src/private/string.rs"
+lines = "1-23"
+title = "One function, two signatures, and three question marks"
+kind  = "cfg-gate"
+tracks = ["reference", "course"]
+course_unit = "11-no-std-and-cfg"
+rust_features = ["cfg", "no-std", "strings", "smart-pointers"]
+prereqs = ["de-impls-0099"]
+body = """
+`from_utf8_lossy` is defined twice with *different return types* — `Cow<'_,
+str>` when an allocator is available, `&str` when not. That is normally a
+mistake. Here it is deliberate, and the comment between the two says exactly why
+it works:
+
+    // The generated code calls this like:
+    //
+    //     let value = &_serde::__private::from_utf8_lossy(bytes);
+    //     Err(_serde::de::Error::unknown_variant(value, VARIANTS))
+    //
+    // so it is okay for the return type to be different from the std case as
+    // long as the above works.
+
+`&*` on a `Cow<str>` derefs to `&str`; `&*` on a `&str` is a no-op. One call
+site, two signatures, and the contract is not the type but the expression the
+caller is known to write.
+
+The `no_std` body cannot allocate, so it cannot build a lossy replacement
+string. It returns three replacement characters instead — the comment calls them
+"a white-on-black question mark" and expects the user to recognise invalid
+UTF-8 on sight. The error message loses the field name entirely in that
+configuration, which is a real degradation stated plainly rather than hidden.
+
+Depending on the *shape of the call site* rather than on a type is a fragile
+contract, and the comment exists because nothing else enforces it.
+"""

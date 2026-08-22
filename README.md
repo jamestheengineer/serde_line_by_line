@@ -8,10 +8,10 @@ Along the way it teaches Rust: lifetimes, trait design, associated types,
 generic bounds, `macro_rules!`, and `no_std` engineering, using one of the most
 carefully written crates in the ecosystem as the worked example.
 
-> **Status: phase 4 complete — `ser/` and `de/value.rs` done, the crate is
-> two-thirds annotated.** Seven files are at 100% and the coverage gate
-> hard-fails on any regression in them. Remaining: `de/impls.rs` and the
-> plumbing files. See **[PLAN.md](PLAN.md)** for the roadmap and
+> **Status: the reference track is complete — every line of `serde_core` is
+> annotated.** All 19 files are at 100%, listed in `annotations/manifest.toml`,
+> so the coverage gate hard-fails on any gap or overlap. Next is phase 7, the
+> course track. See **[PLAN.md](PLAN.md)** for the roadmap and
 > **[docs/decisions.md](docs/decisions.md)** for the architecture calls.
 >
 > ```
@@ -23,7 +23,7 @@ carefully written crates in the ecosystem as the worked example.
 >
 > ```
 > $ cargo xtask coverage
-> TOTAL                        12037     7966     310  66.2%
+> TOTAL                        12037    12037     468 100.0%
 > ```
 
 ---

@@ -1,0 +1,185 @@
+schema = 1
+source = "serde_core-1.0.229"
+
+[[annotation]]
+id    = "macros-0001"
+file  = "src/macros.rs"
+lines = "1-43"
+title = "The one exported macro, and a first paragraph written defensively"
+kind  = "doc-contract"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "visibility"]
+prereqs = ["de-mod-0028"]
+body = """
+The file opens with a note to maintainers rather than users:
+
+    // Super explicit first paragraph because this shows up at the top level and
+    // trips up people who are just looking for basic Serialize / Deserialize
+    // documentation.
+
+`#[macro_export]` puts a macro at the crate root, next to `Serialize` and
+`Deserialize`, with no way to file it under `de`. So the first line of its
+documentation has to work as a signpost for people who arrived by accident:
+*"Helper macro when implementing the `Deserializer` part of a new data format."*
+Naming the audience in the first six words is the entire technique.
+
+The doc comment then states the problem before the solution. A self-describing
+format ignores the hint it is given — it looks at the input and calls the
+matching `visit_*` method — so all twenty-nine `deserialize_*` methods have the
+same body. The doctest shows one of them written out, so the reader feels the
+repetition before being offered the fix.
+"""
+
+[[annotation]]
+id    = "macros-0002"
+file  = "src/macros.rs"
+lines = "44-73"
+title = "The fix, and the convention it assumes"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["macro-rules", "macro-hygiene"]
+prereqs = ["macros-0001"]
+body = """
+The second doctest is the payoff: one real `deserialize_any` and twenty-eight
+method names in a list. *"You can choose which methods to forward"* is the
+sentence that matters — the macro takes a list rather than generating all of
+them, so a format that handles `deserialize_option` specially simply leaves
+`option` out.
+
+Both doctests are `edition2021` and both `use serde::...` rather than
+`serde_core::...`, because these docs are rendered from the facade crate as
+well. A doctest here has to compile in the crate the reader is actually
+depending on.
+"""
+
+[[annotation]]
+id    = "macros-0003"
+file  = "src/macros.rs"
+lines = "74-108"
+title = "The escape hatch for code that named its lifetime something else"
+kind  = "doc-contract"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-hygiene", "lifetimes", "macro-rules"]
+prereqs = ["macros-0002"]
+body = """
+*"The macro assumes the convention that your `Deserializer` lifetime parameter
+is called `'de` and that the `Visitor` type parameters on each method are called
+`V`."*
+
+That sentence describes a hygiene hole, and the third doctest is the patch for
+it. `macro_rules!` hygiene does not extend to lifetimes and type parameters the
+way it does to local variables: a macro that writes `'de` in its output means
+whatever `'de` is in scope at the expansion site. Usually that is exactly what
+you want — the impl really does have a `'de`. But a `Deserializer` whose
+lifetime is `'q`, as in the example, would get a reference to a lifetime that
+does not exist.
+
+The `<W: Visitor<'q>>` prefix lets the caller pass both names in. It is the same
+technique `seq_impl!` used with `$access`: when a macro needs to cooperate with
+identifiers at the call site, the identifiers have to travel through the macro's
+arguments.
+"""
+
+[[annotation]]
+id    = "macros-0004"
+file  = "src/macros.rs"
+lines = "109-118"
+title = "Two arms, and a comment about their order worth testing"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "macro-repetition"]
+prereqs = ["macros-0003"]
+body = """
+Ten lines, and both arms do the same thing — expand each name in the list into a
+call to `forward_to_deserialize_any_helper!`, with the lifetime and visitor
+either taken from the prefix or defaulted to `'de` and `V`.
+
+    // This case must be after the previous one.
+
+That comment does not hold on a current compiler. Reproduce the pair with the
+arms reversed — a first arm matching `$($func:ident)*` and a second matching the
+`<$visitor:ident: Visitor<$lifetime:tt>>` prefix — invoke it with the explicit
+form, and it still selects the second arm and compiles. The generic arm cannot
+match a leading `<`, since that is not an `ident`, so the matcher falls through
+cleanly.
+
+Which leaves two possibilities: a compiler in the supported range where fragment
+matching committed earlier, or ordinary defensiveness. The comment is worth
+keeping either way, and worth knowing you cannot demonstrate today.
+
+`#[macro_export(local_inner_macros)]` on the previous line is the load-bearing
+attribute. It rewrites unqualified macro calls inside the body — here,
+`forward_to_deserialize_any_helper!` — into `$crate`-relative paths, so the
+helper resolves to *this* crate's copy at any expansion site. Without it, a user
+who happened to define a macro of that name would shadow it.
+"""
+
+[[annotation]]
+id    = "macros-0005"
+file  = "src/macros.rs"
+lines = "119-135"
+title = "Every path fully qualified, because the caller's scope is unknown"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-hygiene", "macro-rules", "result"]
+prereqs = ["macros-0004", "crate-root-0008"]
+body = """
+The macro that actually emits a method, and its signature line is a small
+lesson in hygiene:
+
+    fn $func<$v>(self, $($arg: $ty,)* visitor: $v) -> $crate::__private::Result<$v::Value, <Self as $crate::de::Deserializer<$l>>::Error>
+
+`$crate::__private::Result` rather than `Result`. `$crate::de::Visitor` rather
+than `Visitor`. `<Self as $crate::de::Deserializer<$l>>::Error` rather than
+`Self::Error`.
+
+`macro_rules!` hygiene covers local variables and labels — it does not cover
+paths. A name written in a macro body resolves at the *expansion* site, so a
+user with `struct Result;` in scope, or with a different `Visitor` imported,
+would break this macro in ways neither party could easily diagnose. Routing
+every path through `$crate` makes the expansion independent of what the caller
+has imported, and it is why `__private` exists to hold a re-export of
+`core::result::Result`.
+
+`let _ = $arg;` in a loop over the arguments is the small piece: the forwarded
+methods ignore their `name` and `len` parameters, and this suppresses the unused
+warning without prefixing every parameter name with an underscore in the table
+below.
+"""
+
+[[annotation]]
+id    = "macros-0006"
+file  = "src/macros.rs"
+lines = "136-230"
+title = "A ninety-five line lookup table, one arm per method"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "macro-repetition"]
+prereqs = ["macros-0005"]
+body = """
+Twenty-nine arms mapping a short name to a method name and its extra
+parameters: `bool` to `deserialize_bool()`, `tuple` to
+`deserialize_tuple(len: usize)`, `struct` to `deserialize_struct(name: &'static
+str, fields: &'static [&'static str])`.
+
+There is nothing clever here and that is the point — it is a table, and the
+reason it has to exist is that `macro_rules!` cannot build an identifier from
+pieces. `concat_idents!` has never stabilized, so a macro cannot turn the token
+`bool` into the token `deserialize_bool`. Twenty-nine arms are the workaround,
+and the whole reason this is a two-stage macro at all: the caller writes short
+names, this table translates them, and `forward_to_deserialize_any_method!`
+writes the body.
+
+The arms also encode the shape of the `Deserializer` trait itself. Reading down
+the right-hand column tells you which methods carry a name, which carry a
+length, and which carry both — the same information as the trait definition in
+`de/mod.rs`, written a second time because the macro cannot look it up.
+
+That duplication is a real maintenance cost: a new method on `Deserializer`
+needs a matching arm here, or formats using the macro silently fail to forward
+it.
+"""

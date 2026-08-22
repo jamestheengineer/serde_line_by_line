@@ -15,4 +15,13 @@ complete = [
     "src/de/impls.rs",
     "src/crate_root.rs",
     "src/lib.rs",
+    "src/macros.rs",
+    "src/format.rs",
+    "src/std_error.rs",
+    "src/private/mod.rs",
+    "src/private/content.rs",
+    "src/private/doc.rs",
+    "src/private/seed.rs",
+    "src/private/size_hint.rs",
+    "src/private/string.rs",
 ]

@@ -1,0 +1,114 @@
+schema = 1
+source = "serde_core-1.0.229"
+
+[[annotation]]
+id    = "private-doc-0001"
+file  = "src/private/doc.rs"
+lines = "1-34"
+title = "An error type that panics on every method, for documentation only"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["custom-errors", "cfg", "traits"]
+prereqs = ["private-mod-0001"]
+body = """
+*"Used only by Serde doc tests. Not public API."*
+
+A `struct Error;` whose `custom`, `description` and `fmt` all call
+`unimplemented!()`. It exists so that the doc examples throughout `ser/mod.rs`
+can write a `Serializer` impl with a plausible `type Error` without each
+doctest defining its own — the examples are about the trait being demonstrated,
+not about error handling.
+
+`unimplemented!()` rather than a real body is the honest choice: a doctest that
+reached one of these would be testing something it did not mean to.
+
+All three impls carry `diagnostic::do_not_recommend`, the same attribute
+`InPlaceSeed` uses. Without it, a user whose error type does not implement
+`ser::Error` could be shown this one as a candidate — a hidden doctest fixture
+surfacing in a real diagnostic. The attribute is `cfg_attr`-gated on
+`not(no_diagnostic_namespace)` because it does not exist on older compilers.
+"""
+
+[[annotation]]
+id    = "private-doc-0002"
+file  = "src/private/doc.rs"
+lines = "35-56"
+title = "Two macros so a doctest can lie about what Serialize is"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "macro-hygiene", "visibility"]
+prereqs = ["private-doc-0001"]
+body = """
+`__private_serialize!` expands to a local `trait Serialize` declaration with the
+right method signature. A doctest that wants to show how to implement
+`Serializer` — but not drag in the real `Serialize` trait and everything that
+implements it — invokes this and gets a stand-in with the same shape.
+
+`__serialize_unimplemented!` is the ser-side twin of
+`forward_to_deserialize_any!`, and the twin extends to its structure: a
+front-end macro taking a list of short names, a helper table translating each
+name into a method signature, and a third macro writing the body. Same
+three-stage design, same reason — `macro_rules!` cannot build the identifier
+`serialize_bool` from the token `bool`.
+
+Both are `#[macro_export] #[doc(hidden)]`, which is the standard way to make a
+macro reachable from an expansion in another crate without documenting it.
+"""
+
+[[annotation]]
+id    = "private-doc-0003"
+file  = "src/private/doc.rs"
+lines = "57-69"
+title = "The body writer, generic over methods that take a type parameter"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "macro-repetition", "sized-bound"]
+prereqs = ["private-doc-0002"]
+body = """
+    ($func:ident $(<$t:ident>)* ($($arg:ty),*) -> $ret:ident)
+
+Three optional pieces in one matcher: a type parameter that most methods do not
+have, an argument list of any length, and the associated type the method
+returns. `serialize_some<T>(&T) -> Ok` uses all three; `serialize_unit() -> Ok`
+uses one.
+
+The `where $($t: ?Sized + $crate::Serialize,)*` clause is emitted only when a
+type parameter was supplied, because it is inside the same repetition. That is
+the standard `macro_rules!` idiom for an optional clause: repeat it over the
+same capture that may have matched zero times.
+
+`-> $crate::__private::Result<Self::$ret, Self::Error>` shows why `$ret` is an
+identifier rather than a type — it is spliced after `Self::`, naming an
+associated type such as `SerializeSeq`.
+"""
+
+[[annotation]]
+id    = "private-doc-0004"
+file  = "src/private/doc.rs"
+lines = "70-165"
+title = "The ser-side table, and the seven rows that declare a type as well"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "associated-types"]
+prereqs = ["private-doc-0003", "macros-0006"]
+body = """
+Twenty-eight arms mirroring the table in `macros.rs`, for the serialize half of
+the trait. Most are a single line naming a method and its arguments.
+
+Seven are not, and the difference is the shape of `Serializer`. `seq`, `tuple`,
+`tuple_struct`, `tuple_variant`, `map`, `struct` and `struct_variant` each emit
+*two* items:
+
+    type SerializeSeq = $crate::ser::Impossible<Self::Ok, Self::Error>;
+    __serialize_unimplemented_method!(serialize_seq(Option<usize>) -> SerializeSeq);
+
+An associated type as well as a method, because those seven methods return a
+compound serializer rather than a value, and a `Serializer` impl is not complete
+without naming all seven types. `Impossible` is the uninhabited stand-in from
+`ser/impossible.rs` — the type whose every method is unreachable — which is
+exactly right for a serializer that refuses compound values.
+
+That is the last line of the crate's private plumbing, and it closes the loop
+back to `ser/impossible.rs`, annotated back in phase 2.
+"""

@@ -1,0 +1,33 @@
+schema = 1
+source = "serde_core-1.0.229"
+
+[[annotation]]
+id    = "private-mod-0001"
+file  = "src/private/mod.rs"
+lines = "1-21"
+title = "The module that exists so generated code has somewhere to point"
+kind  = "plumbing"
+tracks = ["reference", "course"]
+course_unit = "11-no-std-and-cfg"
+rust_features = ["modules", "visibility", "cfg", "proc-macro-boundary"]
+prereqs = ["crate-root-0008"]
+body = """
+Twenty-one lines declaring five submodules and re-exporting three names, every
+one of them `#[doc(hidden)]`. This is the whole of serde's private surface, and
+it is reached from user crates as `__private229` — the version-stamped alias
+`build.rs` generates.
+
+`#[doc(hidden)]` is not privacy. Everything here is `pub` and reachable by
+anyone willing to type the path; the attribute only keeps it out of the rendered
+documentation. The real protection is the promise in each module's header
+comment — *"Not public API"* — plus a name nobody types by accident.
+
+`content` is gated on `not(no_serde_derive)` and on having an allocator, since
+it buffers arbitrary deserialized values into a `Vec`. On a compiler too old for
+`serde_derive`, nothing would generate a reference to it.
+
+The `FIXME` on line 5 is worth reading: `doc` is only used by this crate's own
+doctests and would ideally be `#[cfg(doctest)]`, but that cfg does not work the
+way you would expect — the linked rustc issue has been open since 2019. So a
+module used by nothing but documentation ships in every build.
+"""

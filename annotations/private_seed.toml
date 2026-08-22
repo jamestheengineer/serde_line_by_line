@@ -1,0 +1,36 @@
+schema = 1
+source = "serde_core-1.0.229"
+
+[[annotation]]
+id    = "private-seed-0001"
+file  = "src/private/seed.rs"
+lines = "1-20"
+title = "InPlaceSeed — twenty lines that carry every in-place optimisation"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["borrowing", "associated-types", "lifetimes", "traits"]
+prereqs = ["de-mod-0023", "de-impls-0057"]
+body = """
+The adapter that turns "deserialize a value" into "deserialize into *this*
+value", and every element-wise reuse in `de/impls.rs` goes through it.
+
+`DeserializeSeed` exists to pass data *into* deserialization. Here the data is a
+`&'a mut T` and the method is `T::deserialize_in_place(deserializer, self.0)`.
+`type Value = ()` because the result went into the borrow rather than out
+through the return.
+
+That is what lets `Vec`'s in-place visitor write
+`seq.next_element_seed(InPlaceSeed(&mut self.0[i]))` and have element *i*
+deserialize directly into element *i*'s existing allocation, several hundred
+lines away from where either half was written.
+
+`diagnostic::do_not_recommend` on the impl is the detail worth pausing on. It
+tells rustc never to suggest this impl when reporting a missing
+`DeserializeSeed` bound. Without it, someone whose type does not implement
+`DeserializeSeed` would be helpfully offered `InPlaceSeed` — a hidden internal
+type they have no reason to have heard of. The attribute is a way of saying
+"this impl is real but is not the answer to anyone's error message", and it is
+gated on `not(no_diagnostic_namespace)` because it only exists on newer
+compilers.
+"""

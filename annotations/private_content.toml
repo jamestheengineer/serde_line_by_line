@@ -1,0 +1,68 @@
+schema = 1
+source = "serde_core-1.0.229"
+
+[[annotation]]
+id    = "private-content-0001"
+file  = "src/private/content.rs"
+lines = "1-9"
+title = "Four lines of comment that deprecate the file"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["visibility", "proc-macro-boundary"]
+prereqs = ["private-mod-0001"]
+body = """
+    // Used from generated code to buffer the contents of the Deserializer when
+    // deserializing untagged enums and internally tagged enums.
+    //
+    // Not public API. Use serde-value instead.
+    //
+    // Obsoleted by format-specific buffer types (https://github.com/serde-rs/serde/pull/2912).
+
+Three separate statements, each doing different work. The first says what the
+type is for: `#[serde(untagged)]` has to try variants in order, which means
+reading the input once and replaying it, which means holding it somewhere. This
+enum is that somewhere.
+
+The second heads off the obvious misuse. `Content` looks exactly like the
+generic value type people want, and pointing at `serde-value` is more useful
+than a refusal.
+
+The third is the one worth acting on: this design has been superseded. Formats
+can now supply their own buffer type — that is what `__deserialize_content_v1`
+on the `Deserializer` trait is for — so the format buffers into its own
+representation instead of being flattened into serde's. Reading the linked PR is
+the fastest way to understand why the method with the version number in its name
+exists.
+"""
+
+[[annotation]]
+id    = "private-content-0002"
+file  = "src/private/content.rs"
+lines = "10-39"
+title = "The data model as a data type, minus two variants"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "01-why-a-data-model"
+rust_features = ["pattern-matching", "smart-pointers", "collections", "lifetime-de"]
+prereqs = ["private-content-0001", "de-mod-0015"]
+body = """
+Twenty-two variants covering the twenty-nine-type data model in concrete form.
+Worth reading beside `Unexpected` in `de/mod.rs`: that enum describes what was
+found for an error message, this one *stores* it.
+
+Three details repay attention.
+
+`Str(&'de str)` and `Bytes(&'de [u8])` sit next to `String(String)` and
+`ByteBuf(Vec<u8>)`, so the buffer preserves whether the input was borrowable.
+Buffering an untagged enum does not force a copy of every string.
+
+`Some`, `Newtype` and the map/seq variants box or vector their contents, because
+an enum containing itself by value would have no finite size. `Map` is a `Vec`
+of pairs rather than a real map — it has to preserve order and duplicates, since
+it does not yet know which variant will consume it.
+
+And what is missing: there is no `I128` or `U128`. The 128-bit types were added
+to the data model later than this enum, and nothing filled the gap. A value that
+must pass through this buffer therefore has nowhere to put a 128-bit integer —
+which is one concrete reason the "obsoleted" note above it exists.
+"""
