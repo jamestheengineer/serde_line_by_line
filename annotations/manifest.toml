@@ -12,4 +12,5 @@ complete = [
     "src/de/mod.rs",
     "src/de/ignored_any.rs",
     "src/de/value.rs",
+    "src/de/impls.rs",
 ]

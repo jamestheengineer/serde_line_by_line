@@ -2844,3 +2844,296 @@ Below that it is the familiar pair — `visit_seq` reading positionally with
 `missing_field`. By the fourth appearance the shape should be predictable, which
 is itself the point: this is what derived code looks like, every time.
 """
+
+[[annotation]]
+id    = "de-impls-0111"
+file  = "src/de/impls.rs"
+lines = "2592-2620"
+title = "RangeFrom — one field, and a range literal with no end"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "pattern-matching"]
+prereqs = ["de-impls-0106"]
+body = """
+`Ok(start..)` builds a `RangeFrom` from the single value the visitor produced.
+The visitor's `Value` is `Idx` rather than a tuple this time — one field means
+there is nothing to pair.
+
+Everything else is the `Range` block with one field removed, and the next
+annotation covers the module it delegates to.
+"""
+
+[[annotation]]
+id    = "de-impls-0112"
+file  = "src/de/impls.rs"
+lines = "2621-2730"
+title = "mod range_from — a hundred and ten lines that differ from mod range by a field"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["modules", "pattern-matching", "proc-macro-boundary"]
+prereqs = ["de-impls-0108", "de-impls-0110"]
+body = """
+This annotation covers the whole module deliberately, because there is one thing
+to say about a hundred and ten lines: it is `mod range` with `end` deleted.
+
+Same private module, same `FIELDS` const, same field-identifier enum, same
+`expecting`-as-a-field visitor, same `visit_seq` and `visit_map` pair. The only
+structural difference is that `enum Field` now has a single variant, which makes
+the `match key` in `visit_map` a one-arm match — exhaustive without a wildcard,
+because a one-variant enum has exactly one possible value.
+
+Four range types produce four copies of this module in the file. Each is
+mechanical, each is what `#[derive(Deserialize)]` would have written, and none
+of them can use the derive because `serde_derive` depends on this crate. If you
+want a number for what the proc macro is worth, it is roughly this: four hundred
+lines here, for four structs with one or two fields each.
+"""
+
+[[annotation]]
+id    = "de-impls-0113"
+file  = "src/de/impls.rs"
+lines = "2731-2759"
+title = "RangeTo — the mirror"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params"]
+prereqs = ["de-impls-0111"]
+body = """
+`Ok(..end)`. A range literal with no start, and the same single-field visitor
+shape. `RangeToInclusive` gets no impl at all, which is the one asymmetry in the
+group and appears to be an omission rather than a decision.
+"""
+
+[[annotation]]
+id    = "de-impls-0114"
+file  = "src/de/impls.rs"
+lines = "2760-2870"
+title = "mod range_to — the fourth copy"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["modules", "pattern-matching"]
+prereqs = ["de-impls-0112"]
+body = """
+`mod range_from` with `start` renamed to `end`. Nothing else differs — same line
+count, same structure, same one-arm match.
+
+Reading these two modules back to back is the strongest argument in the crate
+for why `serde_derive` exists, and it is also a fair look at what generated code
+costs when you have to maintain it by hand: four places to fix if the field
+identifier pattern ever needs to change.
+"""
+
+[[annotation]]
+id    = "de-impls-0115"
+file  = "src/de/impls.rs"
+lines = "2871-2946"
+title = "Bound — and why it cannot use variant_identifier!"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "11-no-std-and-cfg"
+rust_features = ["cfg", "pattern-matching", "no-std"]
+prereqs = ["de-impls-0075"]
+body = """
+Three variants, and a field-identifier impl accepting an index, a name, or bytes
+— which is exactly what `variant_identifier!` generates. So why is it written
+out again?
+
+Look at the macro's own gate, back where it was defined:
+`#[cfg(any(feature = "std", not(no_core_net)))]`. It was introduced for the net
+types and carries their configuration, so in a `no_std` build on a compiler
+predating `core::net` the macro does not exist. `Bound` has no `cfg` at all — it
+must deserialize in every configuration this crate supports.
+
+That is the whole answer: the macro is not available everywhere its output is
+needed. A gate written for one caller's convenience quietly forced two other
+types to duplicate its body, and `Result` below is the second.
+
+The error handling matches `variant_identifier!` exactly, down to `visit_bytes`
+attempting a UTF-8 recovery so it can report `unknown_variant` with names rather
+than `invalid_value` with bytes.
+"""
+
+[[annotation]]
+id    = "de-impls-0116"
+file  = "src/de/impls.rs"
+lines = "2947-2976"
+title = "The first visitor to mix unit and newtype variants"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "marker-types"]
+prereqs = ["de-impls-0115", "de-mod-0070"]
+body = """
+    (Field::Unbounded, v) => v.unit_variant().map(|()| Bound::Unbounded),
+    (Field::Included, v) => v.newtype_variant().map(Bound::Included),
+    (Field::Excluded, v) => v.newtype_variant().map(Bound::Excluded),
+
+`VariantAccess` has a method per variant shape, and this is the first place in
+the file where two of them appear together. `Bound::Unbounded` carries nothing,
+so `unit_variant` returns `Result<(), _>` and the closure maps `()` to the
+variant. The other two carry a `T`, so `newtype_variant` reads it and the
+variant constructor is passed as a function value.
+
+`BoundVisitor<T>(PhantomData<Bound<T>>)` is a tuple struct this time rather than
+the named-field marker used elsewhere — same purpose, four fewer lines.
+"""
+
+[[annotation]]
+id    = "de-impls-0117"
+file  = "src/de/impls.rs"
+lines = "2977-3056"
+title = "Result — the only type here behind a feature of its own"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "11-no-std-and-cfg"
+rust_features = ["cfg", "feature-unification", "result"]
+prereqs = ["de-impls-0115"]
+body = """
+`#[cfg(feature = "result")]`, and `result` is in this crate's `default` list
+alongside `std`. So the impl is present unless someone builds with
+`default-features = false` and does not opt back in.
+
+Every other type in this file is gated by what the platform provides — `std`,
+`alloc`, `no_core_cstr`, `target_has_atomic`. `Result` is gated by nothing but
+its own name. The `rc` feature is the only comparable case, and that one carries
+a documented caveat explaining why you might not want it; this one carries no
+explanation here at all.
+
+Because Cargo features must be additive, a feature like this can only ever be
+*added* by some crate in the graph — one dependency asking for `result` turns it
+on for everybody. The switch is therefore useful to the person compiling a leaf
+binary and nearly useless to a library author.
+
+The field identifier below is the third hand-written copy of
+`variant_identifier!`'s output, for the same reason `Bound` needed one.
+"""
+
+[[annotation]]
+id    = "de-impls-0118"
+file  = "src/de/impls.rs"
+lines = "3057-3086"
+title = "Ok and Err as function values"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["closures", "pattern-matching", "result"]
+prereqs = ["de-impls-0117", "de-impls-0116"]
+body = """
+    (Field::Ok, v) => v.newtype_variant().map(Ok),
+    (Field::Err, v) => v.newtype_variant().map(Err),
+
+`Ok` and `Err` are enum constructors, which means they are also functions of one
+argument, which means they can be passed to `map` directly. The same property
+`Reverse` and `Bound::Included` relied on, on the two variants every Rust
+programmer types daily without thinking of them as callable.
+
+Note the double meaning in `Result<Self::Value, A::Error>` where `Self::Value`
+is itself a `Result<T, E>`: the outer one is deserialization succeeding or
+failing, the inner one is the value that was deserialized. A malformed document
+produces `Err(...)` at the outer level; a document that correctly encodes a
+failure produces `Ok(Err(...))`.
+"""
+
+[[annotation]]
+id    = "de-impls-0119"
+file  = "src/de/impls.rs"
+lines = "3087-3100"
+title = "Wrapping — the smallest impl in the file"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "generic-params"]
+prereqs = ["de-impls-0038"]
+body = """
+One line of body: deserialize the inner type, wrap it. It is exactly what
+`forwarded_impl!(T, Wrapping<T>, Wrapping)` would have produced, written out for
+no reason visible in the source — the macro is in scope and `Reverse` two
+thousand lines above uses it for the identical shape.
+
+`Saturating<T>` gets its impls from `impl_deserialize_num!` instead, which is
+why it is not here.
+"""
+
+[[annotation]]
+id    = "de-impls-0120"
+file  = "src/de/impls.rs"
+lines = "3101-3118"
+title = "atomic_impl! — a cfg computed from the target, not the features"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "11-no-std-and-cfg"
+rust_features = ["cfg", "macro-rules", "msrv", "interior-mutability"]
+prereqs = ["de-impls-0038"]
+body = """
+`Deserialize::deserialize(deserializer).map(Self::new)` is the body — the same
+inference-driven forwarding as `forwarded_impl!`, with `Self::new` in place of a
+named constructor.
+
+The gates are the reason this needs its own macro. Each generated impl carries
+
+    #[cfg(any(no_target_has_atomic, target_has_atomic = $size))]
+
+`target_has_atomic` is set by the compiler from the *target*, not by Cargo: a
+32-bit embedded target may have 8- and 16-bit atomics and no 64-bit ones, and
+some have none at all. The `$size` string is threaded through the macro so each
+type asks about its own width.
+
+`no_target_has_atomic` is the build-script fallback for compilers older than
+1.60, where that cfg did not exist — in which case `build.rs` hardcodes an
+architecture allowlist instead. Two mechanisms for one question, because the
+answer has to work on both sides of a stabilization.
+"""
+
+[[annotation]]
+id    = "de-impls-0121"
+file  = "src/de/impls.rs"
+lines = "3119-3137"
+title = "Eleven atomics in two invocations"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition", "cfg", "interior-mutability"]
+macro_def = "de-impls-0120"
+body = """
+Nine types in the first invocation, two in the second — `AtomicI64` and
+`AtomicU64` are split out under `no_std_atomic64` because 64-bit atomics are the
+ones a 32-bit target is most likely to lack.
+
+`AtomicIsize` and `AtomicUsize` pass `"ptr"` as their size, which is what
+`target_has_atomic` calls a pointer-width atomic.
+
+Deserializing into an atomic is not itself an atomic operation: `Self::new`
+takes the value by move and constructs a fresh cell that nothing else can be
+observing yet.
+"""
+
+[[annotation]]
+id    = "de-impls-0122"
+file  = "src/de/impls.rs"
+lines = "3138-3173"
+title = "FromStrVisitor — the last thing in the file, used fifteen hundred lines above"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "09-blanket-impls-and-coherence"
+rust_features = ["traits", "generic-params", "marker-types", "custom-errors"]
+prereqs = ["de-impls-0073", "de-mod-0008"]
+body = """
+Thirty-five lines closing the file, and the type that made the whole net block
+possible.
+
+`T: str::FromStr` with `T::Err: fmt::Display` is the bound, and
+`s.parse().map_err(Error::custom)` is the body. Any type in any crate that
+implements `FromStr` can be deserialized from a string this way — which is the
+same bridge `de::Error::custom` was documented as providing, seen from the other
+end.
+
+The `expecting` string is a field, like `RangeVisitor`'s, so one visitor serves
+`Ipv4Addr`, `Ipv6Addr`, `SocketAddr` and the rest while each names itself in its
+own error messages.
+
+Only `visit_str` is overridden. A borrowed or owned string both arrive here via
+the trait's defaults, and nothing else is accepted.
+
+That it sits at the bottom of the file while its callers are at line 1584 is the
+ordinary rule for items — order does not matter, name resolution is
+module-wide. Worth one last comparison with `num_128!`, which had to be defined
+before its two callers because macros are the exception to that rule. Same file,
+two opposite constraints, and knowing which is which is most of what reading a
+Rust file top to bottom requires.
+"""
