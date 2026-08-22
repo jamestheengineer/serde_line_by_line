@@ -1768,3 +1768,330 @@ Each row carries both the index and the type-parameter name for every position,
 because the body needs them paired: `$n` for the error message, `$name` for the
 binding and the type.
 """
+
+[[annotation]]
+id    = "de-impls-0069"
+file  = "src/de/impls.rs"
+lines = "1498-1514"
+title = "map_impl! — the same shape as seq_impl!, two callbacks lighter"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "generic-params", "where-clauses"]
+prereqs = ["de-impls-0047"]
+body = """
+The map counterpart, and the interesting comparison is what it does *not* need.
+`seq_impl!` took six arguments; this takes three, because `BTreeMap` and
+`HashMap` agree on the one operation that matters — `insert(key, value)` — so no
+`$insert` callback is required, and neither map has a `clear`-and-`reserve` path
+worth parameterising.
+
+There is no `deserialize_in_place` here at all. Reusing a map's existing entries
+would mean matching incoming keys against keys already present, which is a
+lookup per element and probably slower than rebuilding. The macro does not try,
+and unlike `Option`'s omission there is no `FIXME` suggesting it should.
+
+The matcher is `seq_impl!`'s with `K` and `V` in place of `T`, and only `K` gets
+bounds — `V` is always just `Deserialize`. Note the trailing comma after
+`$with_capacity:expr,`: it is part of the matcher, so every invocation must end
+with one.
+"""
+
+[[annotation]]
+id    = "de-impls-0070"
+file  = "src/de/impls.rs"
+lines = "1515-1555"
+title = "visit_map — and the duplicate key that vanishes"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["collections", "option"]
+prereqs = ["de-mod-0063", "de-impls-0069"]
+body = """
+`while let Some((key, value)) = tri!($access.next_entry())` is the map
+equivalent of the sequence loop, and `next_entry` is the convenience that
+returns both halves at once rather than making the caller sequence `next_key`
+and `next_value` by hand.
+
+`values.insert(key, value)` discards its return value, and that return value is
+`Option<V>` — the previous entry, if the key was already present. So a document
+containing the same key twice deserializes without complaint and the last
+occurrence wins. That is a policy decision made by omission, and it differs from
+what `serde_derive` does for a struct, where a repeated field is a
+`duplicate_field` error. The same input can therefore be rejected as a struct
+and accepted as a `HashMap`.
+
+`deserialize_map` is the hint. A format is free to answer it with a sequence of
+pairs instead, and several do — but this visitor overrides only `visit_map`, so
+they will get a type error unless they call the method that was asked for.
+"""
+
+[[annotation]]
+id    = "de-impls-0071"
+file  = "src/de/impls.rs"
+lines = "1556-1563"
+title = "BTreeMap<K: Ord, V> — nothing to preallocate"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition", "collections"]
+macro_def = "de-impls-0069"
+body = """
+`BTreeMap::new()` ignores the size hint entirely, exactly as `BTreeSet` did.
+Keys land in sorted order regardless of the order they arrived in, which makes a
+`BTreeMap` the type to reach for when a re-serialized document must be
+byte-identical.
+"""
+
+[[annotation]]
+id    = "de-impls-0072"
+file  = "src/de/impls.rs"
+lines = "1564-1571"
+title = "HashMap — cautious about the pair, not the key"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition", "collections"]
+macro_def = "de-impls-0069"
+body = """
+`size_hint::cautious::<(K, V)>(map.size_hint())` measures the *entry* rather
+than either half, so the one-megabyte preallocation ceiling applies to what the
+map will actually store. A `HashMap<u64, [u8; 64]>` gets far fewer preallocated
+slots than a `HashMap<u8, u8>`, which is the intent.
+
+`map` as the `$access` name is the same hygiene-defeating parameter `seq_impl!`
+used, and this expression is why it exists.
+"""
+
+[[annotation]]
+id    = "de-impls-0073"
+file  = "src/de/impls.rs"
+lines = "1572-1591"
+title = "parse_ip_impl! — where is_human_readable stops being theoretical"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "01-why-a-data-model"
+rust_features = ["macro-rules", "cfg"]
+prereqs = ["de-mod-0041", "de-impls-0060"]
+body = """
+`de/mod.rs` documents `is_human_readable` at length and warns about it. This is
+the first place in the crate that actually branches on it, and the two branches
+produce genuinely different wire formats for the same type:
+
+- JSON and friends get `deserialize_str` and parse `"127.0.0.1"` through
+  `FromStr`.
+- bincode and friends get `<[u8; 4]>::deserialize` — four raw octets, using the
+  array impls from a hundred lines above — and `Ipv4Addr::from`.
+
+The consequence is the one the `de/mod.rs` warning is about: a value serialized
+by a human-readable format cannot be deserialized by a binary one. The
+representation is not a property of the type, it is a property of the pair.
+
+`FromStrVisitor` is used here and defined at the very bottom of the file,
+fifteen hundred lines below. That is legal because it is an item, and items are
+visible throughout their module — the exact opposite of the rule that forced
+`num_128!` to be defined before its callers.
+"""
+
+[[annotation]]
+id    = "de-impls-0074"
+file  = "src/de/impls.rs"
+lines = "1592-1605"
+title = "variant_identifier! — the derive, written out by hand"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "proc-macro-boundary", "cfg"]
+prereqs = ["de-impls-0069"]
+body = """
+serde_core cannot use `#[derive(Deserialize)]` — the derive lives in
+`serde_derive`, which depends on this crate, so reaching for it here would be a
+cycle. Everything `serde_derive` would have generated for an enum's variant
+identifier is therefore written out longhand in this macro, and a comment
+further down the file says exactly that.
+
+It is the best available look at what the derive emits, without reading the
+proc-macro's own output. Three pieces come out of it: the `enum` of variant
+names, a `static` array of those names as strings, and a `Deserialize` impl that
+maps an index, a string or a byte string onto a variant.
+
+The `static $variants_name: &[&str]` is not decoration. It is what
+`Error::unknown_variant` needs in order to produce *"unknown variant `V5`,
+expected `V4` or `V6`"* — the list of alternatives has to exist as data
+somewhere, and this is where.
+"""
+
+[[annotation]]
+id    = "de-impls-0075"
+file  = "src/de/impls.rs"
+lines = "1606-1666"
+title = "Three ways to name a variant, and stringify! in pattern position"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "pattern-matching", "strings"]
+prereqs = ["de-impls-0074", "de-mod-0011"]
+body = """
+`KindVisitor` overrides three methods because formats identify a variant in
+three different ways: by index (`visit_u64`), by name (`visit_str`), or by name
+as bytes (`visit_bytes`). A compact binary format writes the index; JSON writes
+the name; a format with no string type writes the bytes.
+
+The line worth noticing is inside `visit_str`:
+
+    stringify!($variant) => Ok($name_kind :: $variant),
+
+`stringify!` in *pattern* position. It expands to a string literal, and a string
+literal is a valid pattern, so the match arm compares against the variant's own
+name with no runtime work and no chance of the two drifting apart. The same
+trick would not work with a `String` — only literals are patterns.
+
+The two error paths differ deliberately. An unrecognised index is
+`invalid_value`, because an integer is not a name and there is no list to
+suggest. An unrecognised name is `unknown_variant` with the `VARIANTS` static,
+which produces the "expected one of" message. `visit_bytes` tries to recover the
+name as UTF-8 first so it can give the better error, and falls back to
+`invalid_value` only when the bytes are not text at all.
+"""
+
+[[annotation]]
+id    = "de-impls-0076"
+file  = "src/de/impls.rs"
+lines = "1667-1703"
+title = "deserialize_enum! — a macro that invokes another macro"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "pattern-matching"]
+prereqs = ["de-impls-0075", "de-mod-0068"]
+body = """
+The second layer: this macro calls `variant_identifier!` to build the kind enum,
+then adds the `EnumVisitor` that consumes it. Composing macros this way is why
+the identifier machinery was factored out — `OsString`, further down, needs
+`variant_identifier!` alone without the enum wrapper.
+
+`visit_enum` is the two-step from `EnumAccess`: `data.variant()` returns the
+identified variant *and* a `VariantAccess` for its contents, and
+`v.newtype_variant()` then reads the payload.
+
+The `match` has no wildcard arm, and that is a property worth pausing on. Its
+arms are generated from the same `$variant` list that generated the enum, so it
+is exhaustive by construction — if the two ever disagreed, the compiler would
+reject the macro's own output rather than silently falling through. Generated
+code that relies on exhaustiveness checking like this is safer than generated
+code that adds a defensive `_ => unreachable!()`.
+
+Note that `VARIANTS` is hardcoded as the static's name in the call to
+`variant_identifier!`, so this macro can only be used once per scope — which is
+why both callers put it inside a function body.
+"""
+
+[[annotation]]
+id    = "de-impls-0077"
+file  = "src/de/impls.rs"
+lines = "1704-1722"
+title = "IpAddr — a macro expanded inside an else block"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["macro-rules", "cfg", "modules"]
+prereqs = ["de-impls-0076", "de-impls-0073"]
+body = """
+The human-readable branch parses a string, like every other type in this block.
+The binary branch is where it gets unusual: `deserialize_enum!` is invoked
+*inside* the `else` block, so the kind enum, the `VARIANTS` static and the
+`EnumVisitor` are all items local to that block. That is what keeps two
+invocations of a macro with a hardcoded `VARIANTS` from colliding.
+
+`use crate::lib::net::IpAddr;` on the line above exists because the macro
+generates paths like `IpAddr::V4`, and the impl header refers to the type as
+`net::IpAddr`. The import brings the bare name into scope for the expansion.
+
+`b"V4"` and index `0` come from the variant's position, which means a binary
+format's encoding of an `IpAddr` depends on the declaration order in the
+standard library. That is fine for a type that will never gain a variant, and it
+is exactly the fragility `#[serde(rename)]` exists to control elsewhere.
+"""
+
+[[annotation]]
+id    = "de-impls-0078"
+file  = "src/de/impls.rs"
+lines = "1723-1728"
+title = "Ipv4Addr and Ipv6Addr — four octets and sixteen"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition", "cfg"]
+macro_def = "de-impls-0073"
+body = """
+The `$size` argument selects which array impl the binary branch reaches, and
+`From<[u8; 4]>` / `From<[u8; 16]>` do the rest. Both are gated on
+`any(feature = "std", not(no_core_net))` — `core::net` stabilized in Rust 1.77,
+so a `no_std` build on an older compiler simply does not get these impls.
+"""
+
+[[annotation]]
+id    = "de-impls-0079"
+file  = "src/de/impls.rs"
+lines = "1729-1749"
+title = "parse_socket_impl! — a tuple with one element inferred"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "04-generic-bounds"
+rust_features = ["macro-rules", "closures", "generic-params"]
+prereqs = ["de-impls-0073", "de-impls-0065"]
+body = """
+The same human-readable branch, with a two-element tuple as the binary
+representation instead of an array. One line does something the rest of the file
+does not:
+
+    <(_, u16)>::deserialize(deserializer).map($new)
+
+An underscore in a type position, inside a turbofish-free qualified path. The
+tuple impl generated back at line 1481 is generic over both elements; here the
+second is pinned to `u16` and the first is left for inference to determine from
+`$new`, the closure this macro was handed. Pass a closure taking
+`(Ipv4Addr, u16)` and the `_` becomes `Ipv4Addr`.
+
+It is the same inference-driven trick `forwarded_impl!` used, applied to one
+element of a tuple rather than a whole type.
+"""
+
+[[annotation]]
+id    = "de-impls-0080"
+file  = "src/de/impls.rs"
+lines = "1750-1768"
+title = "SocketAddr — the enum path again"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["macro-rules", "cfg"]
+prereqs = ["de-impls-0077"]
+body = """
+Structurally identical to `IpAddr`: a string in human-readable mode, a
+two-variant enum in binary mode, the macro expanded inside the `else` block so
+its `VARIANTS` static stays local. Reading the two side by side is the clearest
+way to see how much of this block is one pattern applied twice.
+"""
+
+[[annotation]]
+id    = "de-impls-0081"
+file  = "src/de/impls.rs"
+lines = "1769-1780"
+title = "SocketAddrV6 — two fields that do not survive the round trip"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition", "closures"]
+macro_def = "de-impls-0079"
+body = """
+`|(ip, port)| net::SocketAddrV6::new(ip, port, 0, 0)` — the last two arguments
+are `flowinfo` and `scope_id`, and they are hardcoded to zero because the wire
+format has no place to put them.
+
+Check the other half and it is consistent: `ser/impls.rs` serializes a
+`SocketAddrV6` in binary mode as `(self.ip(), self.port())`, dropping both
+fields on the way out. So a non-human-readable round trip of a
+`SocketAddrV6` silently returns a value that differs from the one you sent, in
+two fields, with no error anywhere.
+
+The human-readable path is better but not whole: `Display` for `SocketAddrV6`
+includes the scope id — the crate's own length calculation on the serialize side
+budgets for `%4294967295` — so scope id survives as text and flowinfo still does
+not.
+
+`SocketAddrV4` has no such fields and round-trips exactly.
+"""
