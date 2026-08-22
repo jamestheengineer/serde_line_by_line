@@ -591,3 +591,478 @@ These are also the expansions where `int_to_uint!`'s
 `#[allow(irrefutable_let_patterns)]` earns its place: `u64` and `u128` are the
 two targets whose `try_from(v as u64)` cannot fail.
 """
+
+[[annotation]]
+id    = "de-impls-0023"
+file  = "src/de/impls.rs"
+lines = "534-552"
+title = "CharVisitor — and the first type here that accepts a string"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "strings"]
+prereqs = ["de-impls-0005", "de-mod-0049"]
+body = """
+Back to a hand-written visitor after four hundred lines of macro. `visit_char`
+is the identity, exactly like `visit_bool` was.
+
+The interesting part is what comes next. Every numeric visitor above refuses a
+string outright — a JSON `"7"` will not deserialize into a `u32`. `char` is the
+first type in this file that overrides `visit_str`, and it does so because most
+formats have no character type at all: JSON, TOML and YAML all represent a
+`char` as a one-character string, so refusing strings would make `char`
+undeserializable in the three formats people actually use.
+
+That is the rule the crate follows throughout — a conversion is accepted when
+the data model genuinely lacks the type, and refused when the format simply
+chose a different representation.
+"""
+
+[[annotation]]
+id    = "de-impls-0024"
+file  = "src/de/impls.rs"
+lines = "553-565"
+title = "Two calls to next(), because both alternatives are wrong"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "12-errors-iterators-closures"
+rust_features = ["iterators", "pattern-matching", "strings"]
+prereqs = ["de-impls-0023"]
+body = """
+The body is asking "does this string hold exactly one character", and the shape
+it uses is worth stealing.
+
+`v.len() == 1` would be wrong: `len` on a `&str` counts UTF-8 bytes, so it
+rejects every non-ASCII character. A single `é` is two bytes and would fail.
+
+`v.chars().count() == 1` would be correct but wasteful — `count` walks the
+entire string, so validating a one-character input against a ten-megabyte string
+decodes all ten megabytes before answering.
+
+Taking two items and matching on the pair answers the question in constant time
+and states it exactly: `(Some(c), None)` is "there was a first character and
+there was no second". Anything else — empty, or two or more — falls through to
+one `invalid_value` carrying `Unexpected::Str(v)`, so the error quotes the
+string that was actually there.
+"""
+
+[[annotation]]
+id    = "de-impls-0025"
+file  = "src/de/impls.rs"
+lines = "566-575"
+title = "Deserialize for char"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "inlining"]
+prereqs = ["de-impls-0003"]
+body = """
+`deserialize_char` is the hint, and a self-describing format is free to ignore
+it and call `visit_str` instead — which is precisely why the visitor overrides
+both. `#[inline]` here and on both visit methods: this is the pattern for
+scalars, where the function body is smaller than the call.
+"""
+
+[[annotation]]
+id    = "de-impls-0026"
+file  = "src/de/impls.rs"
+lines = "576-583"
+title = "Two visitors for one type, and the cfg that gates both"
+kind  = "cfg-gate"
+tracks = ["reference", "course"]
+course_unit = "11-no-std-and-cfg"
+rust_features = ["cfg", "no-std", "lifetimes", "borrowing"]
+prereqs = ["de-impls-0001", "de-mod-0021"]
+body = """
+`String` needs an allocator, so everything from here to line 702 is gated on
+`std` or `alloc`. The gate is repeated on each item rather than wrapping the
+block, which is the convention throughout this file: an item and its cfg stay
+adjacent, so a reader never has to scroll up to learn whether the impl exists in
+their configuration.
+
+Two visitor types appear where every previous type needed one.
+`StringInPlaceVisitor<'a>(&'a mut String)` is the first visitor in this file to
+carry data — a mutable borrow of the `String` the caller already owns. It exists
+to serve `deserialize_in_place`, and the pair of them is the clearest example in
+the crate of why that method is on the trait at all.
+"""
+
+[[annotation]]
+id    = "de-impls-0027"
+file  = "src/de/impls.rs"
+lines = "584-604"
+title = "visit_str and visit_string — the copy, and the one that avoids it"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["ownership", "strings", "lifetime-de"]
+prereqs = ["de-mod-0050", "de-mod-0052"]
+body = """
+Two methods, one allocation apart, and this is the entire reason `Visitor` has
+both.
+
+`visit_str` receives a `&str` that is only valid for the duration of the call —
+it may point into a scratch buffer the format is about to reuse — so `to_owned`
+must copy it. `visit_string` receives a `String` the format has already built
+and no longer wants, so the body is `Ok(v)`: the allocation changes hands and
+nothing is copied.
+
+A format calls whichever it can. `serde_json` reading a string with no escape
+sequences hands out a borrowed slice; one with escapes has to be unescaped into
+a fresh `String` first, and that `String` goes out through `visit_string` rather
+than being copied again. The saving is invisible at this level and real in a
+profile.
+
+Note that `visit_borrowed_str` is *not* overridden. Its default forwards to
+`visit_str`, which copies — correct, because a `String` must own its data
+regardless of how long the input lives.
+"""
+
+[[annotation]]
+id    = "de-impls-0028"
+file  = "src/de/impls.rs"
+lines = "605-628"
+title = "The bytes pair, and a borrow of a value that was just consumed"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "12-errors-iterators-closures"
+rust_features = ["ownership", "borrowing", "strings", "result"]
+prereqs = ["de-impls-0027", "de-mod-0053"]
+body = """
+The same two-method split for byte input, with UTF-8 validation in front of it.
+`String` accepts bytes because several formats have no string type distinct from
+their byte type; invalid UTF-8 is refused rather than replaced, so this is a
+place where deserialization fails on data another library would silently mangle.
+
+`String::from_utf8(v)` in `visit_byte_buf` takes the `Vec` by value and, when
+the bytes are valid, returns a `String` reusing that same allocation — no copy,
+just like `visit_string`. `str::from_utf8` in `visit_bytes` cannot do that and
+`to_owned` copies.
+
+The error arm is the line worth staring at:
+
+    Unexpected::Bytes(&e.into_bytes())
+
+`into_bytes` consumes the `FromUtf8Error` and returns the `Vec` it swallowed —
+that is the only way to get the bytes back, since the error owns them. The
+result is a temporary, and `&` borrows it. This compiles because a temporary
+created inside a function call argument lives until the end of the enclosing
+statement, which outlasts the call it is passed to. Bind it to a variable first
+and it still works; write it as a `let` on its own line and try to use the
+reference afterwards, and it does not.
+"""
+
+[[annotation]]
+id    = "de-impls-0029"
+file  = "src/de/impls.rs"
+lines = "629-684"
+title = "StringInPlaceVisitor — the same four methods, writing through a borrow"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["borrowing", "lifetimes", "ownership", "associated-types"]
+prereqs = ["de-impls-0027", "de-mod-0021"]
+body = """
+Fifty-six lines that mirror the visitor above with one difference: `type Value =
+()`. There is no value to return, because the result went into the `&mut String`
+the visitor is holding. That is what `deserialize_in_place` is — the same
+protocol with the destination supplied up front.
+
+The two owned-input methods are the point of the exercise:
+
+`visit_str` does `clear()` then `push_str(v)`. The `String` keeps its existing
+buffer and, if it is large enough, no allocation happens at all. Deserializing
+into the same struct in a loop — a common shape for a message reader — allocates
+once instead of once per message.
+
+`visit_string` does `*self.0 = v`, which drops the old buffer and takes the new
+one. That looks like it throws away the optimisation, and it does; it is still
+the right choice, because the alternative is copying `v` into the existing
+buffer and then dropping `v` anyway. One allocation is freed either way.
+
+The error paths are identical to the by-value visitor's, including the
+`&e.into_bytes()` temporary.
+"""
+
+[[annotation]]
+id    = "de-impls-0030"
+file  = "src/de/impls.rs"
+lines = "685-702"
+title = "Deserialize for String — the first deserialize_in_place override"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["default-methods", "borrowing"]
+prereqs = ["de-impls-0029", "de-mod-0021"]
+body = """
+Everything before this took the default `deserialize_in_place`, which builds a
+whole new value and assigns it over the place. `String` is the first type in the
+file where that default costs something worth recovering, so it overrides —
+handing the format a `StringInPlaceVisitor` wrapped around the caller's buffer
+instead of a `StringVisitor` that will allocate.
+
+Both methods pass the same hint, `deserialize_string`. The hint says what the
+type wants; the visitor says where to put it. Those are independent, which is
+why one method can be overridden without touching the other.
+
+This is also the payoff for `deserialize_in_place` being on the trait despite
+being `#[doc(hidden)]` and awkward. `serde_derive` generates in-place code for
+struct fields, and a struct of ten `String` fields re-read in a loop reuses ten
+buffers because of these eighteen lines.
+"""
+
+[[annotation]]
+id    = "de-impls-0031"
+file  = "src/de/impls.rs"
+lines = "703-728"
+title = "StrVisitor — two methods, and everything it refuses to implement"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["lifetime-de", "lifetimes", "borrowing", "zero-cost"]
+prereqs = ["de-mod-0051", "de-impls-0027"]
+body = """
+`impl<'a> Visitor<'a>` — the lifetime is spelled `'a` rather than `'de`, which
+is only a naming choice, but it is a deliberate one: here the lifetime is not an
+abstract input-lifetime parameter, it is the lifetime of the `&str` this visitor
+is trying to produce. `type Value = &'a str` ties them together.
+
+`visit_borrowed_str` is `Ok(v)` and dtolnay's comment says `// so easy`. It is
+the entire zero-copy story in one line: the format guarantees the data lives for
+`'a`, the visitor wants a `&'a str`, so there is nothing to do.
+
+What is absent matters more. `visit_str` is not overridden, so its default runs
+and reports a type error. A format that can only offer a transient string —
+because it unescaped it into a scratch buffer — cannot satisfy `&str`, and the
+user gets `invalid type: string "...", expected a borrowed string`. That
+message is the most common confusion in serde, and it is produced by a method
+that is not written here.
+
+`visit_borrowed_bytes` is the same permissiveness `String` showed, minus the
+allocation: validate the UTF-8, hand back a slice of the same memory.
+"""
+
+[[annotation]]
+id    = "de-impls-0032"
+file  = "src/de/impls.rs"
+lines = "729-737"
+title = "impl<'de: 'a, 'a> — the outlives bound that makes borrowing sound"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["lifetime-de", "lifetimes", "variance", "where-clauses"]
+prereqs = ["de-impls-0031", "de-mod-0019"]
+body = """
+Nine lines, and the first one is the most important line of the file.
+
+`impl<'de: 'a, 'a> Deserialize<'de> for &'a str` reads: for any input lifetime
+`'de` that outlives `'a`, a `&'a str` can be deserialized from it. The bound is
+what makes the impl sound — without it, this would claim you can produce a
+reference that lives longer than the data it points into, and the borrow checker
+would have no way to notice.
+
+It also explains a diagnostic people meet without understanding. `T:
+DeserializeOwned` is `for<'de> T: Deserialize<'de>`, quantified over *all*
+lifetimes; this impl exists only for the `'de` that outlive `'a`, so `&str`
+does not satisfy `DeserializeOwned`. Any API bounded that way — anything that
+deserializes from a source it will drop, like reading from a file — rejects
+`&str` at compile time. That refusal is this bound.
+
+Declaration order is `'de` first because `'de: 'a` mentions it. Rust does not
+require that, but reading the constraint before the thing it constrains is
+easier.
+"""
+
+[[annotation]]
+id    = "de-impls-0033"
+file  = "src/de/impls.rs"
+lines = "738-772"
+title = "&[u8] — the same shape, and the asymmetry between the two"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["lifetime-de", "borrowing", "strings"]
+prereqs = ["de-impls-0032"]
+body = """
+Byte slices, structurally identical to `&str`: two borrowed-only visit methods,
+the same `'de: 'a` bound, `deserialize_bytes` as the hint.
+
+The asymmetry is worth naming. `BytesVisitor::visit_borrowed_str` accepts a
+string and returns `v.as_bytes()` unconditionally, because every `&str` is
+valid bytes. Going the other way, `StrVisitor::visit_borrowed_bytes` has to
+validate UTF-8 and can fail. The pair of impls is therefore not symmetric, and
+the direction that cannot fail is the one with no error path.
+
+`expecting` reads `"a borrowed byte array"`, which is what a user sees when a
+format offers a transient slice — the same trap as `&str`, with a different
+noun.
+"""
+
+[[annotation]]
+id    = "de-impls-0034"
+file  = "src/de/impls.rs"
+lines = "773-786"
+title = "CString — gated on a build-script cfg as well as a feature"
+kind  = "cfg-gate"
+tracks = ["reference", "course"]
+course_unit = "11-no-std-and-cfg"
+rust_features = ["cfg", "no-std", "msrv"]
+prereqs = ["de-impls-0026"]
+body = """
+`#[cfg(any(feature = "std", all(not(no_core_cstr), feature = "alloc")))]` is the
+most complex gate in the file, and it encodes a piece of Rust history:
+`CString` moved from `std` to `alloc` in Rust 1.64. So the item exists if you
+have `std` at all, or if you have `alloc` *and* a compiler new enough to put
+`CString` there. `no_core_cstr` is set by `build.rs`, not by Cargo.
+
+Note the mismatch with the `doc(cfg)` attribute on the impl below, which
+advertises plain `any(feature = "std", feature = "alloc")`. The documentation
+tells a simpler story than the code, deliberately — the MSRV detail is noise to
+a reader browsing docs.rs on a current toolchain.
+
+`expecting` writes `"byte array"` with no article, where every neighbour writes
+`"a string"` or `"a borrowed byte array"`. It produces `expected byte array`,
+which is a small grammatical wart in a user-facing message.
+"""
+
+[[annotation]]
+id    = "de-impls-0035"
+file  = "src/de/impls.rs"
+lines = "787-799"
+title = "visit_seq — cautious preallocation, and serde's own ?"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "12-errors-iterators-closures"
+rust_features = ["collections", "result", "macro-rules"]
+prereqs = ["de-mod-0060", "de-mod-0066"]
+body = """
+The first `visit_seq` in the file, and the template every collection below
+follows.
+
+`size_hint::cautious::<u8>(seq.size_hint())` is a defence against hostile input.
+The length in the stream is attacker-controlled, so a four-byte header claiming
+four billion elements would otherwise become a four-gigabyte allocation before a
+single element is read. `cautious` caps the preallocation at one megabyte's
+worth of the element type — for `u8` that is 1,048,576 — and returns 0 for
+zero-sized types. A legitimate longer sequence still works; the `Vec` simply
+grows the ordinary way.
+
+`tri!` is serde's `?`, defined in `crate_root.rs`. It expands to a `match` that
+returns the error unchanged; `?` would additionally route it through
+`From::from`, which is the identity conversion here and still costs a
+monomorphised call in an unoptimised build. Across a crate with this many
+fallible call sites that is a compile-time and debug-performance decision, not a
+correctness one.
+
+`CString::new(values)` fails if the bytes contain an interior nul, and
+`map_err(Error::custom)` turns that standard-library error into the format's
+error type by way of its `Display`. `Error::custom` used as a function value
+rather than called — it is a one-argument constructor, so it can be passed
+directly to `map_err`.
+"""
+
+[[annotation]]
+id    = "de-impls-0036"
+file  = "src/de/impls.rs"
+lines = "800-828"
+title = "Four more methods, all funnelling into CString::new"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["result", "strings"]
+prereqs = ["de-impls-0035"]
+body = """
+`visit_bytes`, `visit_byte_buf`, `visit_str` and `visit_string` are four
+one-line bodies with the same shape, because `CString::new` is generic over
+`Into<Vec<u8>>` and accepts all four argument types.
+
+Accepting strings is the same judgement `char` made: a format with no byte type
+represents a `CString` as text, and refusing would make it undeserializable
+there. The interior-nul check is what keeps that safe — a string containing a
+nul is rejected with the standard library's own message rather than silently
+truncated, which is the classic C-string bug this type exists to prevent.
+
+Five visit methods on one visitor is the widest acceptance in the file so far.
+Compare `StrVisitor`, two lines up, which overrides two and refuses everything
+else.
+"""
+
+[[annotation]]
+id    = "de-impls-0037"
+file  = "src/de/impls.rs"
+lines = "829-839"
+title = "Deserialize for CString — asking for bytes it might not get"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "cfg"]
+prereqs = ["de-impls-0036"]
+body = """
+The hint is `deserialize_byte_buf`: "give me bytes, and give me them owned if
+that is cheaper for you". A non-self-describing format takes that literally. A
+self-describing one reads what is actually there, which is why the visitor above
+handles sequences and strings too — for JSON, a `CString` most often arrives as
+one of those.
+"""
+
+[[annotation]]
+id    = "de-impls-0038"
+file  = "src/de/impls.rs"
+lines = "840-856"
+title = "forwarded_impl! — where the inner type is chosen by inference"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "macro-repetition", "generic-params", "closures"]
+prereqs = ["de-impls-0007"]
+body = """
+Sixteen lines that cover every type which is "some other `Deserialize` type,
+transformed by one function". The body is the whole idea:
+
+    Deserialize::deserialize(deserializer).map($func)
+
+Nothing in that line names the type being deserialized. It is inferred from
+`$func`: `map` requires the function's argument type to match, so passing
+`CString::into_boxed_c_str` makes the inner call `CString::deserialize`, and
+passing `Reverse` — a tuple-struct constructor used as a function value — makes
+it `T::deserialize`. Change the function and the inner type follows.
+
+The matcher earns two other things. `$(#[$attr:meta])*` forwards arbitrary
+attributes, so an invocation can carry its own `#[cfg]` and `doc(cfg)` without
+the macro knowing what they are. `($($id:ident),*)` is the list of generic
+parameters, expanded into `impl<'de $(, $id : Deserialize<'de>,)*>` — note the
+comma inside the repetition as well as before it, which produces a trailing
+comma in the generic list. That is legal Rust and is what lets the zero-parameter
+case, `()`, expand to plain `impl<'de>` without a dangling comma.
+
+No `deserialize_in_place` here. Every type this macro generates is a wrapper, and
+recovering the in-place benefit through one would mean unwrapping the place,
+which the macro has no way to express.
+"""
+
+[[annotation]]
+id    = "de-impls-0039"
+file  = "src/de/impls.rs"
+lines = "857-862"
+title = "Box<CStr> — via CString, with the cfg travelling as an argument"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition", "cfg", "smart-pointers"]
+macro_def = "de-impls-0038"
+body = """
+Deserialize a `CString`, then `into_boxed_c_str` to drop the excess capacity.
+The two attributes are matched by `$(#[$attr:meta])*` and re-emitted onto the
+impl, which is how this invocation carries the same `no_core_cstr` gate as the
+`CString` code above it without the macro containing a single `cfg`.
+"""
+
+[[annotation]]
+id    = "de-impls-0040"
+file  = "src/de/impls.rs"
+lines = "863-866"
+title = "Reverse<T> — three lines for a generic wrapper"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition", "generic-params"]
+macro_def = "de-impls-0038"
+body = """
+`(T)` fills the generic parameter list, producing `impl<'de, T: Deserialize<'de>>
+Deserialize<'de> for Reverse<T>`, and `Reverse` as the function value both names
+the constructor and pins the inner type to `T`. The whole impl for a wrapper the
+standard library uses to invert an `Ord`.
+"""
