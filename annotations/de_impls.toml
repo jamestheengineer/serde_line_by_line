@@ -2095,3 +2095,274 @@ not.
 
 `SocketAddrV4` has no such fields and round-trips exactly.
 """
+
+[[annotation]]
+id    = "de-impls-0082"
+file  = "src/de/impls.rs"
+lines = "1781-1810"
+title = "&Path — a borrowed conversion that costs nothing"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["lifetime-de", "borrowing", "strings"]
+prereqs = ["de-impls-0031"]
+body = """
+`StrVisitor` with one line changed: `Ok(v.as_ref())` instead of `Ok(v)`. The
+conversion from `&str` to `&Path` is a pointer cast — `Path` is a
+`repr(transparent)`-style wrapper over `OsStr`, which on Unix is a wrapper over
+bytes — so nothing is copied or allocated and the borrow of the input carries
+straight through.
+
+Same two methods, same refusal to implement `visit_str`, same consequence: a
+format that can only offer a transient string cannot produce a `&Path`.
+"""
+
+[[annotation]]
+id    = "de-impls-0083"
+file  = "src/de/impls.rs"
+lines = "1811-1821"
+title = "The same 'de: 'a bound, third time"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["lifetime-de", "lifetimes"]
+prereqs = ["de-impls-0032"]
+body = """
+`impl<'de: 'a, 'a> Deserialize<'de> for &'a Path`. The third borrowed type in
+the file and the third identical header — `&str`, `&[u8]`, `&Path`. Once you
+have read one you have read all three, and the shared bound is what excludes all
+three from `DeserializeOwned`.
+
+Gated on `std` alone: `Path` has never been in `alloc`.
+"""
+
+[[annotation]]
+id    = "de-impls-0084"
+file  = "src/de/impls.rs"
+lines = "1822-1865"
+title = "PathBuf — and the paths it refuses to deserialize"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings", "result", "ownership"]
+prereqs = ["de-impls-0027"]
+body = """
+Four methods, the same copy-versus-move pair as `String`, with `From::from`
+doing the conversion in each. `From<&str>` and `From<String>` for `PathBuf` both
+exist, and the `String` one reuses the allocation.
+
+The limitation is in the two byte methods: both validate UTF-8 and refuse
+anything else. On Unix a path is an arbitrary byte string — a filename can hold
+bytes that are not valid UTF-8 at all — and this impl refuses every one of
+them.
+
+The serialize side agrees rather than papering over it: `Path`'s `Serialize`
+calls `to_str` and returns `Error::custom("path contains invalid UTF-8
+characters")` when that fails. So such a path cannot be written either, and the
+type is simply not round-trippable outside UTF-8.
+
+That gap is precisely why `OsString`, the next type in the file, goes to the
+trouble of a two-variant enum instead. `PathBuf` chose the simpler encoding and
+the narrower domain.
+
+`expecting` writes `"path string"` — no article again.
+"""
+
+[[annotation]]
+id    = "de-impls-0085"
+file  = "src/de/impls.rs"
+lines = "1866-1882"
+title = "PathBuf's impl, and Box<Path> for free"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["smart-pointers", "macro-repetition"]
+prereqs = ["de-impls-0084", "de-impls-0038"]
+body = """
+`deserialize_string` as the hint, then one `forwarded_impl!` invocation covers
+`Box<Path>` by deserializing a `PathBuf` and calling `into_boxed_path` — five
+lines for a type that would otherwise need its own visitor.
+"""
+
+[[annotation]]
+id    = "de-impls-0086"
+file  = "src/de/impls.rs"
+lines = "1883-1895"
+title = "The comment that says what this whole block is working around"
+kind  = "macro-use"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["proc-macro-boundary", "macro-repetition", "cfg"]
+macro_def = "de-impls-0074"
+body = """
+    // If this were outside of the serde crate, it would just use:
+    //
+    //    #[derive(Deserialize)]
+    //    #[serde(variant_identifier)]
+
+Four lines of comment that explain `variant_identifier!` more directly than the
+macro itself does. `serde_derive` depends on `serde_core`, so `serde_core`
+cannot use the derive without a dependency cycle — every enum it needs is
+therefore hand-rolled through this macro.
+
+This invocation is at module scope rather than inside a function, which is why
+its static is named `OSSTR_VARIANTS` instead of `VARIANTS`: the name has to be
+unique here, where the two `deserialize_enum!` callers could get away with
+shadowing inside a block.
+"""
+
+[[annotation]]
+id    = "de-impls-0087"
+file  = "src/de/impls.rs"
+lines = "1896-1939"
+title = "Two visit_enum bodies, chosen by the target platform"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "11-no-std-and-cfg"
+rust_features = ["cfg", "pattern-matching", "custom-errors", "strings"]
+prereqs = ["de-impls-0086", "de-impls-0084"]
+body = """
+`OsString` is bytes on Unix and UTF-16 on Windows, and the two are not
+convertible in general — a Windows path can contain unpaired surrogates, a Unix
+path can contain arbitrary bytes, and neither maps into the other. Serde's
+answer is to put the platform in the data: the value is serialized as an enum
+with a `Unix` or `Windows` variant, so the reader can tell what it received.
+
+Two `visit_enum` bodies, gated `#[cfg(unix)]` and `#[cfg(windows)]`. Only one is
+compiled, and each handles both variants — the matching one by conversion, the
+other by an explicit `Error::custom("cannot deserialize Windows OS string on
+Unix")`.
+
+This is the honest design. The alternative — lossily converting — would produce
+a path that silently does not name the file it named on the other machine. A
+run-time error naming both platforms is a much better failure, and it is
+reachable only when data genuinely crosses between them.
+
+Note the two `use` statements inside the method bodies. `OsStringExt` is a
+platform extension trait, and importing it at module scope would break the build
+on the other platform even though the method that needs it is `cfg`-ed out.
+Function-local imports keep the trait's visibility as narrow as the code that
+uses it.
+"""
+
+[[annotation]]
+id    = "de-impls-0088"
+file  = "src/de/impls.rs"
+lines = "1940-1950"
+title = "deserialize_enum, with a name and a variant list"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "cfg"]
+prereqs = ["de-impls-0087"]
+body = """
+`deserializer.deserialize_enum("OsString", OSSTR_VARIANTS, OsStringVisitor)` —
+the hint carries both the type name and the list of variant names, which is what
+a non-self-describing format needs in order to know how to read the tag.
+
+The impl is gated on `any(unix, windows)`. On any other target — wasm, a bare
+metal target — `OsString` has no `Deserialize` impl at all, and a struct
+containing one will not derive.
+"""
+
+[[annotation]]
+id    = "de-impls-0089"
+file  = "src/de/impls.rs"
+lines = "1951-1976"
+title = "Four boxed types, four lines of real content"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition", "smart-pointers"]
+macro_def = "de-impls-0038"
+body = """
+`Box<T>` via `Box::new`, `Box<[T]>` via `Vec::into_boxed_slice`, `Box<str>` via
+`String::into_boxed_str`, `Box<OsStr>` via `OsString::into_boxed_os_str`. Each
+deserializes the owned type and converts.
+
+The pattern is worth naming because it recurs: the boxed form is never given its
+own visitor. Deserialize the growable type, then shrink. That costs one
+reallocation when capacity exceeds length, and saves four visitors.
+
+`(T)` versus `()` in the first argument is the only structural difference
+between these four — whether the impl is generic.
+"""
+
+[[annotation]]
+id    = "de-impls-0090"
+file  = "src/de/impls.rs"
+lines = "1977-1992"
+title = "Cow — the impl that never borrows, and the confusion it causes"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "07-lifetimes-de-and-zero-copy"
+rust_features = ["lifetime-de", "smart-pointers", "associated-types", "strings"]
+prereqs = ["de-impls-0032", "de-mod-0022"]
+body = """
+Sixteen lines that generate more confusion than anything else in serde:
+
+    T::Owned::deserialize(deserializer).map(Cow::Owned)
+
+A `Cow<'a, str>` field always deserializes to `Cow::Owned`. Never `Borrowed`.
+The type is named "clone on write" and the impl clones unconditionally.
+
+The reason is in the header. `impl<'de, 'a, T> Deserialize<'de> for Cow<'a, T>`
+— `'a` and `'de` are unrelated, with no outlives bound between them. Without one
+there is no way to produce a `&'a T` from data living for `'de`, so `Owned` is
+the only variant this impl can construct. And the bound cannot simply be added:
+it would make `Cow<'a, str>` fail every `DeserializeOwned` bound, exactly as
+`&'a str` does, breaking every existing user who reaches for `Cow` expecting an
+ordinary owned type.
+
+The way to actually borrow is `#[serde(borrow)]` on the field, which makes
+`serde_derive` bypass this impl entirely and generate code that deserializes a
+`&str` and wraps it in `Cow::Borrowed`. That attribute exists because of this
+impl's limitation, and reading them together is the only way either makes sense.
+
+`T: ?Sized + ToOwned` with `T::Owned: Deserialize<'de>` is what lets one impl
+serve `Cow<str>`, `Cow<[u8]>` and `Cow<Path>` — the bound is on the owned form,
+which is the only form ever built.
+"""
+
+[[annotation]]
+id    = "de-impls-0091"
+file  = "src/de/impls.rs"
+lines = "1993-2016"
+title = "Weak — parse the value, then throw it away"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["smart-pointers", "cfg", "option"]
+prereqs = ["de-impls-0043"]
+body = """
+Two statements, and the first one's result is discarded:
+
+    tri!(Option::<T>::deserialize(deserializer));
+    Ok(RcWeak::new())
+
+`Weak::new()` produces a pointer with a reference count of zero that can never
+be upgraded, so the deserialized value is thrown away — but it still has to be
+*read*, because the bytes are in the stream and a format that does not consume
+them will misparse everything after. Discarding is not the same as skipping.
+
+`Option<T>` matches what the serialize side writes: `ser/impls.rs` serializes a
+`Weak` as `self.upgrade()`, which is `Some` if the value is still alive and
+`None` if it is not. So the wire shape is an option either way, and this side
+reads it and drops it.
+
+The doc comment states the consequence plainly, which is the right call — a
+`Weak` that silently cannot be upgraded would otherwise look like a bug in the
+caller's code. The `rc` feature is off by default for the same reason: these
+impls do not round-trip object graphs, they only avoid failing to compile.
+"""
+
+[[annotation]]
+id    = "de-impls-0092"
+file  = "src/de/impls.rs"
+lines = "2017-2038"
+title = "ArcWeak — the same twenty lines again"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["smart-pointers", "cfg"]
+prereqs = ["de-impls-0091"]
+body = """
+Identical to the `Rc` version with one identifier changed, including the doc
+comment. `crate_root.rs` aliases `RcWeak` and `ArcWeak` precisely so these two
+impls can be written without a `use` collision on `Weak`.
+
+A macro could have covered both, and `box_forwarded_impl!` immediately below
+does exactly that for `Rc` and `Arc`. These two were left written out.
+"""
