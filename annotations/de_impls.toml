@@ -1,0 +1,593 @@
+schema = 1
+source = "serde_core-1.0.229"
+
+[[annotation]]
+id    = "de-impls-0001"
+file  = "src/de/impls.rs"
+lines = "1-11"
+title = "Eleven lines of imports for the largest file in the crate"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["modules", "no-std", "cfg"]
+prereqs = ["de-mod-0006"]
+body = """
+This file is 3,173 lines and 52 of them are doc comments. Nothing here is
+documentation; `de/mod.rs` already made every promise, and this is where they
+are kept for roughly a hundred standard-library types.
+
+`crate::lib::*` is the `no_std` shim: `fmt`, `Box`, `String`, `Vec`, `num`,
+`Wrapping`, the collections, all arriving through one glob whose contents depend
+on which of `std` / `alloc` is enabled. Because it is a glob, a type that is
+absent in a given configuration produces "cannot find type" at its use site
+rather than at the import — which is why the impls below are individually
+`#[cfg]`-gated instead of relying on the glob.
+
+The six names from `crate::de` are the whole vocabulary of this file: the two
+traits it implements, and the four access traits its visitors call back into.
+
+`size_hint` is gated because only the collection impls use it, and collections
+need an allocator. A `no_std` build without `alloc` has no `Vec` to preallocate,
+so the import would be dead.
+"""
+
+[[annotation]]
+id    = "de-impls-0002"
+file  = "src/de/impls.rs"
+lines = "12-29"
+title = "UnitVisitor — the smallest complete instance of the pattern"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "05-default-methods"
+rust_features = ["traits", "default-methods", "associated-types", "marker-types"]
+prereqs = ["de-mod-0043", "de-mod-0044"]
+body = """
+Every impl in this file is two pieces: a visitor type that carries no data, and
+a `Deserialize` impl that hands one to one hint method. This is the shortest
+version of that pair, so read it as the template for the next three thousand
+lines.
+
+`struct UnitVisitor;` is a unit struct — zero bytes, constructed by naming it.
+The visitor exists to carry the `type Value` association and a table of
+overridden methods, not state. Where a visitor does need state you will see it
+below on `StringInPlaceVisitor`, which holds a `&mut String`.
+
+`expecting` writes `"unit"` and that string is not decoration: it is the second
+half of every error message this visitor can produce, via `Expected` and
+`invalid_type`. Get it wrong and a user reads a wrong sentence.
+
+`visit_unit` is the only method overridden. The other twenty-odd keep the
+defaults from `Visitor`, all of which call `invalid_type`. That default is what
+makes a mismatch a diagnosable error rather than a silent success, and it is why
+an impl this short is complete.
+"""
+
+[[annotation]]
+id    = "de-impls-0003"
+file  = "src/de/impls.rs"
+lines = "30-38"
+title = "Deserialize for () — the hint, and who ignores it"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "05-default-methods"
+rust_features = ["traits", "generic-params", "monomorphization"]
+prereqs = ["de-mod-0028", "de-mod-0036"]
+body = """
+`deserializer.deserialize_unit(UnitVisitor)` is the entire body, and the method
+name is the only place the type `()` communicates anything about itself.
+
+For a self-describing format the hint is discarded: `serde_json` looks at the
+next byte and calls whichever `visit_*` matches, so `deserialize_unit` and
+`deserialize_any` behave identically. For a non-self-describing format the hint
+is the whole message — a bincode stream contains no marker saying "a unit comes
+next", so the call itself is what tells the format to consume zero bytes and
+call `visit_unit`.
+
+No `deserialize_in_place` override here. The default builds a new value and
+assigns it, which for a zero-sized type is nothing at all.
+"""
+
+[[annotation]]
+id    = "de-impls-0004"
+file  = "src/de/impls.rs"
+lines = "39-49"
+title = "Deserialize for ! — an impl for a type with no values"
+kind  = "cfg-gate"
+tracks = ["reference", "course"]
+course_unit = "11-no-std-and-cfg"
+rust_features = ["cfg", "pattern-matching", "custom-errors"]
+prereqs = ["de-mod-0008"]
+body = """
+`!` is the never type: it has no values, so no correct implementation can ever
+return `Ok`. The body returns an error unconditionally, and that is not a
+shortcut — there is no expression of type `!` to put inside an `Ok`.
+
+The impl exists so that generic code bounded by `T: Deserialize` still compiles
+when someone instantiates it at `!`, which is the only reason to implement a
+trait for an uninhabited type. Deserialization then fails at run time with a
+message rather than at compile time with a missing-impl error.
+
+`Error::custom` is called without naming a type. Inference reads it back from
+the return position — the function returns `Result<Self, D::Error>`, so
+`custom` resolves on `D::Error`. This is the only mechanism available: the trait
+has no `Self` value in hand to dispatch from.
+
+`#[cfg_attr(docsrs, doc(cfg(feature = "unstable")))]` is the docs.rs
+convention. It renders the feature badge on the published page, and it is a
+`cfg_attr` because `doc(cfg)` is itself unstable and must not reach a normal
+build.
+"""
+
+[[annotation]]
+id    = "de-impls-0005"
+file  = "src/de/impls.rs"
+lines = "50-68"
+title = "BoolVisitor — and the grammar of expecting strings"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "default-methods"]
+prereqs = ["de-impls-0002", "de-mod-0045"]
+body = """
+The same two pieces again, with `visit_bool` in place of `visit_unit` and no
+conversion in the body at all. `bool` is the one scalar with a single
+representation and no wider or narrower neighbour, so `Ok(v)` is the whole
+implementation. Everything from here to line 533 is about what happens when
+that is not true.
+
+The `expecting` string is `"a boolean"`, where `UnitVisitor` wrote `"unit"`.
+The convention across the crate is that the string completes the sentence
+"expected ...", so nouns that read as a class take an article and type names do
+not: you get `expected a boolean`, `expected unit`, `expected i8`, `expected a
+nonzero u32`. These strings are a user-visible interface with no test coverage
+guarding their grammar, which is why they are worth reading rather than
+skimming.
+
+Note what is not overridden: `visit_u64`. A format that yields the integer `1`
+where a `bool` is wanted gets a type error. serde does not coerce.
+"""
+
+[[annotation]]
+id    = "de-impls-0006"
+file  = "src/de/impls.rs"
+lines = "69-78"
+title = "Deserialize for bool"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits"]
+prereqs = ["de-impls-0003"]
+body = """
+Identical to the unit impl one hint along. If a format wants to accept `"true"`
+or `1` for a `bool`, the place to do it is inside the format's
+`deserialize_bool`, by calling `visit_bool` with the value it decoded — not
+here. That division is what keeps the coercion policy per-format instead of
+global.
+"""
+
+[[annotation]]
+id    = "de-impls-0007"
+file  = "src/de/impls.rs"
+lines = "79-127"
+title = "impl_deserialize_num! — a macro that takes macro calls as arguments"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "macro-repetition", "macro-hygiene", "cfg", "msrv"]
+examples = ["num_widening"]
+prereqs = ["ser-impls-0002", "de-mod-0046"]
+body = """
+Sixteen numeric types need `Deserialize`, and each one accepts a different set
+of source types with a different conversion for each. That is the matrix this
+macro exists to write, and the trick that makes it affordable is in the matcher:
+
+    $($method:ident!($($val:ident : $visit:ident)*);)*
+
+That fragment matches *macro invocations as data*. When you write
+`int_to_int!(i16:visit_i16 i32:visit_i32);` in an invocation below, nothing
+expands it — `impl_deserialize_num!` captures the name `int_to_int`, the pairs
+inside, and re-emits the call later, sometimes with extra tokens prepended. One
+list of "which source types, handled how" therefore generates three different
+impls, because the same list can be replayed against three different arms of
+each of those six helper macros.
+
+This first arm is the three-argument form, taken when a `$nonzero` name is
+supplied. It does three things. Line 83 recurses into the second arm to get the
+plain primitive impl. Lines 85 to 104 build the `NonZero` impl, replaying the
+method list with `nonzero $primitive` prepended so each helper selects its
+nonzero arm. Lines 106 to 126 do the same with `saturating` for
+`Saturating<$primitive>`.
+
+`#[cfg(not(no_core_num_saturating))]` is a build-script cfg, not a Cargo
+feature. `build.rs` sets it when the compiler is older than 1.74, where
+`core::num::Saturating` did not yet exist. serde supports compilers it was
+released before, so this is how a newer standard library type is used without
+raising the MSRV.
+
+One detail that is easy to miss: `struct NonZeroVisitor;` is declared inside
+`fn deserialize`, not at module scope. `macro_rules!` hygiene does not rename
+item identifiers, so twelve expansions of this macro at module scope would be
+twelve colliding definitions of the same name. Nesting the struct inside the
+function body is the mechanism that keeps them apart, and it is the reason every
+visitor in this macro is function-local while `UnitVisitor` above is not.
+"""
+
+[[annotation]]
+id    = "de-impls-0008"
+file  = "src/de/impls.rs"
+lines = "128-152"
+title = "The second arm — the plain primitive impl"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "macro-repetition", "inlining"]
+prereqs = ["de-impls-0007"]
+body = """
+The two-argument form: no `$nonzero`, so this arm produces exactly one impl. The
+first arm calls into it, and the two float invocations reach it directly, since
+there is no `NonZeroF32`.
+
+Arms are tried top to bottom and the first arm demands three leading
+identifiers, so a two-identifier invocation cannot match it. The ordering is
+load-bearing but not fragile here — the shapes are disjoint.
+
+`$($($method!($val : $visit);)*)*` is the same replay as above with nothing
+prepended, which selects each helper macro's first arm. The two levels of
+repetition are the two levels in the matcher: outer over the helper calls, inner
+over the pairs inside one call.
+
+`#[inline]` sits on this `deserialize` and on none of the generated ones in the
+first arm. For the plain primitives the whole function is one virtual-ish call
+into the format, and cross-crate inlining is what collapses it; for `NonZero`
+and `Saturating` it was simply never added.
+"""
+
+[[annotation]]
+id    = "de-impls-0009"
+file  = "src/de/impls.rs"
+lines = "153-186"
+title = "num_self! — the identity conversion, in three flavours"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "pattern-matching", "custom-errors"]
+examples = ["num_widening"]
+prereqs = ["de-impls-0007", "de-mod-0009"]
+body = """
+The first of six helpers, and the template for all of them: three arms, selected
+by a leading `nonzero` or `saturating` token that `impl_deserialize_num!`
+prepends. Read this one carefully and the other five cost a glance each.
+
+Arm one is the source type that is already the target — `Ok(v)`, `#[inline]`.
+
+Arm two, `nonzero`, is the same value passed through `Self::Value::new`, which
+returns `Option` because zero is not representable. The error is
+`Unexpected::Unsigned(0)` unconditionally, even when the target is
+`NonZeroI8`. That is correct rather than sloppy: the only input that reaches the
+`else` is zero, and zero is not negative.
+
+Arm three, `saturating`, wraps in `Saturating` and cannot fail.
+
+Notice that arm two and arm three accept a `$primitive` parameter and never use
+it — `Self::Value::new` and `Saturating(v)` both infer what they need. It is
+there because all six helpers must accept the same call shape, so that
+`impl_deserialize_num!` can replay a list of them without knowing which is
+which. Uniform interfaces cost an unused parameter here exactly as they do in
+ordinary code.
+"""
+
+[[annotation]]
+id    = "de-impls-0010"
+file  = "src/de/impls.rs"
+lines = "187-220"
+title = "num_as_self! — the widening cast, unchecked by design"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "zero-cost"]
+examples = ["num_widening"]
+prereqs = ["de-impls-0009"]
+body = """
+`Ok(v as Self::Value)` with no test, because this helper is only ever named for
+a source type that cannot overflow the target — `i8` into `i64`, `u16` into
+`u32`. Nothing in the macro enforces that. The guarantee lives entirely in the
+invocation lists below, where a human decided which helper each source type
+gets; write `num_as_self!(i64:visit_i64)` in the `i8` block and you get silent
+truncation with no compiler complaint.
+
+The nonzero arm shows why every helper takes `$primitive` even when
+`num_self!` did not need it. `Self::Value` there is `NonZeroU32`, and there is
+no `as` cast to a `NonZero` type — the cast has to go to the underlying
+`u32` first, which is what `$primitive` names.
+
+The float invocations use this helper for all eight integer source types, and
+that is a real widening only up to 2^24 for `f32`. Integer-to-float precision
+loss is silent here; the example transcript has the row.
+"""
+
+[[annotation]]
+id    = "de-impls-0011"
+file  = "src/de/impls.rs"
+lines = "221-242"
+title = "num_as_copysign_self! — four lines about the sign bit of NaN"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "11-no-std-and-cfg"
+rust_features = ["macro-rules", "cfg", "no-std"]
+examples = ["num_widening"]
+prereqs = ["de-impls-0010"]
+body = """
+One arm, not three: there is no `NonZeroF32` and no `Saturating<f64>`, so this
+helper is only ever replayed in the plain position.
+
+The comment states the problem exactly — `v as f32` on a NaN is not required to
+preserve the sign bit, and in practice the result depends on the hardware and on
+what LLVM decided to constant-fold. A round trip that turns `-NaN` into `NaN`
+is a defect that shows up in exactly one test at exactly one optimisation level,
+so serde pins it down: take the sign first, cast, then put the sign back with
+`copysign`.
+
+The cfg split is not about correctness but availability: `copysign` is a
+`std` float method in the versions serde supports, so a `no_std` build has to
+take the bare cast and accept whatever sign it gets. Two builds of the same
+crate genuinely differ here, and this is one of the few places where a feature
+gate changes a result rather than a surface.
+
+The two `#[cfg]` blocks are expression-position attributes on braced blocks, one
+of which is compiled away entirely. Both blocks evaluate to the function's
+return value, which is why neither ends in a semicolon.
+"""
+
+[[annotation]]
+id    = "de-impls-0012"
+file  = "src/de/impls.rs"
+lines = "243-284"
+title = "int_to_int! — widen to i64, then try_from down"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "result", "option"]
+examples = ["num_widening"]
+prereqs = ["de-impls-0009", "de-mod-0009"]
+body = """
+The first helper that can fail. A signed source narrowing into a signed target
+is range-checked at run time, and the check is written once for every source
+width by casting to `i64` first: `Self::Value::try_from(v as i64)`. Without that
+widening the macro would need a separate arm per source type, since `try_from`
+is a different impl for each pair.
+
+The failure carries `Unexpected::Signed(v as i64)` — the *value* that arrived,
+not its type. That is what puts the offending number into the message rather
+than only the two type names, and it is why serde error strings are usually
+enough to find the bad field without reaching for a debugger. The example
+transcript has the exact wording.
+
+The nonzero arm does the two checks in sequence with one shared error: range
+first via `$primitive::try_from`, then `Self::Value::new` for the zero case.
+Both failures report the same thing, which is a small loss — a zero and an
+out-of-range value produce messages that differ only in the expectation clause.
+
+The saturating arm cannot use `try_from` at all: it needs to know *which* end
+was exceeded in order to clamp to the right one, so it compares against
+`$primitive::MIN` and `MAX` in `i64` space explicitly. This is the shape all
+three saturating arms take.
+"""
+
+[[annotation]]
+id    = "de-impls-0013"
+file  = "src/de/impls.rs"
+lines = "285-334"
+title = "int_to_uint! — the sign check, and a lint that fires in one expansion"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "result", "cfg"]
+examples = ["num_widening"]
+prereqs = ["de-impls-0012"]
+body = """
+Signed source, unsigned target, so there are two ways to fail and the negative
+case is checked first: `if 0 <= v` guards the whole conversion, and everything
+that falls out the bottom shares one `Err`. Structuring it as an early `return`
+inside the guard rather than nested `if let` chains is what keeps the error
+expression written once.
+
+`#[allow(irrefutable_let_patterns)]` is the detail worth stopping at. When this
+macro is replayed for `u64` and for `u128`, `Self::Value::try_from(v as u64)`
+converts a `u64` into something at least as wide, so it resolves to the
+reflexive `TryFrom` impl whose error type is `Infallible` — and `if let Ok(v)`
+on a `Result` that cannot be `Err` is an irrefutable pattern. The lint would
+fire on those two expansions and no others. There is no way to write a
+`#[cfg]` that knows which expansion it is in, so the allow is unconditional and
+inert everywhere else.
+
+In that same arm the trailing `v as Self::Value` is a no-op cast: `try_from`
+already produced a `Self::Value`. It costs nothing and it makes the three arms
+look alike.
+
+The saturating arm clamps negatives to zero rather than to `MIN`, which for an
+unsigned target is the same number said the honest way.
+"""
+
+[[annotation]]
+id    = "de-impls-0014"
+file  = "src/de/impls.rs"
+lines = "335-374"
+title = "uint_to_self! — one helper for both target signednesses"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "result"]
+examples = ["num_widening"]
+prereqs = ["de-impls-0012"]
+body = """
+The last of the six, and the one that does the most work per line. An unsigned
+source can never be negative, so a single `Self::Value::try_from(v as u64)`
+covers everything — including targets that are *signed*. The `i8` block below
+uses this helper for all four unsigned source types, and the `try_from` into
+`i8` rejects 200 as out of range without any extra arm.
+
+`Unexpected::Unsigned(v as u64)` is the counterpart to `int_to_int!`'s
+`Signed`, and the reason `Unexpected` carries the two separately: a
+`u64::MAX` reported as a signed integer would print as -1.
+
+The saturating arm clamps at `MAX` only, since the source cannot go below zero,
+and it reaches `$primitive::MAX` through the same `try_from` failure path rather
+than a comparison — the only saturating arm of the six that can get away with
+that.
+"""
+
+[[annotation]]
+id    = "de-impls-0015"
+file  = "src/de/impls.rs"
+lines = "375-381"
+title = "i8 — every source type but its own can overflow it"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition"]
+macro_def = "de-impls-0007"
+examples = ["num_widening"]
+body = """
+The narrowest signed target, so the list is almost all checked helpers: `num_self!`
+for `i8` itself, `int_to_int!` for the three wider signed types, `uint_to_self!`
+for all four unsigned ones. Three impls come out — `i8`, `NonZeroI8`,
+`Saturating<i8>` — and the hint is `deserialize_i8`.
+"""
+
+[[annotation]]
+id    = "de-impls-0016"
+file  = "src/de/impls.rs"
+lines = "382-404"
+title = "i16, i32, i64 — one source type migrates per step"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition"]
+macro_def = "de-impls-0007"
+body = """
+Read these three as a sequence. Each widening of the target moves exactly one
+source type out of `int_to_int!` and into `num_as_self!`, because it has just
+become unconditionally representable. By `i64` there is no `int_to_int!` line
+left at all, and only the unsigned sources can still fail.
+"""
+
+[[annotation]]
+id    = "de-impls-0017"
+file  = "src/de/impls.rs"
+lines = "405-411"
+title = "isize — no visit_isize, so no num_self! row"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition", "cfg"]
+macro_def = "de-impls-0007"
+body = """
+The data model has no pointer-sized integer, so there is nothing for
+`num_self!` to match and the hint is `deserialize_i64`, exactly as `isize`
+serializes through `serialize_i64`. `i8` and `i16` get `num_as_self!` because
+`isize` is guaranteed at least 16 bits; `i32` and `i64` stay checked, and on a
+32-bit target the `i32` row is the one that starts rejecting real input.
+"""
+
+[[annotation]]
+id    = "de-impls-0018"
+file  = "src/de/impls.rs"
+lines = "412-441"
+title = "u8, u16, u32, u64 — the unsigned mirror"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition"]
+macro_def = "de-impls-0007"
+examples = ["num_widening"]
+body = """
+Same progression, with `int_to_uint!` covering all four signed sources at every
+width — a negative number is out of range for an unsigned target no matter how
+wide it is, so that line never shortens. Among the unsigned sources the same
+migration happens as on the signed side, and `u64` ends with no `uint_to_self!`
+row.
+"""
+
+[[annotation]]
+id    = "de-impls-0019"
+file  = "src/de/impls.rs"
+lines = "442-448"
+title = "usize — the same shape as isize"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition"]
+macro_def = "de-impls-0007"
+body = """
+No `num_self!`, hint `deserialize_u64`, `num_as_self!` for the two widths that
+always fit. This is the impl that runs for every collection length and index
+that has been round-tripped through a format.
+"""
+
+[[annotation]]
+id    = "de-impls-0020"
+file  = "src/de/impls.rs"
+lines = "449-464"
+title = "f32, f64 — two arguments, and no range check anywhere"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition"]
+macro_def = "de-impls-0007"
+examples = ["num_widening"]
+body = """
+These two take the two-argument form of `impl_deserialize_num!` — there is no
+`NonZeroF32` or `Saturating<f32>` to generate — so each produces exactly one
+impl. Every integer source goes through `num_as_self!` with no check at all, and
+the other float width through `num_as_copysign_self!`. An `f32` that receives
+`1e300` gets infinity, not an error; the example transcript shows it next to the
+integer rows that would have refused.
+"""
+
+[[annotation]]
+id    = "de-impls-0021"
+file  = "src/de/impls.rs"
+lines = "465-517"
+title = "num_128! — defined here because macros are scoped by position"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "macro-hygiene", "custom-errors"]
+examples = ["num_widening"]
+prereqs = ["de-impls-0012", "de-mod-0047"]
+body = """
+A seventh helper, sitting in the middle of the file rather than with its five
+siblings. That position is deliberate and it teaches the rule: `macro_rules!`
+definitions are textually scoped from the point of definition to the end of the
+enclosing block, unlike `fn` and `struct` items, which are visible throughout
+their module. The twelve invocations above do not need this macro, the two below
+do, and putting it here is legal only because "below" is what matters.
+
+What it does is the one conversion the other helpers cannot express. `int_to_int!`
+and `uint_to_self!` both funnel through `i64` or `u64` to keep one arm per
+helper; a 128-bit target has nothing wider to funnel through. So the range check
+is written directly, and in two halves:
+
+    v as i128 >= Self::Value::MIN as i128 && v as u128 <= Self::Value::MAX as u128
+
+The low bound is compared in `i128` and the high bound in `u128`, because
+neither type alone can hold both ends of the union of `i128` and `u128`. Each
+comparison is exact in its own domain.
+
+The error is the other difference. `Unexpected` has no 128-bit variant — the
+same gap that forced `visit_i128`'s default to build a string by hand — so this
+macro passes `Unexpected::Other(stringify!($ty))`. The consequence is
+user-visible: where the 64-bit helpers report `invalid value: integer 300`, this
+one reports `invalid value: u128`, naming the type and losing the number.
+"""
+
+[[annotation]]
+id    = "de-impls-0022"
+file  = "src/de/impls.rs"
+lines = "518-533"
+title = "i128, u128 — the two blocks that needed the seventh helper"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition"]
+macro_def = "de-impls-0007"
+examples = ["num_widening"]
+body = """
+`i128` takes every integer up to `u64` through `num_as_self!` — all of them fit
+— and needs `num_128!` only for `u128`. `u128` still needs `int_to_uint!` for
+the signed sources, to reject negatives, and `num_128!` for `i128`.
+
+These are also the expansions where `int_to_uint!`'s
+`#[allow(irrefutable_let_patterns)]` earns its place: `u64` and `u128` are the
+two targets whose `try_from(v as u64)` cannot fail.
+"""

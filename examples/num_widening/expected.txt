@@ -1,0 +1,85 @@
+num_as_self! and num_self! — the conversions that cannot fail
+---------------------------------------------------------------
+i64                visit_i8(-8)           -8
+i64                visit_i64(-64)         -64
+u64                visit_u8(8)            8
+i128               visit_u64(18446744073709551615) 18446744073709551615
+
+The target is at least as wide as the source, so the macro emits a bare
+`v as Self::Value` with no check. num_self! is the same arm with the
+cast removed, for the one source type that is already the target.
+
+int_to_int! and uint_to_self! — narrowing, checked at run time
+----------------------------------------------------------------
+i8                 visit_i64(127)         127
+i8                 visit_i64(128)         Err: invalid value: integer `128`, expected i8
+u8                 visit_u64(255)         255
+u8                 visit_u64(256)         Err: invalid value: integer `256`, expected u8
+
+Both widen to i64/u64 first and then `try_from` into the target, so one
+macro arm covers every source width. Out of range is an error, never a
+truncation: 300 does not become 44.
+
+int_to_uint! — the sign check that comes first
+------------------------------------------------
+u8                 visit_i64(300)         Err: invalid value: integer `300`, expected u8
+u8                 visit_i64(-1)          Err: invalid value: integer `-1`, expected u8
+u8                 visit_i8(-1)           Err: invalid value: integer `-1`, expected u8
+
+Signed source, unsigned target. The `if 0 <= v` guard runs before the
+`try_from`, which is why -1 reports the value it saw rather than a
+conversion failure.
+
+The nonzero arms — same conversion, one extra rejection
+---------------------------------------------------------
+NonZeroU32         visit_u64(7)           7
+NonZeroU32         visit_u64(0)           Err: invalid value: integer `0`, expected a nonzero u32
+NonZeroU8          visit_i64(-3)          Err: invalid value: integer `-3`, expected a nonzero u8
+NonZeroI8          visit_i64(200)         Err: invalid value: integer `200`, expected a nonzero i8
+
+`impl_deserialize_num!`'s first arm generates a second impl for the
+matching NonZero type out of the same macro list, adding a
+`Self::Value::new(v)` step. Note the message: the expectation comes
+from the visitor's `expecting`, so it names the primitive.
+
+The saturating arms — clamping instead of failing
+---------------------------------------------------
+Saturating<u8>     visit_i64(300)         255
+Saturating<u8>     visit_i64(-1)          0
+Saturating<i8>     visit_i64(-999)        -128
+
+The third arm of each macro. Same input as the checked rows above, and
+the only impls here that answer an out-of-range number with a number.
+
+num_128! — the range check that cannot borrow i64/u64
+-------------------------------------------------------
+i128               visit_u128(340282366920938463463374607431768211455) Err: invalid value: u128, expected i128
+u128               visit_i128(-1)         Err: invalid value: i128, expected u128
+u128               visit_u128(340282366920938463463374607431768211455) 340282366920938463463374607431768211455
+
+128-bit targets cannot widen to i64 first, so this macro compares in
+i128/u128 directly. The error also reads differently: Unexpected has no
+128-bit variant, so the macro passes Unexpected::Other with the type
+name and you get the type instead of the value.
+
+The float arms — num_as_copysign_self!, and no range check anywhere
+---------------------------------------------------------------------
+f32                visit_f64(1e300)       inf
+f32                visit_f64(16777217.0)  16777216.0
+f64                visit_u64(18446744073709551615) 1.8446744073709552e19
+f32                visit_f64(-NaN)        NaN, sign_negative = true
+
+The float arms have no guard. Out of range saturates to infinity,
+precision is dropped silently, and the only thing the macro takes care
+to preserve is the sign of NaN — `as` alone is allowed to lose it.
+
+The method that is missing: visit_str
+-------------------------------------
+u8                 visit_str("7")         Err: invalid type: string "7", expected u8
+f64                visit_str("1.5")       Err: invalid type: string "1.5", expected f64
+
+None of the sixteen numeric visitors overrides visit_str, so the
+default from the Visitor trait runs and reports a type error. serde
+never parses a number out of a string on its own; a format that wants
+that has to call visit_u64 itself.
+

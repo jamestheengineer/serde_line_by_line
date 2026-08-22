@@ -18,6 +18,7 @@ wasm-bindgen = "=0.2.127"
 collect_str = { path = "../examples/collect_str" }
 default_methods = { path = "../examples/default_methods" }
 error_custom = { path = "../examples/error_custom" }
+num_widening = { path = "../examples/num_widening" }
 ok_and_error = { path = "../examples/ok_and_error" }
 primitive_dispatch = { path = "../examples/primitive_dispatch" }
 seq_state_machine = { path = "../examples/seq_state_machine" }
