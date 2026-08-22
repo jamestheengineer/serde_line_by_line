@@ -1481,3 +1481,290 @@ checker required. Under NLL it is unnecessary: `InPlaceSeed`'s `Value` is `()`,
 so `next` is an `Option<()>` holding no borrow at all, and the reference dies
 when the call returns. The braces are harmless and they document the intent.
 """
+
+[[annotation]]
+id    = "de-impls-0058"
+file  = "src/de/impls.rs"
+lines = "1225-1239"
+title = "ArrayVisitor — one type parameter for the whole array"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["marker-types", "generic-params"]
+prereqs = ["de-impls-0041"]
+body = """
+`ArrayVisitor<A>` is parameterised by the array type itself — `[T; 4]` — not by
+the element type. That is what lets a single struct serve thirty-three different
+`Visitor` impls, each written for a different concrete `A`, with the length
+living in the type rather than in a field.
+
+`fn new()` exists because the alternative at each call site is
+`ArrayVisitor { marker: PhantomData }`, and the marker field is private noise
+the caller should not have to spell. It is declared in a bare `impl<A>` with no
+bounds at all, so it is available for every `A` including the ones that have no
+`Visitor` impl.
+"""
+
+[[annotation]]
+id    = "de-impls-0059"
+file  = "src/de/impls.rs"
+lines = "1240-1265"
+title = "[T; 0] — the impl with no bound on T"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "04-generic-bounds"
+rust_features = ["generic-params", "where-clauses", "zero-cost"]
+prereqs = ["de-impls-0058"]
+body = """
+The comment above the impl is the whole point: *"Does not require T:
+Deserialize<'de>."* An empty array contains no elements, so deserializing one
+never deserializes a `T`, so demanding that `T` be deserializable would be a
+bound that buys nothing and excludes real code — `[Box<dyn Fn()>; 0]` is a
+legitimate field on a struct someone wants to derive.
+
+That is the general principle worth taking away: put a bound where the operation
+happens, not where the type appears. `serde_derive` gets this wrong by default
+and generates `T: Deserialize` for every parameter, which is why
+`#[serde(bound = "...")]` exists as an escape hatch.
+
+It is hand-written rather than generated because `array_impls!` builds its array
+literal from a `$(...),+` repetition, which requires at least one element.
+
+The hint is `deserialize_tuple(0, ...)`: in serde's data model an array is a
+fixed-length sequence, which is the same thing a tuple is.
+"""
+
+[[annotation]]
+id    = "de-impls-0060"
+file  = "src/de/impls.rs"
+lines = "1266-1292"
+title = "array_impls! — building a fixed-size array without partial initialization"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "macro-repetition", "unsafe", "pattern-matching"]
+prereqs = ["de-impls-0047", "de-impls-0059"]
+body = """
+Constructing a `[T; 32]` element by element is the classic place people reach
+for `MaybeUninit` and `unsafe`: you cannot assign into an array that does not
+exist yet, and if element 17 fails you must drop exactly the first 16.
+
+This macro sidesteps the whole problem. The array is built as a single
+expression:
+
+    Ok([$( match tri!(seq.next_element()) { ... } ),+])
+
+Each element position holds a `match` that either evaluates to a `T` or returns
+early from the function. The array literal is therefore never partially
+initialized — either every position produces a value and the array comes into
+existence complete, or the function returned before any of it was built and the
+values already produced are dropped by the ordinary rules. No `unsafe`, no
+`MaybeUninit`, no manual drop counting. The crate contains two `unsafe` blocks
+in twelve thousand lines, and this is one of the places you might have expected
+a third.
+
+The `$($n:tt)+` capture is a list of index tokens — `0 1 2 3` — and it is used
+in exactly one place, `Error::invalid_length($n, &self)`. Its real job is to be
+a repetition of the right length, since `$len` alone cannot drive a
+repetition; the fact that its tokens are also the correct indices for the error
+message is what makes it free.
+"""
+
+[[annotation]]
+id    = "de-impls-0061"
+file  = "src/de/impls.rs"
+lines = "1293-1321"
+title = "The in-place visitor, and a variable that exists to satisfy the borrow checker"
+kind  = "impl"
+tracks = ["reference", "course"]
+course_unit = "12-errors-iterators-closures"
+rust_features = ["borrowing", "iterators", "borrow-splitting"]
+prereqs = ["de-impls-0060", "de-impls-0057"]
+body = """
+Arrays get the element-wise reuse that `seq_impl!` could not offer, and for a
+simpler reason than `Vec`: the length is fixed, so there is no truncating or
+growing to think about. Walk `iter_mut()`, hand each element to `InPlaceSeed`,
+done.
+
+`fail_idx` is the line that deserves the explanation. The obvious code is to
+`return Err(Error::invalid_length(idx, &self))` inside the loop — but the loop
+is iterating `self.0[..].iter_mut()`, which holds a mutable borrow of `self` for
+its entire duration, and `invalid_length` needs `&self` to render the
+expectation. Shared and mutable borrows of the same value cannot coexist, so the
+error cannot be constructed until the iterator is dropped.
+
+The fix is to record the index, `break` to end the loop and with it the borrow,
+then build the error afterwards. It reads like a workaround because it is one —
+the alternative is restructuring the loop to index by integer rather than
+iterate, which costs a bounds check per element.
+"""
+
+[[annotation]]
+id    = "de-impls-0062"
+file  = "src/de/impls.rs"
+lines = "1322-1343"
+title = "The generated Deserialize, with both halves supplied"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "default-methods"]
+prereqs = ["de-impls-0061"]
+body = """
+Two methods, both one line, both passing `$len` as the tuple length so a
+non-self-describing format knows how many elements to read without a count in
+the stream.
+
+This is the first macro in the file to generate a `deserialize_in_place` that is
+genuinely better than the default rather than merely equivalent — `seq_impl!`
+clears and refills, this one overwrites in place. Fixed length is what makes the
+difference.
+"""
+
+[[annotation]]
+id    = "de-impls-0063"
+file  = "src/de/impls.rs"
+lines = "1344-1378"
+title = "1 through 32 — a table that const generics made obsolete"
+kind  = "macro-use"
+tracks = ["reference", "course"]
+course_unit = "04-generic-bounds"
+rust_features = ["macro-repetition", "msrv", "generic-params"]
+macro_def = "de-impls-0060"
+body = """
+Thirty-two lines, one per array length, each spelling out its own indices. It is
+the most mechanical block in the crate and it is a historical artifact: before
+const generics, `impl<T> Deserialize for [T; N]` could not be written for all
+`N`, so the standard library and every crate that followed it stopped at 32.
+
+Const generics stabilized in Rust 1.51 and this crate's declared minimum is
+1.56, so the technical obstacle is gone. The table remains, and the practical
+consequence is that `[T; 33]` has no `Deserialize` impl — a limit users still
+hit and report.
+
+Worth knowing when you meet it: the workaround is `#[serde(with = ...)]` or a
+newtype, not a patch to this list.
+"""
+
+[[annotation]]
+id    = "de-impls-0064"
+file  = "src/de/impls.rs"
+lines = "1379-1394"
+title = "tuple_impls! — a macro split in two so one impl can opt out"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "macro-repetition", "cfg"]
+prereqs = ["de-impls-0060"]
+body = """
+This macro generates only the impl *header* and delegates everything inside the
+braces to `tuple_impl_body!`. The split exists for one caller: the one-element
+tuple `(T,)`, below, needs the same body under a different header — one carrying
+rustdoc attributes and a hand-written generic list.
+
+Factoring the body into its own macro is the ordinary refactor, applied to
+macros. It works because a `macro_rules!` invocation is allowed in item
+position inside an impl block, so `tuple_impl_body!(...)` expands to the two
+methods exactly where it is written.
+
+`#[cfg_attr(docsrs, doc(hidden))]` hides all fifteen generated impls from the
+documentation. The next annotation shows what appears in their place.
+"""
+
+[[annotation]]
+id    = "de-impls-0065"
+file  = "src/de/impls.rs"
+lines = "1395-1432"
+title = "Type parameters reused as variable names"
+kind  = "macro-def"
+tracks = ["reference", "course"]
+course_unit = "10-macro-rules"
+rust_features = ["macro-rules", "macro-hygiene", "pattern-matching"]
+prereqs = ["de-impls-0064"]
+body = """
+The body is the array visitor's trick again — a `match` per element that either
+yields a value or returns early — with one difference in how the values are
+held.
+
+An array is homogeneous, so its elements can be built directly inside the array
+literal. A tuple is not: each position has its own type, and the expansion needs
+a distinct binding per position. Rather than invent names, the macro reuses the
+type parameter identifiers as variable names:
+
+    let $name = match tri!(seq.next_element()) { ... };
+
+so `T0`, `T1`, `T2` become both the types in the impl header and the locals in
+the body. It is guaranteed to produce one distinct name per element, because the
+type parameters already had to be distinct. The cost is `#[allow(non_snake_case)]`,
+since `let T0 = ...` violates the naming lint — and that attribute is the visible
+trace of the trick.
+
+`Ok(($($name,)+))` then collects them. The trailing comma inside the repetition
+is what makes the one-element case `(T0,)` a tuple rather than a parenthesised
+expression.
+"""
+
+[[annotation]]
+id    = "de-impls-0066"
+file  = "src/de/impls.rs"
+lines = "1433-1467"
+title = "In place, and the parentheses around self.0"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "borrowing", "msrv"]
+prereqs = ["de-impls-0065"]
+body = """
+The in-place half needs no `fail_idx` dance: the repetition is unrolled, so each
+element is a separate statement with its own `return`, and no loop holds a
+borrow across the error construction. What the array visitor needed a workaround
+for, the macro gets for free by not having a loop at all.
+
+`InPlaceSeed(&mut (self.0).$n)` — the parentheses are the curiosity. `self.0` is
+the `&mut` tuple the visitor wraps, and `$n` is the field index within it, so
+the expression wants to be `self.0.0`. Written directly that is fine on a
+current compiler; it was not always, because a tuple index followed by another
+was lexed as a float literal, and this crate supports compilers back to 1.56.
+The parentheses break the sequence unambiguously and cost nothing.
+"""
+
+[[annotation]]
+id    = "de-impls-0067"
+file  = "src/de/impls.rs"
+lines = "1468-1479"
+title = "(T,) — the impl that rustdoc shows in place of all sixteen"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg", "macro-rules", "visibility"]
+prereqs = ["de-impls-0064"]
+body = """
+The one-tuple, written out so it can carry two rustdoc attributes the generated
+impls cannot.
+
+`doc(fake_variadic)` is a rustdoc feature for exactly this situation: it renders
+a family of tuple or array impls as a single collapsible entry instead of
+sixteen near-identical ones. Paired with the `doc(hidden)` on
+`tuple_impls!`'s output, the published page shows this impl and a line reading
+*"This trait is implemented for tuples up to 16 items long"* — which is the
+attribute on the lines below it, written out as prose because rustdoc cannot
+infer the count.
+
+The body is `tuple_impl_body!(1 => (0 T))`, the same expansion every other
+tuple gets. Nothing about the code differs; only the documentation does.
+"""
+
+[[annotation]]
+id    = "de-impls-0068"
+file  = "src/de/impls.rs"
+lines = "1480-1497"
+title = "2 through 16 — where the tuple table stops"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-repetition"]
+macro_def = "de-impls-0064"
+body = """
+Sixteen is the standard library's own limit for tuple trait impls, and serde
+matches it. Unlike the array table there is no const-generic escape here —
+variadic generics do not exist in Rust, so this list cannot be replaced by
+anything shorter until they do.
+
+Each row carries both the index and the type-parameter name for every position,
+because the body needs them paired: `$n` for the error message, `$name` for the
+binding and the type.
+"""
