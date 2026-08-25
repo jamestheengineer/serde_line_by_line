@@ -1,0 +1,525 @@
+# The course track.
+#
+# Same annotation store as the reference track, different ordering: the
+# reference track walks the source tree, this one walks a teaching progression.
+# A unit's content is the annotations tagged with its `id` in `course_unit`,
+# plus the framing written here.
+#
+# `supplement` is the honesty field. serde_core exercises lifetimes, traits and
+# macros exhaustively and ordinary imperative Rust barely at all (PLAN.md §2),
+# so some units cannot be taught from this crate. Saying which is the point:
+#
+#   none    — taught entirely from serde_core; nothing invented
+#   partial — serde_core shows part of it, written material fills the rest
+#   full    — serde_core does not exercise this; the unit is written from scratch
+#
+# `status` is "written" once the unit's framing and its supplementary material
+# both exist; "planned" until then. The coverage gate warns on planned units so
+# the remaining work stays visible, and the reader sees the label too.
+
+schema = 1
+source = "serde_core-1.0.229"
+
+# Dependency order, used to sequence annotations drawn from several files into
+# one unit. Path order would put `de/` before `ser/`, which is backwards: the
+# serializer half is strictly simpler and every explanation of `Deserializer`
+# leans on it. The coverage gate checks this list against the pinned tree.
+reading_order = [
+    "src/lib.rs",
+    "src/crate_root.rs",
+    "src/macros.rs",
+    "src/ser/mod.rs",
+    "src/ser/impls.rs",
+    "src/ser/impossible.rs",
+    "src/ser/fmt.rs",
+    "src/de/mod.rs",
+    "src/de/ignored_any.rs",
+    "src/de/value.rs",
+    "src/de/impls.rs",
+    "src/format.rs",
+    "src/std_error.rs",
+    "src/private/mod.rs",
+    "src/private/content.rs",
+    "src/private/doc.rs",
+    "src/private/seed.rs",
+    "src/private/size_hint.rs",
+    "src/private/string.rs",
+]
+
+[[unit]]
+id = "01-why-a-data-model"
+title = "Why serialization needs a data model"
+supplement = "none"
+status = "written"
+prereqs = []
+rust_features = ["traits", "modules"]
+examples = ["primitive_dispatch"]
+summary = """
+Serde does not connect data structures to formats directly. It connects both to
+a 29-type model in the middle, and almost every design decision in the crate
+follows from that one choice.
+"""
+body = """
+Start with the arithmetic. Ten data structures and ten formats need a hundred
+pieces of conversion code if each pair is written by hand. Put a fixed model
+between them and it is ten plus ten: each type says how it maps onto the model,
+each format says how it writes the model down, and neither has heard of the
+other.
+
+The model is the price. It has 29 types, and a type that does not fit one of
+them cannot be serialized without lying about its shape — which is why the list
+is worth reading closely rather than skimming. `ser/mod.rs` enumerates it in
+prose; `private/content.rs` is the same model expressed as a Rust enum, which
+makes the shape concrete and also shows the two variants it turns out not to
+have.
+
+Watch for the seam this creates. The data structure chooses which model type it
+looks like, the format chooses what that type costs, and neither choice is
+visible to the other side. `is_human_readable` is the one place the seam leaks,
+and the annotation on it says what that leak buys and what it costs.
+
+The examples in this unit make the dispatch observable: a serializer whose `Ok`
+type is *the method it was called with*, so you can see exactly which of the 29
+types a value claimed to be.
+"""
+
+[[unit]]
+id = "02-traits-and-supertraits"
+title = "Traits and supertraits"
+supplement = "none"
+status = "written"
+prereqs = ["01-why-a-data-model"]
+rust_features = ["traits", "supertraits", "sized-bound", "trait-objects"]
+examples = []
+summary = """
+`Serialize` and `Serializer` are the two halves of the contract. The bounds
+attached to them — especially the ones deliberately left off — decide what can
+implement each side.
+"""
+body = """
+Two traits, two roles: `Serialize` is implemented by data structures,
+`Serializer` by formats. Read them as a pair of interfaces negotiating across a
+boundary, not as a base class and its subclasses.
+
+The teaching is in the bounds. `Serialize` has no `Sized` bound, which is why
+`str` and `[T]` — types whose size is not known at compile time — can implement
+it at all; the `str` impl is the proof, and it is four lines long. `Serializer`
+does have `Sized` as a supertrait, and that single word rules out
+`dyn Serializer` for the whole ecosystem. That is a real trade: static dispatch
+and monomorphized formats in exchange for never being able to store a boxed
+serializer.
+
+A supertrait here is a requirement, not an inheritance relationship. When you
+see `trait Foo: Bar`, read it as "anything implementing `Foo` must also
+implement `Bar`, and `Foo`'s default methods may rely on that" — the compiler
+gives you `Bar`'s methods inside `Foo`'s bodies, and nothing else.
+"""
+
+[[unit]]
+id = "03-associated-types"
+title = "Associated types"
+supplement = "none"
+status = "written"
+prereqs = ["02-traits-and-supertraits"]
+rust_features = ["associated-types", "generic-params", "traits"]
+examples = ["ok_and_error", "seq_state_machine"]
+summary = """
+`type Ok`, `type Error`, and the seven compound types are how a format states
+its own vocabulary. This is the unit where Serde's central trick becomes
+visible.
+"""
+body = """
+An associated type is a type the *implementer* chooses and the caller has to
+accept. `Serializer::Ok` is the clearest case in the crate: `serde_json`'s
+string serializer produces `()` because output accumulates into a buffer the
+caller already owns, while a hash-computing serializer produces `u64`. Same
+trait, same calls, different type — and the `Serialize` impls are generic over
+it, so they never notice.
+
+Compare that with a type parameter. `trait Serializer<Ok>` would let one format
+implement `Serializer` at several `Ok` types, and every call site would then
+have to say which one it meant. Associated types are the "there is exactly one"
+version, and that is the property the whole API depends on.
+
+The seven compound associated types — `SerializeSeq`, `SerializeMap`, and the
+rest — are the same idea applied to state machines. Each names the type you get
+back from `serialize_seq` or `serialize_map`, and the receivers on that type's
+methods (`&mut self` to add, `self` to finish) turn the protocol into something
+the borrow checker enforces rather than something the docs ask for.
+
+On the deserialization side the payoff is `Visitor::Value` and
+`DeserializeSeed::Value`: the visitor names what it will produce, and that is
+what lets a seed carry data *into* deserialization instead of only out of it.
+"""
+
+[[unit]]
+id = "04-generic-bounds"
+title = "Generic bounds and `where` clauses"
+supplement = "none"
+status = "written"
+prereqs = ["03-associated-types"]
+rust_features = ["generic-params", "where-clauses", "sized-bound", "traits"]
+examples = []
+summary = """
+519 `where` clauses. This unit reads the ones that carry a decision, and the
+ones whose absence carries a bigger one.
+"""
+body = """
+A bound is a promise you demand from a caller. Two questions are worth asking at
+every one in this crate: what breaks without it, and what does requiring it stop
+you from doing?
+
+`Option<T>` needs `T: Serialize` — obvious. `[T; 0]` needs nothing at all, which
+looks like an oversight until you notice there is no `T` value to serialize, so
+demanding `T: Serialize` would reject arrays of unserializable types for no
+reason. `Box<T>` is bounded on `Box<T>: Serialize`-adjacent shapes rather than
+on `T` in the deserializing direction, and `Cell<T>` inherits a `Copy` bound
+from the operation it has to perform rather than from the trait it is
+implementing.
+
+Bounds in `where` position instead of inline are usually a readability choice,
+but not always: `where` is the only place you can bound something that is not a
+bare type parameter, such as `A::Error` or `Self::Ok`. Once you see that,
+several of the crate's longer clauses stop looking decorative.
+
+Collections make the trade-off concrete. `BTreeSet` and `HashSet` have the same
+deserialization body and different bounds — `Ord` for one, `Hash + Eq` for the
+other — because the bound is dictated by the container, not by Serde.
+"""
+
+[[unit]]
+id = "05-default-methods"
+title = "Default methods, and what silence means"
+supplement = "none"
+status = "written"
+prereqs = ["04-generic-bounds"]
+rust_features = ["default-methods", "traits", "zero-cost"]
+examples = ["default_methods", "collect_str"]
+summary = """
+157 trait methods in this crate have bodies. Every one of them is a decision the
+trait makes on your behalf when you say nothing, and a few of those decisions
+are surprising.
+"""
+body = """
+A default method is a policy with a fallback, and reading one means asking what
+the fallback commits you to. Three in `Serializer` are worth the time:
+
+`serialize_i128` defaults to an error. Silence means "this format has no 128-bit
+integers", which is the right default only because the alternative — silently
+truncating — is worse. `is_human_readable` defaults to `true`, so a format that
+says nothing is assumed to be rendering for people. `collect_str` defaults to
+`self.serialize_str(&value.to_string())`, which allocates; a format that can
+stream a `Display` implementation directly overrides it and saves the
+allocation.
+
+The pattern generalizes past this crate: a default body is how a trait grows
+without breaking implementers, and the cost is that every default silently
+picks a behaviour for code that was written before the method existed.
+
+The deserializing side shows the other reason to override: performance.
+`MapDeserializer::next_entry_seed` exists only because the default —
+`next_key_seed` then `next_value_seed` — has to stash the value between the two
+calls, and this implementation has both halves in hand at once.
+"""
+
+[[unit]]
+id = "06-ownership-and-borrowing"
+title = "Ownership and borrowing"
+supplement = "full"
+status = "planned"
+prereqs = ["05-default-methods"]
+rust_features = ["ownership", "borrowing", "strings", "smart-pointers"]
+examples = []
+summary = """
+Fully supplementary. serde_core is generic, trait-heavy code that almost never
+does ordinary imperative ownership work, so this unit is written from scratch —
+and the next unit needs it.
+"""
+body = """
+This unit is not drawn from serde_core, and the honest reason is in PLAN.md §2:
+the crate exercises `ownership` and `borrowing` almost nowhere in the form a
+learner needs to meet them first. There are no long functions moving values
+between locals, no `clone()`-to-appease-the-borrow-checker moments, no data
+structures being mutated in place through a chain of `&mut`. What the crate has
+instead is 724 lifetime parameters, which is the *next* topic and unreadable
+without this one.
+
+Planned material: moves and copies, what `Drop` runs and when, shared versus
+mutable references and the aliasing rule that keeps them apart, and the
+`String`/`&str` pair as the worked example — because that pair is exactly what
+unit 08 will ask you to reason about across a format boundary.
+
+When this unit is written it will carry its own examples, including at least one
+`compile_fail` case: a borrow-checker error is easier to understand when you
+have made the compiler produce it yourself than when it is quoted at you.
+"""
+
+[[unit]]
+id = "07-lifetimes-basics"
+title = "Lifetimes I: the basics"
+supplement = "full"
+status = "planned"
+prereqs = ["06-ownership-and-borrowing"]
+rust_features = ["lifetimes", "borrowing"]
+examples = []
+summary = """
+Fully supplementary. Lifetime *syntax* has to be routine before `'de` can teach
+anything, and serde_core's lifetimes are all advanced ones.
+"""
+body = """
+serde_core is one of the best places in the ecosystem to learn what lifetimes
+are *for*, and one of the worst places to learn what they *are*. Every lifetime
+in it is doing real work — outlives bounds, higher-ranked bounds, two lifetimes
+deliberately unified into one — and none of them is a first example.
+
+Planned material: what a lifetime parameter annotates and what it does not,
+elision in function signatures and why it usually just works, the meaning of
+`'a: 'b`, and lifetimes on structs — the point where a type stops being
+self-contained and starts describing a view into someone else's memory.
+
+Then unit 08 picks up exactly where this leaves off: `'de` is a struct lifetime
+that names the buffer the input lives in, and `impl<'de: 'a, 'a>` in
+`de/impls.rs` is the outlives bound from this unit doing load-bearing work.
+"""
+
+[[unit]]
+id = "08-lifetimes-de-and-zero-copy"
+title = "Lifetimes II: `'de` and zero-copy deserialization"
+supplement = "none"
+status = "written"
+prereqs = ["07-lifetimes-basics"]
+rust_features = ["lifetime-de", "lifetimes", "hrtb", "borrowing", "strings"]
+examples = []
+summary = """
+The crate's central idea, and the reason `Deserialize<'de>` has a lifetime
+parameter at all: some data can be handed to you as a borrow of the input
+instead of a copy of it.
+"""
+body = """
+`'de` is the lifetime of the input data. `Deserialize<'de>` means "this type can
+be built from data borrowed for `'de`", and a type that borrows nothing — `u64`,
+`String` — satisfies it for every `'de`, which is what `DeserializeOwned`
+expresses without being a trait anyone implements directly.
+
+The pair to study is `visit_str` and `visit_borrowed_str`. Both receive a
+`&str`; only the second promises that the string lives as long as `'de`, so only
+the second lets a visitor keep the reference instead of copying it. Sixteen
+lines, and the entire zero-copy story is in the difference.
+
+Not every format can offer that. One reading from a socket has no buffer to
+borrow from, so it only ever calls `visit_str` — which is why the borrowed
+methods have defaults that fall back to the transient ones, and why a type that
+requires borrowing simply will not deserialize from such a format. The failure
+is a compile-time bound in one direction and a runtime error in the other, and
+the annotations say which is which.
+
+Then read `Cow`. It is the impl most people expect to borrow, it never does, and
+the annotation explains why the obvious implementation cannot be written.
+"""
+
+[[unit]]
+id = "09-phantomdata-and-variance"
+title = "`PhantomData` and variance"
+supplement = "partial"
+status = "written"
+prereqs = ["08-lifetimes-de-and-zero-copy"]
+rust_features = ["marker-types", "variance", "generic-params"]
+examples = []
+summary = """
+107 `PhantomData` fields. What a type parameter that appears in no field is
+for, and the variance question that decides which `PhantomData<...>` you write.
+"""
+body = """
+A struct that is generic over `E` but stores no `E` will not compile with `E`
+unused, so it stores `PhantomData<E>` — zero bytes, and a note to the compiler
+about how the parameter should behave. serde_core does this 107 times, most
+visibly in the error-typed deserializers of `de/value.rs`, where `E` exists only
+so the caller can name the error type the deserializer will produce.
+
+`PhantomData` is not inert. `PhantomData<T>` makes the struct behave, for
+variance and drop-check purposes, as though it owned a `T`; `PhantomData<fn() -> T>`
+does not. The annotations point at the places where this choice is visible, and
+at `UnitDeserializer`, whose single field claims an ownership relationship the
+struct does not have.
+
+**Supplement needed.** Variance itself — covariance, contravariance, why
+`&'long T` is usable where `&'short T` is wanted and function arguments go the
+other way — is not something serde_core demonstrates by contrast anywhere. The
+written material for this unit fills that in; the crate supplies the motivation
+but not the counter-examples.
+"""
+
+[[unit]]
+id = "10-blanket-impls-and-coherence"
+title = "Blanket impls and coherence"
+supplement = "none"
+status = "written"
+prereqs = ["09-phantomdata-and-variance"]
+rust_features = ["blanket-impls", "traits", "trait-objects", "generic-params"]
+examples = []
+summary = """
+`impl<T: Bound> Trait for T` gives every qualifying type an implementation at
+once. The orphan rule is what stops that from being chaos, and it shapes the
+whole `IntoDeserializer` module.
+"""
+body = """
+`de/value.rs` exists to turn values you already have into deserializers, and it
+is the best blanket-impl case study in the crate: one trait, roughly 30 impls,
+several of them written as blankets over anything satisfying a bound. Reading
+them together shows the technique and its cost — a blanket impl is a commitment
+you cannot narrow later without breaking downstream code.
+
+Coherence is the rule that makes it safe: an impl is allowed only if the trait
+or the type is local to your crate. That is why you cannot implement `Serialize`
+for `Vec<T>` in your own crate, why serde ships the impls for the standard
+library itself, and why `#[serde(remote)]` exists as a workaround for foreign
+types.
+
+Two smaller pieces are worth reading in the same sitting. `Expected` is a
+one-method trait that could not have been `Display`, and its impl on a trait
+object shows dispatch working through `dyn` in a crate that otherwise avoids it.
+`&mut Formatter` implementing `Serializer` is the same move from the other
+direction: an impl on a reference type, chosen because the underlying type
+cannot be consumed.
+"""
+
+[[unit]]
+id = "11-macro-rules"
+title = "`macro_rules!`"
+supplement = "none"
+status = "written"
+prereqs = ["10-blanket-impls-and-coherence"]
+rust_features = ["macro-rules", "macro-repetition", "macro-hygiene", "monomorphization"]
+examples = ["num_widening", "primitive_dispatch"]
+summary = """
+45 definitions generate 288 invocations. This is the largest single body of
+declarative-macro practice in the unit list, and `de/impls.rs` is where it
+lives.
+"""
+body = """
+Declarative macros match token patterns and emit tokens. That is the whole
+model, and everything difficult about them follows from it: a macro cannot see
+types, cannot compute names, and cannot ask the compiler a question.
+
+serde_core makes each of those limits visible. `impl_deserialize_num!` takes
+*macro calls* as arguments, because there is no other way to parametrize which
+conversion each impl applies. `forward_to_deserialize_any!` needs a two-stage
+helper table because `concat_idents!` never stabilized, so building
+`deserialize_bool` from the token `bool` is impossible and 29 arms do it by
+hand. `seq_impl!` parses a generic parameter list by hand, one token category at
+a time.
+
+Hygiene is the other half. Every path inside these macros is fully qualified —
+`$crate::de::Error`, not `Error` — because the caller's scope is unknown and a
+name that resolves during testing may not resolve where the macro is used.
+
+Read the definitions first and the invocations second. The reference track
+renders runs of invocations as compact rows under one definition for exactly
+this reason: the sixteenth call of `primitive_impl!` teaches nothing the first
+did not, and the two examples here make what the expansion *does* observable.
+"""
+
+[[unit]]
+id = "12-no-std-and-cfg"
+title = "`no_std` and feature gates"
+supplement = "none"
+status = "written"
+prereqs = ["11-macro-rules"]
+rust_features = ["no-std", "cfg", "feature-unification", "msrv", "modules"]
+examples = []
+summary = """
+315 `#[cfg]` attributes. Supporting `no_std`, `alloc`, and `std` from one source
+tree is an engineering discipline, and this crate is a complete worked example
+of it.
+"""
+body = """
+`crate_root.rs` is the map: a module named `core` that is sometimes `std`, seven
+alloc-or-std import pairs, and imports gated on a compiler version detected by a
+build script. Read it before anything else in this unit, because every later
+`#[cfg]` in the crate assumes that scaffolding.
+
+Three rules the crate follows, each visible in the annotations:
+
+Features must be additive. Enabling `std` may add impls; it may never remove or
+change one, because Cargo unifies features across the whole dependency graph and
+a crate you have never heard of may have turned it on. Feature-gated behaviour
+that *differs* rather than *adds* is the bug this rule prevents.
+
+Where a method cannot be written the same way twice, write it twice.
+`collect_str` has two full bodies chosen by `cfg`, because the `no_std` version
+cannot allocate — and `format.rs` exists to give that version somewhere to write
+into, using one of the crate's two `unsafe` blocks.
+
+Version detection is a build-time cfg, not a feature. `CString`, the 128-bit
+integer impls and several atomics are gated on what the compiler supports, which
+is why `build.rs` and `#[cfg(no_core_cstr)]`-style names show up alongside the
+ordinary feature gates.
+"""
+
+[[unit]]
+id = "13-errors-and-control-flow"
+title = "Errors and control flow"
+supplement = "partial"
+status = "written"
+prereqs = ["12-no-std-and-cfg"]
+rust_features = ["custom-errors", "result", "pattern-matching", "option"]
+examples = ["error_custom"]
+summary = """
+`ser::Error` and `de::Error` are a case study in designing an error type you do
+not control — plus `tri!`, the macro that replaced `?` crate-wide, with
+measurements attached.
+"""
+body = """
+A `Serialize` impl is generic over the format, so it cannot name a concrete
+error type. All it has is `S::Error: ser::Error`, and therefore `Error::custom`,
+which takes anything `Display` and no `self`. That signature is the constraint
+worth studying: an error constructor that cannot see the serializer cannot know
+*where* the failure happened, so position has to be attached by the format
+afterwards.
+
+`de::Error` adds `invalid_type` and `invalid_value`, which read the input back
+to you in the message. Getting those right is most of the difference between a
+usable deserializer and one that says "invalid value" and stops.
+
+Then the control-flow half. serde_core does not use `?`. `lib.rs` sets
+`#![deny(clippy::question_mark_used)]`, making it a compile error crate-wide,
+and `tri!` is used instead — justified upstream by a measurement: 9% of compile
+time against `?`, 5.5% against the old `try!`. The reason it can be a plain
+macro at all is that no `From::from` conversion is ever needed here.
+
+**Supplement needed.** Idiomatic application-level error handling — `From`
+conversions, error enums, the `?` operator you would normally reach for — is
+exactly what this crate opted out of, so the written material covers it.
+"""
+
+[[unit]]
+id = "14-iterators-and-closures"
+title = "Iterators and closures"
+supplement = "partial"
+status = "planned"
+prereqs = ["13-errors-and-control-flow"]
+rust_features = ["iterators", "closures", "option"]
+examples = []
+summary = """
+Mostly supplementary. serde_core consumes iterators carefully in a few places
+and writes essentially no closures, so the crate supplies three good cautionary
+tales and none of the fundamentals.
+"""
+body = """
+The three annotations in this unit are worth reading on their own: a
+`SeqDeserializer` that wraps its iterator in `Fuse` for a reason you should not
+skip, a visitor that calls `next()` twice because both alternatives are wrong,
+and a two-state machine built out of `Option::take`. All three are about the
+*edges* of iteration — exhaustion, restarting, taking a value out of a place
+that must then be empty.
+
+None of them teach the iterator protocol, and the crate has no closures to speak
+of. `Fn`, `FnMut`, `FnOnce`, capture modes, and the adapter chains that make up
+most day-to-day Rust are absent by nature: this is generic trait code, not
+application code.
+
+Planned material: the `Iterator` trait and what implementing it by hand feels
+like, the adapters worth knowing, the three closure traits and why there are
+three, and what a closure actually compiles to — which connects back to
+monomorphization from unit 11.
+"""

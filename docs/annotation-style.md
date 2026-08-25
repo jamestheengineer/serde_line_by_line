@@ -98,3 +98,37 @@ reader finds the other 723 places `'de` shows up.
       or explicitly links forward when it must
 - [ ] Add it to `complete` in `annotations/manifest.toml` — this makes future
       gaps a hard CI failure
+
+## Course units
+
+`annotations/course.toml` holds the course track: one record per unit, in
+teaching order. A unit's *content* is the annotations tagged with its id in
+`course_unit`, so writing a unit means writing its framing — `summary` for the
+index, `body` for the unit page — and tagging the annotations that belong to it.
+
+Three fields carry rules rather than prose:
+
+- **`supplement`** is the honesty label, and the coverage gate checks it against
+  the store. `none` means every part of the unit comes from serde_core and at
+  least one annotation is tagged to it; `partial` means the crate shows some of
+  it and written material fills the rest; `full` means the crate does not
+  exercise the topic at all, and *no* annotation may be tagged to the unit. If
+  you find yourself wanting to tag one annotation to a `full` unit, the unit is
+  `partial` — change the label rather than the gate.
+- **`prereqs`** may only name earlier units. That keeps the unit graph acyclic
+  by construction, and it is the check that catches a re-ordering that broke the
+  sequence.
+- **`status`** is `planned` until both the framing and the supplementary
+  material exist. Planned units are a warning in `cargo xtask coverage` and are
+  labelled in the UI, so an unwritten unit is visible rather than empty.
+
+Within a unit, annotations are ordered by the prereq graph first and position
+second, with position taken from `reading_order` at the top of the registry —
+dependency order over the files, because path order puts `de/` before `ser/`
+and every explanation of `Deserializer` leans on the serializer half.
+
+When an annotation's prereq lives in a *later* unit, the gate warns and the unit
+page tells the reader so explicitly. Some of that is unavoidable: the prereq
+graph was built for the reference track, and no single ordering satisfies both.
+A warning that can be removed by re-tagging the annotation into the unit that
+actually teaches it should be.

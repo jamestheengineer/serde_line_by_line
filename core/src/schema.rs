@@ -125,3 +125,78 @@ impl Manifest {
         toml::from_str(&text).with_context(|| format!("parsing manifest {}", path.display()))
     }
 }
+
+/// The course track's unit registry (`annotations/course.toml`).
+///
+/// The units are content in their own right — the framing that turns a set of
+/// annotations into a lesson — so they live in the store beside the
+/// annotations rather than in the renderer.
+#[derive(Debug, Deserialize)]
+pub struct CourseFile {
+    pub schema: u32,
+    pub source: String,
+    /// Dependency order over the pinned source files. Used to sequence
+    /// annotations drawn from several files into one unit; path order would put
+    /// `de/` before `ser/`, which is backwards.
+    #[serde(default)]
+    pub reading_order: Vec<String>,
+    #[serde(default, rename = "unit")]
+    pub units: Vec<CourseUnit>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CourseUnit {
+    /// Slug with a numeric prefix, e.g. "03-associated-types". Annotations
+    /// point at this through `course_unit`.
+    pub id: String,
+    pub title: String,
+    /// How much of the unit serde_core can actually teach. The plan commits to
+    /// labelling this in the UI rather than pretending the crate covers
+    /// everything (PLAN.md §2).
+    pub supplement: Supplement,
+    pub status: UnitStatus,
+    #[serde(default)]
+    pub prereqs: Vec<String>,
+    #[serde(default)]
+    pub rust_features: Vec<String>,
+    #[serde(default)]
+    pub examples: Vec<String>,
+    pub summary: String,
+    pub body: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Supplement {
+    /// Taught entirely from serde_core.
+    None,
+    /// serde_core shows part of it; written material fills the rest.
+    Partial,
+    /// serde_core does not exercise this at all.
+    Full,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UnitStatus {
+    Written,
+    Planned,
+}
+
+impl CourseFile {
+    pub fn load(path: &Path) -> Result<Self> {
+        let text = std::fs::read_to_string(path)
+            .with_context(|| format!("reading course registry {}", path.display()))?;
+        let parsed: CourseFile =
+            toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+        if parsed.schema != SCHEMA_VERSION {
+            bail!(
+                "{}: schema {} but this build understands {SCHEMA_VERSION}",
+                path.display(),
+                parsed.schema
+            );
+        }
+        Ok(parsed)
+    }
+}

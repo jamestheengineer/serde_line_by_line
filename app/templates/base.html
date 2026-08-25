@@ -10,11 +10,16 @@
 <body data-root="{{ root }}">
 <header class="top">
   <a class="brand" href="{{ root }}index.html">serde&nbsp;line&nbsp;by&nbsp;line</a>
+  <nav class="tracks">
+    <a href="{{ root }}index.html"{% if track == "reference" %} class="on"{% endif %}>reference</a>
+    <a href="{{ root }}course/index.html"{% if track == "course" %} class="on"{% endif %}>course</a>
+  </nav>
   <span class="src-id">{{ source_id }}</span>
   <button id="theme" class="theme" type="button" aria-label="Toggle colour theme">◐</button>
 </header>
 <div class="shell">
   <aside class="nav">
+{% block sidebar %}
     <div class="nav-head">source files</div>
     <ul>
     {% for f in nav %}
@@ -27,6 +32,7 @@
       </li>
     {% endfor %}
     </ul>
+{% endblock %}
   </aside>
   <main>
 {% block content %}{% endblock %}

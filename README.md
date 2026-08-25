@@ -10,8 +10,13 @@ carefully written crates in the ecosystem as the worked example.
 
 > **Status: the reference track is complete — every line of `serde_core` is
 > annotated.** All 19 files are at 100%, listed in `annotations/manifest.toml`,
-> so the coverage gate hard-fails on any gap or overlap. Next is phase 7, the
-> course track. See **[PLAN.md](PLAN.md)** for the roadmap and
+> so the coverage gate hard-fails on any gap or overlap.
+>
+> Phase 7 is under way: the course track is walkable end to end, 11 of its 14
+> units written. The three still marked *planned* are the ones serde_core
+> cannot teach — ownership, lifetime basics, iterators and closures — and they
+> need supplementary material rather than more annotations. See
+> **[PLAN.md](PLAN.md)** for the roadmap and
 > **[docs/decisions.md](docs/decisions.md)** for the architecture calls.
 >
 > ```
@@ -24,6 +29,8 @@ carefully written crates in the ecosystem as the worked example.
 > ```
 > $ cargo xtask coverage
 > TOTAL                        12037    12037     468 100.0%
+>
+> course track: 11/14 units written
 > ```
 
 ---
@@ -75,9 +82,11 @@ example's output is asserted in CI, so explanations cannot drift from behavior.
 Two ways to read it:
 
 - **Reference track** — file by file, 100% coverage, the spine.
-- **Course track** — the same annotations reordered as a Rust curriculum, plus
-  supplementary units covering what serde_core genuinely does not exercise
-  (ownership in imperative code, iterators, closures, error idioms, `unsafe`).
+- **Course track** — the same annotations reordered as a Rust curriculum: 14
+  units, sequenced by the prereq graph rather than by file. Units serde_core
+  cannot supply — ownership in imperative code, lifetime basics, iterators and
+  closures — are written from scratch and labelled **supplementary** in the UI,
+  rather than pretending the crate demonstrates them.
 
 ## Repository layout
 
@@ -86,6 +95,7 @@ Two ways to read it:
 | `PLAN.md` | full design and roadmap |
 | `vendor/` | pinned, unmodified `serde_core` 1.0.229 (MIT/Apache-2.0) |
 | `annotations/` | the explanations, as TOML keyed to line ranges |
+| `annotations/course.toml` | the course track's units, ordering, and honesty labels |
 | `examples/` | micro-example crates, CI-verified |
 | `app/` | Axum + Askama reader |
 | `xtask/` | coverage gate, build and WASM pipeline |

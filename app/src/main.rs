@@ -12,7 +12,7 @@ mod markdown;
 use anyhow::{Context, Result};
 use askama::Template;
 use highlight::{Highlighter, Line};
-use slbl_core::schema::Kind;
+use slbl_core::schema::{CourseUnit, Kind, Supplement, UnitStatus};
 use slbl_core::{vendor, Store, Unit};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -56,6 +56,40 @@ struct Use {
     end: u32,
 }
 
+/// One annotation as it appears on a course-unit page: the reference-track
+/// block, plus the context the course ordering needs — where the code lives,
+/// and what it assumes that the course has not taught yet.
+struct CourseBlock {
+    block: Block,
+    file: String,
+    href: String,
+    assumes: Vec<Assumes>,
+}
+
+/// A prereq whose own unit comes later in the course. The coverage gate warns
+/// about these; the reader gets told too, rather than hitting an explanation
+/// that leans on something twelve units away.
+struct Assumes {
+    title: String,
+    unit_title: String,
+    href: String,
+}
+
+/// A course unit in the sidebar and on the index.
+struct NavUnit {
+    id: String,
+    number: String,
+    name: String,
+    title: String,
+    href: String,
+    summary_html: String,
+    annotations: usize,
+    supplement: String,
+    supplement_class: String,
+    supplement_note: String,
+    planned: bool,
+}
+
 struct NavFile {
     path: String,
     href: String,
@@ -67,6 +101,35 @@ struct NavFile {
 }
 
 #[derive(Template)]
+#[template(path = "course.html")]
+struct CoursePage {
+    units: Vec<NavUnit>,
+    written: usize,
+    total_units: usize,
+    course_annotations: usize,
+    source_id: String,
+    root: String,
+    track: String,
+}
+
+#[derive(Template)]
+#[template(path = "unit.html")]
+struct UnitPage {
+    units: Vec<NavUnit>,
+    unit: NavUnit,
+    body_html: String,
+    blocks: Vec<CourseBlock>,
+    features: Vec<String>,
+    examples: Vec<String>,
+    prereqs: Vec<NavUnit>,
+    prev: Vec<NavUnit>,
+    next: Vec<NavUnit>,
+    source_id: String,
+    root: String,
+    track: String,
+}
+
+#[derive(Template)]
 #[template(path = "index.html")]
 struct IndexPage {
     nav: Vec<NavFile>,
@@ -75,9 +138,11 @@ struct IndexPage {
     percent: f64,
     percent_label: String,
     annotations: usize,
+    course_units: usize,
     source_id: String,
     root: String,
     current: String,
+    track: String,
 }
 
 #[derive(Template)]
@@ -92,6 +157,7 @@ struct FilePage {
     source_id: String,
     root: String,
     current: String,
+    track: String,
 }
 
 fn main() -> Result<()> {
@@ -110,6 +176,7 @@ fn main() -> Result<()> {
     }
     std::fs::create_dir_all(out.join("static"))?;
     std::fs::create_dir_all(out.join("file"))?;
+    std::fs::create_dir_all(out.join("course"))?;
 
     let nav = build_nav(&store);
 
@@ -120,20 +187,33 @@ fn main() -> Result<()> {
         percent: store.percent(),
         percent_label: format!("{:.1}", store.percent()),
         annotations: store.by_file.values().map(Vec::len).sum(),
+        course_units: store.course.len(),
         source_id: vendor::SOURCE_ID.to_string(),
         root: "./".to_string(),
         current: String::new(),
+        track: "reference".to_string(),
     };
     write(&out.join("index.html"), &index.render()?)?;
 
     let defs = macro_defs(&store);
     let root = vendor::vendor_root(&repo);
-    for (file, lines) in &store.files {
+
+    // Highlighted once for the whole build: the reference track renders each
+    // file on its own page, and the course track pulls spans out of a dozen
+    // files into one unit page.
+    let mut highlighted_files: BTreeMap<&str, Vec<Line>> = BTreeMap::new();
+    for (file, _) in &store.files {
         let text =
             std::fs::read_to_string(root.join(file)).with_context(|| format!("reading {file}"))?;
-        let highlighted = hl
-            .file(&text)
-            .with_context(|| format!("highlighting {file}"))?;
+        highlighted_files.insert(
+            file,
+            hl.file(&text)
+                .with_context(|| format!("highlighting {file}"))?,
+        );
+    }
+
+    for (file, lines) in &store.files {
+        let highlighted = &highlighted_files[file.as_str()];
         let units = store.units_for(file);
 
         let page = FilePage {
@@ -142,13 +222,16 @@ fn main() -> Result<()> {
             percent: percent_of(units, *lines),
             percent_label: format!("{:.1}", percent_of(units, *lines)),
             lines: *lines,
-            blocks: blocks_for(units, &highlighted, &defs, file),
+            blocks: blocks_for(units, highlighted, &defs, file),
             source_id: vendor::SOURCE_ID.to_string(),
             root: "../".to_string(),
             current: file.clone(),
+            track: "reference".to_string(),
         };
         write(&out.join("file").join(page_name(file)), &page.render()?)?;
     }
+
+    write_course(&out, &store, &highlighted_files, &defs)?;
 
     // Copied rather than embedded: the playground is a binary artefact, and it
     // may legitimately be absent — the site must build without a wasm
@@ -161,12 +244,206 @@ fn main() -> Result<()> {
 
     println!(
         "wrote {} pages to {}  ({:.1}% annotated, {} annotations)",
-        store.files.len() + 1,
+        store.files.len() + store.course.len() + 2,
         out.display(),
         store.percent(),
         index_count(&store),
     );
     Ok(())
+}
+
+/// The course track: an index and one page per unit.
+///
+/// Both are queries over the same annotation store the reference track renders.
+/// Nothing here is a second copy of the content — a unit page is the unit's own
+/// framing followed by its annotations, pulled out of up to a dozen files and
+/// re-ordered by the prereq graph.
+fn write_course(
+    out: &Path,
+    store: &Store,
+    highlighted: &BTreeMap<&str, Vec<Line>>,
+    defs: &BTreeMap<String, (String, String)>,
+) -> Result<()> {
+    let nav: Vec<NavUnit> = store
+        .course
+        .iter()
+        .map(|u| nav_unit(u, store.course_annotations(&u.id).len()))
+        .collect();
+
+    let index = CoursePage {
+        units: nav.iter().map(clone_unit).collect(),
+        written: store
+            .course
+            .iter()
+            .filter(|u| u.status == UnitStatus::Written)
+            .count(),
+        total_units: store.course.len(),
+        course_annotations: nav.iter().map(|u| u.annotations).sum(),
+        source_id: vendor::SOURCE_ID.to_string(),
+        root: "../".to_string(),
+        track: "course".to_string(),
+    };
+    write(&out.join("course").join("index.html"), &index.render()?)?;
+
+    // Which unit each annotation belongs to, and how far into the course that
+    // unit is — the two facts a forward-reference warning needs.
+    let placement: BTreeMap<&str, usize> = store
+        .by_file
+        .values()
+        .flatten()
+        .filter_map(|u| {
+            let unit = u.annotation.course_unit.as_deref()?;
+            let at = store.course.iter().position(|c| c.id == unit)?;
+            Some((u.annotation.id.as_str(), at))
+        })
+        .collect();
+    let titles: BTreeMap<&str, &str> = store
+        .by_file
+        .values()
+        .flatten()
+        .map(|u| (u.annotation.id.as_str(), u.annotation.title.as_str()))
+        .collect();
+
+    for (i, unit) in store.course.iter().enumerate() {
+        let annotations = store.course_annotations(&unit.id);
+        let blocks: Vec<CourseBlock> = annotations
+            .iter()
+            .map(|u| course_block(u, highlighted, defs, i, &placement, &titles, &store.course))
+            .collect();
+
+        let page = UnitPage {
+            units: nav.iter().map(clone_unit).collect(),
+            unit: clone_unit(&nav[i]),
+            body_html: markdown::render(&unit.body),
+            features: unit.rust_features.clone(),
+            examples: unit.examples.clone(),
+            prereqs: unit
+                .prereqs
+                .iter()
+                .filter_map(|p| nav.iter().find(|n| &n.id == p).map(clone_unit))
+                .collect(),
+            // Askama has no `Option` conditional as clean as an empty list, and
+            // the first and last units are the only ones that need one.
+            prev: nav
+                .get(i.wrapping_sub(1))
+                .map(clone_unit)
+                .into_iter()
+                .collect(),
+            next: nav.get(i + 1).map(clone_unit).into_iter().collect(),
+            blocks,
+            source_id: vendor::SOURCE_ID.to_string(),
+            root: "../".to_string(),
+            track: "course".to_string(),
+        };
+        write(
+            &out.join("course").join(format!("{}.html", unit.id)),
+            &page.render()?,
+        )?;
+    }
+    Ok(())
+}
+
+fn nav_unit(unit: &CourseUnit, annotations: usize) -> NavUnit {
+    let (number, name) = match unit.id.split_once('-') {
+        Some((n, rest)) => (n.to_string(), rest.to_string()),
+        None => (String::new(), unit.id.clone()),
+    };
+    let (supplement, supplement_note) = match unit.supplement {
+        Supplement::None => (
+            "from serde_core",
+            "Every part of this unit is drawn from the crate.",
+        ),
+        Supplement::Partial => (
+            "part supplementary",
+            "serde_core shows part of this. The rest is written material, labelled as such.",
+        ),
+        Supplement::Full => (
+            "supplementary",
+            "serde_core does not exercise this. The whole unit is written from scratch \
+             rather than pretending the crate teaches it.",
+        ),
+    };
+    NavUnit {
+        supplement_class: format!("b-{}", supplement.replace(' ', "-")),
+        number,
+        name,
+        title: unit.title.clone(),
+        href: format!("{}.html", unit.id),
+        summary_html: markdown::render(&unit.summary),
+        annotations,
+        supplement: supplement.to_string(),
+        supplement_note: supplement_note.to_string(),
+        planned: unit.status == UnitStatus::Planned,
+        id: unit.id.clone(),
+    }
+}
+
+fn clone_unit(u: &NavUnit) -> NavUnit {
+    NavUnit {
+        id: u.id.clone(),
+        number: u.number.clone(),
+        name: u.name.clone(),
+        title: u.title.clone(),
+        href: u.href.clone(),
+        summary_html: u.summary_html.clone(),
+        annotations: u.annotations,
+        supplement: u.supplement.clone(),
+        supplement_class: u.supplement_class.clone(),
+        supplement_note: u.supplement_note.clone(),
+        planned: u.planned,
+    }
+}
+
+fn course_block(
+    unit: &Unit,
+    highlighted: &BTreeMap<&str, Vec<Line>>,
+    defs: &BTreeMap<String, (String, String)>,
+    position: usize,
+    placement: &BTreeMap<&str, usize>,
+    titles: &BTreeMap<&str, &str>,
+    course: &[CourseUnit],
+) -> CourseBlock {
+    let a = &unit.annotation;
+    let file = a.file.clone();
+    let lines = highlighted
+        .get(file.as_str())
+        .map_or(&[][..], Vec::as_slice);
+    let mut block = annotated(unit, lines);
+
+    // Course pages never merge macro uses — a unit picks out individual
+    // invocations from across a file, so there is no contiguous run to merge —
+    // but the link back to the definition still has to work.
+    if a.kind == Kind::MacroUse {
+        if let Some((def_file, name)) = a.macro_def.as_deref().and_then(|id| defs.get(id)) {
+            block.expands_name = name.clone();
+            block.expands_href = format!(
+                "{}#{}",
+                page_name(def_file),
+                a.macro_def.as_deref().unwrap_or_default()
+            );
+        }
+    }
+
+    let assumes = a
+        .prereqs
+        .iter()
+        .chain(a.macro_def.iter())
+        .filter_map(|p| {
+            let at = *placement.get(p.as_str())?;
+            (at > position).then(|| Assumes {
+                title: titles.get(p.as_str()).copied().unwrap_or(p).to_string(),
+                unit_title: course[at].title.clone(),
+                href: format!("{}.html#{}", course[at].id, p),
+            })
+        })
+        .collect();
+
+    CourseBlock {
+        href: format!("{}#{}", page_name(&file), a.id),
+        file,
+        block,
+        assumes,
+    }
 }
 
 fn index_count(store: &Store) -> usize {

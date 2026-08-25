@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}{{ unit.title }} — serde line by line{% endblock %}
+{% block sidebar %}
+    <div class="nav-head">course units</div>
+    <ul class="unitnav">
+    {% for u in units %}
+      <li{% if u.id == unit.id %} class="here"{% endif %}>
+        <a href="{{ root }}course/{{ u.href }}">
+          <span class="unum">{{ u.number }}</span>
+          <span class="fname">{{ u.title }}</span>
+        </a>
+      </li>
+    {% endfor %}
+    </ul>
+{% endblock %}
+{% block content %}
+<div class="unithead lead">
+  <span class="unum big">{{ unit.number }}</span>
+  <h1>{{ unit.title }}</h1>
+  <div class="badges">
+    <span class="badge {{ unit.supplement_class }}">{{ unit.supplement }}</span>
+    {% if unit.planned %}<span class="badge b-planned">planned</span>{% endif %}
+  </div>
+</div>
+
+<p class="supnote">{{ unit.supplement_note }}</p>
+
+{% if !prereqs.is_empty() %}
+<p class="prereqs">Assumes:
+  {% for p in prereqs %}<a href="{{ root }}course/{{ p.href }}">{{ p.number }} · {{ p.title }}</a>{% endfor %}
+</p>
+{% endif %}
+
+<section class="unitbody prose">{{ body_html|safe }}</section>
+
+{% if !examples.is_empty() %}
+<div class="examples unitexamples">
+  {% for e in examples %}<button class="run" data-example="{{ e }}">Run {{ e }}</button>{% endfor %}
+  <pre class="output" hidden></pre>
+</div>
+{% endif %}
+
+{% if !features.is_empty() %}
+<ul class="tags">{% for f in features %}<li>{{ f }}</li>{% endfor %}</ul>
+{% endif %}
+
+{% if blocks.is_empty() %}
+<p class="pending big">
+  No annotations yet. This unit's material has to be written before it can be
+  read — the crate has nothing to point at for it.
+</p>
+{% else %}
+<h2 class="fromsource">From the source</h2>
+{% endif %}
+
+{% for cb in blocks %}
+<section class="block" id="{{ cb.block.id }}">
+  <div class="code">
+    <div class="codehead">
+      <a class="range" href="{{ root }}file/{{ cb.href }}">{{ cb.file }} · {{ cb.block.range_label }}</a>
+    </div>
+    <div class="src">
+    {%- for line in cb.block.code %}
+      <div class="ln" id="{{ cb.block.id }}-L{{ line.number }}" data-n="{{ line.number }}"><span class="num">{{ line.number }}</span><code>{{ line.html|safe }}</code></div>
+    {%- endfor %}
+    </div>
+  </div>
+  <div class="note">
+    <div class="kind">{{ cb.block.kind }}</div>
+    <h2>{{ cb.block.title }}</h2>
+    {% if !cb.block.expands_href.is_empty() %}
+    <a class="expands" href="{{ root }}file/{{ cb.block.expands_href }}">expands <code>{{ cb.block.expands_name }}</code></a>
+    {% endif %}
+    {% for a in cb.assumes %}
+    <p class="ahead">Leans on <a href="{{ root }}course/{{ a.href }}">{{ a.title }}</a>, which the course does not reach until <i>{{ a.unit_title }}</i>.</p>
+    {% endfor %}
+    {% if !cb.block.body_html.is_empty() %}
+    <div class="prose">{{ cb.block.body_html|safe }}</div>
+    {% endif %}
+    {% if !cb.block.features.is_empty() %}
+    <ul class="tags">{% for f in cb.block.features %}<li>{{ f }}</li>{% endfor %}</ul>
+    {% endif %}
+    {% if !cb.block.examples.is_empty() %}
+    <div class="examples">
+      {% for e in cb.block.examples %}<button class="run" data-example="{{ e }}">Run {{ e }}</button>{% endfor %}
+      <pre class="output" hidden></pre>
+    </div>
+    {% endif %}
+  </div>
+</section>
+{% endfor %}
+
+<nav class="unitsteps">
+  {% for p in prev %}<a class="prev" href="{{ root }}course/{{ p.href }}">← {{ p.number }} · {{ p.title }}</a>{% endfor %}
+  {% for n in next %}<a class="next" href="{{ root }}course/{{ n.href }}">{{ n.number }} · {{ n.title }} →</a>{% endfor %}
+</nav>
+{% endblock %}

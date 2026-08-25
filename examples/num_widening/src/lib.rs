@@ -29,7 +29,7 @@
 use serde_core::de::{Deserialize, Deserializer, Visitor};
 use serde_core::forward_to_deserialize_any;
 use std::fmt::{self, Display};
-use std::num::{NonZeroI8, NonZeroU8, NonZeroU32, Saturating};
+use std::num::{NonZeroI8, NonZeroU32, NonZeroU8, Saturating};
 
 /// The one value a `Feed` holds, tagged with the visit method it will call.
 #[derive(Clone, Copy)]

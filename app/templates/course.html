@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Course track — serde line by line{% endblock %}
+{% block sidebar %}
+    <div class="nav-head">course units</div>
+    <ul class="unitnav">
+    {% for u in units %}
+      <li>
+        <a href="{{ root }}course/{{ u.href }}">
+          <span class="unum">{{ u.number }}</span>
+          <span class="fname">{{ u.title }}</span>
+        </a>
+      </li>
+    {% endfor %}
+    </ul>
+{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>The course track</h1>
+  <p class="lede">
+    The same annotations as the reference track, ordered by what has to be
+    understood first. {{ total_units }} units, {{ course_annotations }}
+    annotations drawn from across the crate.
+  </p>
+  <p class="lede small">
+    serde_core teaches lifetimes, trait design and <code>macro_rules!</code>
+    better than almost any crate in the ecosystem, and teaches ordinary
+    imperative Rust hardly at all. Units it cannot supply are written from
+    scratch and labelled <b>supplementary</b> rather than dressed up as
+    something the crate demonstrates.
+  </p>
+  <div class="progress">
+    <div class="figures">
+      <span><b>{{ written }} / {{ total_units }}</b> units written</span>
+      <span>{{ course_annotations }} annotations on the course track</span>
+    </div>
+  </div>
+</section>
+
+<section class="unitlist">
+  {% for u in units %}
+  <article class="unitcard{% if u.planned %} planned{% endif %}">
+    <div class="unithead">
+      <span class="unum">{{ u.number }}</span>
+      <h2><a href="{{ root }}course/{{ u.href }}">{{ u.title }}</a></h2>
+      <span class="badge {{ u.supplement_class }}" title="{{ u.supplement_note }}">{{ u.supplement }}</span>
+      {% if u.planned %}<span class="badge b-planned">planned</span>{% endif %}
+    </div>
+    <div class="prose">{{ u.summary_html|safe }}</div>
+    <div class="unitmeta">{{ u.annotations }} annotations</div>
+  </article>
+  {% endfor %}
+</section>
+{% endblock %}

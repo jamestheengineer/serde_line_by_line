@@ -6,7 +6,9 @@
 
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
-use slbl_core::schema::{Annotation, Kind, LineRange, Manifest, Track};
+use slbl_core::schema::{
+    Annotation, CourseFile, CourseUnit, Kind, LineRange, Manifest, Supplement, Track, UnitStatus,
+};
 use slbl_core::vendor::{self, SOURCE_ID};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
@@ -21,6 +23,19 @@ pub struct FileCoverage {
     pub gaps: Vec<String>,
 }
 
+/// One course unit's shape, for the report and for `coverage.json`. The course
+/// track has no line-coverage number of its own — it is a re-ordering of the
+/// same annotations — so what it reports is how much of it is written.
+#[derive(Debug, Serialize)]
+pub struct UnitCoverage {
+    pub id: String,
+    pub title: String,
+    pub supplement: Supplement,
+    pub status: UnitStatus,
+    pub annotations: usize,
+    pub lines: u32,
+}
+
 #[derive(Debug, Serialize)]
 pub struct Report {
     pub source: String,
@@ -28,6 +43,7 @@ pub struct Report {
     pub claimed_lines: u32,
     pub annotations: usize,
     pub files: Vec<FileCoverage>,
+    pub course: Vec<UnitCoverage>,
 }
 
 impl Report {
@@ -241,12 +257,23 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
         });
     }
 
+    // 5. The course track: the registry, and every annotation that points at it.
+    let course = check_course(
+        repo,
+        &annotations,
+        &known_files,
+        &features,
+        &examples,
+        &mut diag,
+    )?;
+
     let report = Report {
         source: SOURCE_ID.to_string(),
         total_lines,
         claimed_lines,
         annotations: annotations.len(),
         files,
+        course,
     };
 
     print_report(&report, &diag, &kinds);
@@ -261,6 +288,188 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
         bail!("{} coverage error(s)", diag.errors.len());
     }
     Ok(report)
+}
+
+/// Validates `annotations/course.toml` and every annotation that points into it.
+///
+/// The course track is the one part of the project with no line-coverage number
+/// to keep it honest, so the checks here take its place: units must be ordered,
+/// their prereqs must point backwards, and a unit's `supplement` must match
+/// whether serde_core actually supplies any of it.
+fn check_course(
+    repo: &Path,
+    annotations: &[Annotation],
+    known_files: &HashSet<&str>,
+    features: &BTreeSet<String>,
+    examples: &HashSet<String>,
+    diag: &mut Diagnostics,
+) -> Result<Vec<UnitCoverage>> {
+    let path = repo.join("annotations").join("course.toml");
+    let course = CourseFile::load(&path)?;
+    if course.source != SOURCE_ID {
+        bail!(
+            "course registry source {:?} does not match pinned source {:?}",
+            course.source,
+            SOURCE_ID
+        );
+    }
+
+    // The reading order sequences annotations drawn from several files into one
+    // unit, so a file missing from it would silently sort last.
+    let mut seen_files: HashSet<&str> = HashSet::new();
+    for f in &course.reading_order {
+        if !known_files.contains(f.as_str()) {
+            diag.error(format!("course reading_order: unknown file {f:?}"));
+        }
+        if !seen_files.insert(f.as_str()) {
+            diag.error(format!("course reading_order: {f:?} listed twice"));
+        }
+    }
+    for f in known_files {
+        if !seen_files.contains(f) {
+            diag.error(format!("course reading_order: {f:?} is missing"));
+        }
+    }
+
+    let mut index: HashMap<&str, usize> = HashMap::new();
+    for (i, u) in course.units.iter().enumerate() {
+        if index.insert(&u.id, i).is_some() {
+            diag.error(format!("duplicate course unit {:?}", u.id));
+        }
+    }
+    // Declaration order is teaching order, and ids carry a numeric prefix.
+    // Requiring the two to agree keeps a renumbered unit from reading in one
+    // order and sorting in another.
+    for pair in course.units.windows(2) {
+        if pair[0].id >= pair[1].id {
+            diag.error(format!(
+                "course units out of order: {:?} declared before {:?}",
+                pair[0].id, pair[1].id
+            ));
+        }
+    }
+
+    let mut counts: BTreeMap<&str, (usize, u32)> = BTreeMap::new();
+    for a in annotations {
+        let Some(unit) = a.course_unit.as_deref() else {
+            continue;
+        };
+        match index.get(unit) {
+            None => diag.error(format!("{}: unknown course_unit {unit:?}", a.id)),
+            Some(_) => {
+                let entry = counts.entry(unit).or_default();
+                entry.0 += 1;
+                entry.1 += LineRange::parse(&a.lines).map_or(0, |r| r.line_count());
+            }
+        }
+        if !a.tracks.contains(&Track::Course) {
+            diag.error(format!(
+                "{}: has course_unit {unit:?} but is not on the course track",
+                a.id
+            ));
+        }
+    }
+
+    // A prereq that lives in a later unit means the course track asks the
+    // reader to know something it has not taught yet. That is a content
+    // problem, not a build failure, so it is a warning with enough detail to
+    // fix: either move the annotation or re-order the units.
+    let unit_of: HashMap<&str, &str> = annotations
+        .iter()
+        .filter_map(|a| Some((a.id.as_str(), a.course_unit.as_deref()?)))
+        .collect();
+    for a in annotations {
+        let Some(here) = a.course_unit.as_deref().and_then(|u| index.get(u)) else {
+            continue;
+        };
+        for p in a.prereqs.iter().chain(a.macro_def.iter()) {
+            let Some(there) = unit_of.get(p.as_str()).and_then(|u| index.get(u)) else {
+                continue;
+            };
+            if there > here {
+                diag.warn(format!(
+                    "{}: depends on {p}, which the course track does not reach until {}",
+                    a.id, course.units[*there].id
+                ));
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    for (i, u) in course.units.iter().enumerate() {
+        let (count, lines) = counts.get(u.id.as_str()).copied().unwrap_or((0, 0));
+        check_unit(u, i, &index, count, features, examples, diag);
+        out.push(UnitCoverage {
+            id: u.id.clone(),
+            title: u.title.clone(),
+            supplement: u.supplement,
+            status: u.status,
+            annotations: count,
+            lines,
+        });
+    }
+    Ok(out)
+}
+
+fn check_unit(
+    u: &CourseUnit,
+    position: usize,
+    index: &HashMap<&str, usize>,
+    count: usize,
+    features: &BTreeSet<String>,
+    examples: &HashSet<String>,
+    diag: &mut Diagnostics,
+) {
+    for p in &u.prereqs {
+        match index.get(p.as_str()) {
+            None => diag.error(format!("{}: unknown prereq unit {p:?}", u.id)),
+            // Backward-only prereqs make the unit graph acyclic by
+            // construction, so there is no separate cycle check here.
+            Some(&at) if at >= position => {
+                diag.error(format!("{}: prereq {p:?} is not an earlier unit", u.id))
+            }
+            Some(_) => {}
+        }
+    }
+    for f in &u.rust_features {
+        if !features.contains(f) {
+            diag.error(format!(
+                "{}: rust_feature {f:?} not in docs/rust-features.md",
+                u.id
+            ));
+        }
+    }
+    for e in &u.examples {
+        if !examples.contains(e) {
+            diag.error(format!("{}: unknown example {e:?}", u.id));
+        }
+    }
+    if u.summary.trim().is_empty() || u.body.trim().is_empty() {
+        diag.error(format!("{}: empty summary or body", u.id));
+    }
+    // `supplement` is the claim the UI shows the reader. It has to match what
+    // the store actually holds, or the honesty label is decoration.
+    match (u.supplement, count) {
+        (Supplement::Full, n) if n > 0 => diag.error(format!(
+            "{}: supplement = \"full\" but {n} annotation(s) are tagged to it",
+            u.id
+        )),
+        (Supplement::None | Supplement::Partial, 0) => diag.error(format!(
+            "{}: supplement = {:?} but no annotations are tagged to it",
+            u.id, u.supplement
+        )),
+        _ => {}
+    }
+    if u.status == UnitStatus::Planned {
+        diag.warn(format!(
+            "{}: unit is planned, not written{}",
+            u.id,
+            match u.supplement {
+                Supplement::Full => " (nothing in serde_core to fall back on)",
+                _ => "",
+            }
+        ));
+    }
 }
 
 fn fmt_gap(a: u32, b: u32) -> String {
@@ -398,6 +607,33 @@ fn print_report(report: &Report, diag: &Diagnostics, kinds: &BTreeMap<String, us
         report.annotations,
         report.percent()
     );
+
+    if !report.course.is_empty() {
+        let written = report
+            .course
+            .iter()
+            .filter(|u| u.status == UnitStatus::Written)
+            .count();
+        println!(
+            "\ncourse track: {}/{} units written\n",
+            written,
+            report.course.len()
+        );
+        println!(
+            "{:<32}{:>8}{:>8}  {:<12}status",
+            "unit", "annots", "lines", "supplement"
+        );
+        for u in &report.course {
+            println!(
+                "{:<32}{:>8}{:>8}  {:<12}{}",
+                u.id,
+                u.annotations,
+                u.lines,
+                format!("{:?}", u.supplement).to_lowercase(),
+                format!("{:?}", u.status).to_lowercase(),
+            );
+        }
+    }
 
     if !kinds.is_empty() {
         let parts: Vec<String> = kinds.iter().map(|(k, n)| format!("{k} {n}")).collect();
