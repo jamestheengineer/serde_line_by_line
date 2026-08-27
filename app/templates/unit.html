@@ -45,10 +45,18 @@
 {% endif %}
 
 {% if blocks.is_empty() %}
+{% if unit.planned %}
 <p class="pending big">
   No annotations yet. This unit's material has to be written before it can be
   read — the crate has nothing to point at for it.
 </p>
+{% else %}
+<p class="pending big">
+  Nothing from the source, by design: serde_core does not exercise this topic,
+  so the text above and its examples <i>are</i> the material rather than a
+  framing around code.
+</p>
+{% endif %}
 {% else %}
 <h2 class="fromsource">From the source</h2>
 {% endif %}

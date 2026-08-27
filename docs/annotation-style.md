@@ -84,7 +84,15 @@ reader finds the other 723 places `'de` shows up.
 - Examples must **return `String`, never print**, so they run identically under
   `cargo test` and as WASM.
 - Prefer an example that *fails* to compile when that is the lesson. Put it in
-  `examples/compile_fail/` with the expected diagnostic committed.
+  `examples/compile_fail/tests/ui/` with the expected diagnostic committed:
+  `trybuild` compiles each case under `cargo test`, asserts it fails, and diffs
+  rustc's output against the `.stderr` beside it, so a case that quietly starts
+  compiling breaks the build. Start the file with a comment saying what the
+  case shows and what the fix is — the whole file is printed on the page, and
+  the diagnostic quotes it by line number. After a rustc upgrade the wording
+  may change; regenerate with `TRYBUILD=overwrite cargo test -p compile_fail`
+  and read the new output before committing it, because a changed message is
+  sometimes a changed rule.
 - Keep them under ~120 lines. Past that, the reader is studying the example
   instead of the crate.
 

@@ -226,32 +226,91 @@ calls, and this implementation has both halves in hand at once.
 id = "06-ownership-and-borrowing"
 title = "Ownership and borrowing"
 supplement = "full"
-status = "planned"
+status = "written"
 prereqs = ["05-default-methods"]
 rust_features = ["ownership", "borrowing", "strings", "smart-pointers"]
-examples = []
+examples = ["move_and_borrow", "compile_fail"]
 summary = """
 Fully supplementary. serde_core is generic, trait-heavy code that almost never
 does ordinary imperative ownership work, so this unit is written from scratch —
 and the next unit needs it.
 """
 body = """
-This unit is not drawn from serde_core, and the honest reason is in PLAN.md §2:
-the crate exercises `ownership` and `borrowing` almost nowhere in the form a
-learner needs to meet them first. There are no long functions moving values
-between locals, no `clone()`-to-appease-the-borrow-checker moments, no data
-structures being mutated in place through a chain of `&mut`. What the crate has
-instead is 724 lifetime parameters, which is the *next* topic and unreadable
-without this one.
+Nothing in this unit comes from serde_core, and the reason is PLAN.md §2: the
+crate has no long functions shuffling values between locals, no `clone()` added
+to appease the borrow checker, no structure mutated in place through a chain of
+`&mut`. What it has instead is 724 lifetime parameters — the *next* unit, and
+unreadable without this one.
 
-Planned material: moves and copies, what `Drop` runs and when, shared versus
-mutable references and the aliasing rule that keeps them apart, and the
-`String`/`&str` pair as the worked example — because that pair is exactly what
-unit 08 will ask you to reason about across a format boundary.
+Two questions are worth holding onto, because every rule below is an answer to
+one of them.
 
-When this unit is written it will carry its own examples, including at least one
-`compile_fail` case: a borrow-checker error is easier to understand when you
-have made the compiler produce it yourself than when it is quoted at you.
+**Ownership answers: who frees this, and when?** Rust has no garbage collector
+and no manual `free`. Each value has exactly one owner, and the value is dropped
+when that owner goes out of scope. So `let b = a;` on a `String` cannot mean
+"now there are two" — that would mean two frees. It means the ownership moved,
+and `a` is no longer usable.
+
+The part that surprises people is what a move *costs*. It copies the `String`
+itself — pointer, length, capacity, three machine words — and does not touch the
+heap buffer at all. `move_and_borrow` proves it by comparing `as_ptr()` across a
+move, a function call that takes the value, and a call that gives it back: same
+address every time. The line that actually allocates is `clone()`, and it shows
+up as a different address holding equal contents. A move is not a deep copy that
+the optimizer might elide; it is a change of who is responsible.
+
+Types that own nothing opt out. `i32`, `bool`, `char`, `&T` are `Copy`:
+duplicating them is harmless because there is nothing to free twice. Same
+syntax, different rule, and the difference is a property of the type rather than
+of the line you wrote.
+
+Scope is the other half. The example's `Tracked` type appends to a log when it
+is dropped, which turns the rules into a printed sequence: a value moved into a
+function dies inside that function, before the caller's next statement; locals
+die at the closing brace in reverse declaration order; a value never bound to a
+name dies at the end of the statement that made it. Read that transcript once
+and "when does the destructor run" stops being a guess. This is also how RAII
+works in Rust — a file closes, a lock releases, a buffer frees, all because
+something went out of scope.
+
+**Borrowing answers: who may look while someone else owns?** A `&T` is a
+temporary view: read-only, and any number may exist at once. A `&mut T` is
+exclusive: while one exists, no other reference to that value may. That is the
+aliasing rule, and it is one rule, not two — shared *xor* mutable.
+
+Borrows are also cheap in the way moves are. Four `&str` values in the example
+point into a single `String`'s buffer at different offsets, and no allocation
+happens. A `&str` is a pointer and a length into memory that someone else owns
+and will free.
+
+Which is exactly why the aliasing rule is not bookkeeping. `String::push_str`
+may reallocate — copy every byte into a larger buffer and free the old one — so
+a `&str` taken beforehand would be left pointing at freed memory. The compiler
+rejecting the mutation is the entire reason that program cannot read a dangling
+pointer. `examples/compile_fail` holds that case with rustc's own diagnostic
+committed next to it, along with the use-after-move, the two `&mut`, and the
+move out of a shared reference. Reading the real error, underlines and all,
+teaches more than any paraphrase of it.
+
+Two practical corollaries. First, a borrow ends at its **last use**, not at the
+end of the block — so restructuring code so the borrow finishes earlier is often
+the whole fix. Second, when a reference cannot survive a mutation, an index can:
+a `Range<usize>` is a pair of numbers and promises nothing about memory, so you
+save it, mutate, and re-slice. That trade — reference versus index — is the one
+you will keep making.
+
+**Where this touches serde_core, honestly:** in one place, and it is a design
+decision rather than an exercise. Every `Serializer` method that produces
+output takes `self` by value — the one exception, `is_human_readable`, takes
+`&self` because it only answers a question — so serializing a value *consumes*
+the serializer, and it cannot be reused by mistake. Formats that need to write several values implement the trait for
+`&'a mut MySerializer` instead, which makes the reuse explicit at the type
+level. That is ownership as an API constraint — which is how this crate uses it
+throughout, and why it never has to teach it.
+
+Then unit 07 picks up the question this unit cannot answer: `first_word` at the
+end of the example returns a `&str` borrowed from its argument, and something
+has to tell the compiler what that reference points into.
 """
 
 [[unit]]

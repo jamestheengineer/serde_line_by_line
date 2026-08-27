@@ -16,8 +16,10 @@ wasm-bindgen = "=0.2.127"
 # One entry per directory in examples/. build.rs generates the dispatch from
 # that directory, so a missing entry here fails the build by name.
 collect_str = { path = "../examples/collect_str" }
+compile_fail = { path = "../examples/compile_fail" }
 default_methods = { path = "../examples/default_methods" }
 error_custom = { path = "../examples/error_custom" }
+move_and_borrow = { path = "../examples/move_and_borrow" }
 num_widening = { path = "../examples/num_widening" }
 ok_and_error = { path = "../examples/ok_and_error" }
 primitive_dispatch = { path = "../examples/primitive_dispatch" }

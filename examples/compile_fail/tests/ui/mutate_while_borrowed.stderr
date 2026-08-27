@@ -1,0 +1,9 @@
+error[E0502]: cannot borrow `buf` as mutable because it is also borrowed as immutable
+  --> tests/ui/mutate_while_borrowed.rs:13:5
+   |
+12 |     let head: &str = &buf[..5];
+   |                       --- immutable borrow occurs here
+13 |     buf.push_str("_core");
+   |     ^^^^^^^^^^^^^^^^^^^^^ mutable borrow occurs here
+14 |     println!("{head}");
+   |                ---- immutable borrow later used here

@@ -1,0 +1,14 @@
+error[E0382]: borrow of moved value: `original`
+  --> tests/ui/use_after_move.rs:13:16
+   |
+11 |     let original = String::from("owns its bytes");
+   |         -------- move occurs because `original` has type `String`, which does not implement the `Copy` trait
+12 |     let moved = original;
+   |                 -------- value moved here
+13 |     println!("{original} then {moved}");
+   |                ^^^^^^^^ value borrowed here after move
+   |
+help: consider cloning the value if the performance cost is acceptable
+   |
+12 |     let moved = original.clone();
+   |                         ++++++++

@@ -1,0 +1,140 @@
+Four programs that must not compile, and what rustc says about them.
+The diagnostics below are committed output, checked against the real
+compiler by trybuild on every `cargo test`.
+
+========================================================================
+use_after_move
+Using a value after it moved. One allocation, one owner.
+
+// Unit 06 — the first ownership error everyone meets.
+//
+// `String` owns a heap buffer, so `let moved = original;` transfers that
+// ownership. Reading `original` afterwards would give one allocation two
+// owners, and later two frees.
+//
+// The fix is to decide what you meant: borrow (`&original`) if you only want
+// to look, or clone if you genuinely want a second buffer.
+
+fn main() {
+    let original = String::from("owns its bytes");
+    let moved = original;
+    println!("{original} then {moved}");
+}
+
+error[E0382]: borrow of moved value: `original`
+  --> tests/ui/use_after_move.rs:13:16
+   |
+11 |     let original = String::from("owns its bytes");
+   |         -------- move occurs because `original` has type `String`, which does not implement the `Copy` trait
+12 |     let moved = original;
+   |                 -------- value moved here
+13 |     println!("{original} then {moved}");
+   |                ^^^^^^^^ value borrowed here after move
+   |
+help: consider cloning the value if the performance cost is acceptable
+   |
+12 |     let moved = original.clone();
+   |                         ++++++++
+
+========================================================================
+two_mutable_borrows
+Two `&mut` to one value. Exclusive means exclusive.
+
+// Unit 06 — the aliasing rule, in its simplest form.
+//
+// Two `&mut` to the same value at the same time would let two pieces of code
+// each believe they have exclusive access. Rust allows one, and the error
+// names both the first borrow and the use that keeps it alive.
+
+fn main() {
+    let mut buf = String::from("serde");
+    let first = &mut buf;
+    let second = &mut buf;
+    first.push('!');
+    second.push('?');
+}
+
+error[E0499]: cannot borrow `buf` as mutable more than once at a time
+  --> tests/ui/two_mutable_borrows.rs:10:18
+   |
+ 9 |     let first = &mut buf;
+   |                 -------- first mutable borrow occurs here
+10 |     let second = &mut buf;
+   |                  ^^^^^^^^ second mutable borrow occurs here
+11 |     first.push('!');
+   |     ----- first borrow later used here
+
+========================================================================
+mutate_while_borrowed
+Growing a String while a &str into it is still alive.
+
+// Unit 06 — why the aliasing rule is not bookkeeping.
+//
+// `push_str` may reallocate: it can copy every byte into a larger buffer and
+// free the old one. `head` points into the old buffer, so if this compiled,
+// the `println!` would read freed memory.
+//
+// This is the case `move_and_borrow` section 5 demonstrates the legal version
+// of: save indices, re-borrow after the mutation.
+
+fn main() {
+    let mut buf = String::from("serde");
+    let head: &str = &buf[..5];
+    buf.push_str("_core");
+    println!("{head}");
+}
+
+error[E0502]: cannot borrow `buf` as mutable because it is also borrowed as immutable
+  --> tests/ui/mutate_while_borrowed.rs:13:5
+   |
+12 |     let head: &str = &buf[..5];
+   |                       --- immutable borrow occurs here
+13 |     buf.push_str("_core");
+   |     ^^^^^^^^^^^^^^^^^^^^^ mutable borrow occurs here
+14 |     println!("{head}");
+   |                ---- immutable borrow later used here
+
+========================================================================
+move_out_of_ref
+Taking a field out from behind a shared reference.
+
+// Unit 06 — a shared reference is a view, not a claim.
+//
+// `&Config` grants permission to read, not to take. Moving `name` out would
+// leave the borrowed `Config` holding a `String` that has been given away,
+// and the borrow does not own it to begin with.
+//
+// The fixes are `c.name.clone()` to pay for a copy, or `&c.name` to keep
+// borrowing — which is what most callers wanted.
+
+struct Config {
+    name: String,
+}
+
+fn steal(c: &Config) -> String {
+    c.name
+}
+
+fn main() {
+    let config = Config {
+        name: String::from("serde"),
+    };
+    println!("{}", steal(&config));
+}
+
+error[E0507]: cannot move out of `c.name` which is behind a shared reference
+  --> tests/ui/move_out_of_ref.rs:15:5
+   |
+15 |     c.name
+   |     ^^^^^^ move occurs because `c.name` has type `String`, which does not implement the `Copy` trait
+   |
+help: consider cloning the value if the performance cost is acceptable
+   |
+15 |     c.name.clone()
+   |           ++++++++
+
+The pattern across all four: the compiler is not tracking your style,
+it is tracking whether a pointer can outlive what it points at, or two
+writers can reach one place. Every fix is a decision about which of
+those you meant — borrow, clone, or restructure so the borrow ends
+sooner.

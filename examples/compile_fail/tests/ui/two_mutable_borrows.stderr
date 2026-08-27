@@ -1,0 +1,9 @@
+error[E0499]: cannot borrow `buf` as mutable more than once at a time
+  --> tests/ui/two_mutable_borrows.rs:10:18
+   |
+ 9 |     let first = &mut buf;
+   |                 -------- first mutable borrow occurs here
+10 |     let second = &mut buf;
+   |                  ^^^^^^^^ second mutable borrow occurs here
+11 |     first.push('!');
+   |     ----- first borrow later used here

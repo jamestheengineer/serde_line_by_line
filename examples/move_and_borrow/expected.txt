@@ -1,0 +1,80 @@
+Ownership and borrowing, observed rather than asserted.
+Addresses are compared, never printed: the comparisons are the facts.
+
+1. A move transfers ownership, not bytes
+----------------------------------------
+let moved = original;      same buffer: yes
+round_trip(moved)          same buffer: yes
+returned.clone()           same buffer: no
+  ...but equal contents:   yes
+
+Two moves and a function call copied 0 bytes of the heap buffer: the
+address never changed, so all three names described the same 30 bytes.
+`clone()` is the line that allocates, and it is visible as a different
+address holding equal contents.
+
+2. Ownership decides who runs Drop, and when
+--------------------------------------------
+  create first
+  create second
+  inspect(second) body
+  consume(first) body
+  DROP   first
+  create temporary
+  DROP   temporary
+  end of inner block
+  DROP   second
+  after inner block
+
+`first` dies inside consume(), before the next statement runs.
+`temporary` dies one line after it is born. `second` outlives both and
+dies at the closing brace — locals drop in reverse declaration order.
+
+3. Copy types do not move
+-------------------------
+let m = n;   n is still readable: 7, and m is 7
+let also = flag;   flag is still readable: true / true
+
+Same syntax, different rule, and the difference is whether the type
+owns anything. `i32` is four bytes and owns nothing, so duplicating it
+is harmless. `String` owns a heap buffer, and two owners would mean two
+frees — which is why the same line moves instead. The `use_after_move`
+case in examples/compile_fail is what the compiler says about it.
+
+4. A borrow is a view into someone else's buffer
+------------------------------------------------
+  &str               offset  len
+  "owned"                 0    5
+  "bytes,"                6    6
+  "borrowed"             13    8
+  "views"                22    5
+
+Four `&str` values, one allocation. Each is a pointer into `sentence`
+plus a length; the offsets are where in that one buffer they start.
+Nothing was copied, and none of them may outlive `sentence`.
+
+5. The aliasing rule, and what it protects
+------------------------------------------
+shared borrow while nothing mutates: "serde"
+last use of the borrow, so it ends here: 5
+after push_str: "serde_core"
+re-sliced by the saved range: "serde"
+
+`push_str` may reallocate: it can move every byte to a larger buffer
+and free the old one. Any `&str` taken beforehand would then point at
+freed memory — so the rule is not bookkeeping, it is the reason this
+program cannot read a dangling pointer. The workaround is the last
+line: store indices, re-borrow after the mutation.
+
+6. Where lifetimes come in
+--------------------------
+first_word(&owned) = "borrowed", sharing the input buffer: yes
+
+`first_word` returns a reference it did not allocate, so the compiler
+has to know what it points into. That is the whole job of a lifetime
+parameter, and it is unit 07.
+
+Unit 08 is this exact function with the input coming from a format:
+`'de` names the buffer the serialized bytes live in, and a
+`Deserialize<'de>` impl that borrows instead of allocating is doing
+what `first_word` does here.
