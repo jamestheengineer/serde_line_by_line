@@ -1,3 +1,5 @@
+# The gates below are mirrored by .githooks/pre-push, which runs them before a
+# push leaves the machine. Add a step here and add it there too.
 name: ci
 
 on:
@@ -12,7 +14,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -39,15 +41,24 @@ jobs:
       - name: Build site
         run: cargo site
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: coverage.json
 
+      # trybuild leaves a `target/tests/target` symlink that rust-cache's post
+      # step cannot walk, so every run ends in an ENOENT error annotation and
+      # the cache save aborts (Swatinem/rust-cache#193). It is build output the
+      # next `cargo test` recreates, so removing it here costs nothing. Runs on
+      # failure too, since the post step runs then as well.
+      - name: Drop trybuild symlink before cache save
+        if: always()
+        run: rm -rf target/tests
+
   wasm:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown

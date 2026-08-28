@@ -136,6 +136,62 @@ UX, which is where it belongs.
 
 ---
 
+## D5 — CI is enforced before the push, not after it
+
+**Decision:** `.githooks/pre-push` runs the same gates as
+`.github/workflows/ci.yml` and blocks the push if any fail. Enabled per clone
+with `git config core.hooksPath .githooks`.
+
+### Measured
+
+Of the eleven runs before this was added, seven failed. Every one of them failed
+on the same gate, `cargo fmt --all --check`, and the last seven failed on the
+same two lines: an import list in `examples/num_widening/src/lib.rs` that was
+committed unsorted and then pushed seven more times before anyone ran `cargo
+fmt`.
+
+| | |
+|---|---:|
+| runs before the hook | 11 |
+| red | 7 |
+| distinct causes | **1** |
+| distinct causes that were not `cargo fmt` | **0** |
+
+The full gate set, warm, on this machine:
+
+| gate | time |
+|---|---:|
+| Format | 0.15 s |
+| Clippy | 0.26 s |
+| Examples | 1.4 s |
+| Coverage, Build site | ~1 s |
+| wasm job | ~10 s |
+
+### Why a hook and not more CI
+
+CI already reported all seven failures correctly and promptly. It was not a
+detection problem — the red X was there each time, and the next commit was
+pushed on top of it anyway. Nothing failed except the feedback arriving after
+the push, when acting on it costs a context switch instead of two seconds.
+
+Moving the identical commands to just before the push converts a build-status
+notification into a blocked action, which is the only form of the feedback that
+cannot be deferred. It also costs a couple of seconds, which is cheap enough
+that no one is tempted to route around it; `--no-verify` stays available for
+the deliberate case.
+
+### What it does not cover
+
+A hook narrows the gap; it does not close it. The runner has a newer stable
+toolchain than this machine on any given day, so a fresh `clippy` lint can still
+land red on a push that was green locally. The wasm gates are skipped, loudly,
+when the local `wasm-bindgen` does not match the pin in `playground/Cargo.toml`.
+Neither has actually broken a run yet, but "never fails" is not a promise a
+pre-push hook can make — it is a promise about the class of failure that has
+happened here, which is the entirely preventable one.
+
+---
+
 ## Still open
 
 - **D4 — scroll-sync UX** between the source pane and the explanation pane:

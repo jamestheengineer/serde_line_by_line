@@ -102,6 +102,21 @@ Two ways to read it:
 | `app/` | Axum + Askama reader |
 | `xtask/` | coverage gate, build and WASM pipeline |
 | `docs/` | style guide, Rust-feature vocabulary, contributing |
+| `.githooks/` | pre-push hook running the CI gates locally |
+
+## Working on this
+
+Enable the pre-push hook once per clone:
+
+```
+git config core.hooksPath .githooks
+```
+
+It runs the same gates as CI — `cargo fmt --all --check`, clippy with `-D
+warnings`, `cargo test --workspace`, the coverage gate, the site build, and the
+wasm build — and refuses the push if any fail, which takes a couple of seconds
+warm. `git push --no-verify` skips it when that is what you want. The reasoning
+is in [`docs/decisions.md`](docs/decisions.md) under D5.
 
 ## Licensing
 
