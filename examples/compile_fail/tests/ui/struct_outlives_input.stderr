@@ -1,0 +1,11 @@
+error[E0597]: `text` does not live long enough
+  --> tests/ui/struct_outlives_input.rs:20:34
+   |
+19 |         let text = String::from("alpha;beta;gamma");
+   |             ---- binding `text` declared here
+20 |         parser = Parser { input: &text };
+   |                                  ^^^^^ borrowed value does not live long enough
+21 |     }
+   |     - `text` dropped here while still borrowed
+22 |     println!("{}", parser.input);
+   |                    ------------ borrow later used here

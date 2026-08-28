@@ -317,28 +317,80 @@ has to tell the compiler what that reference points into.
 id = "07-lifetimes-basics"
 title = "Lifetimes I: the basics"
 supplement = "full"
-status = "planned"
+status = "written"
 prereqs = ["06-ownership-and-borrowing"]
 rust_features = ["lifetimes", "borrowing"]
-examples = []
+examples = ["lifetime_basics", "compile_fail"]
 summary = """
 Fully supplementary. Lifetime *syntax* has to be routine before `'de` can teach
 anything, and serde_core's lifetimes are all advanced ones.
 """
 body = """
 serde_core is one of the best places in the ecosystem to learn what lifetimes
-are *for*, and one of the worst places to learn what they *are*. Every lifetime
-in it is doing real work — outlives bounds, higher-ranked bounds, two lifetimes
-deliberately unified into one — and none of them is a first example.
+are *for*, and one of the worst places to learn what they *are*. It has 724
+lifetime parameters and not one of them is a first example: they are outlives
+bounds, higher-ranked bounds, and two lifetimes deliberately unified into one.
+Every one is doing real work. So this unit is written from scratch, like unit
+06, and for the same measured reason (PLAN.md §2).
 
-Planned material: what a lifetime parameter annotates and what it does not,
-elision in function signatures and why it usually just works, the meaning of
-`'a: 'b`, and lifetimes on structs — the point where a type stops being
-self-contained and starts describing a view into someone else's memory.
+One sentence carries the whole unit. **A lifetime parameter does not create,
+extend, or shorten anything — it relates references that already exist**, so
+the compiler can prove no reference outlives what it points into. Everything
+below is a consequence, and `lifetime_basics` checks each one the only way a
+running program can: by comparing `as_ptr()` and showing the result really does
+share a buffer with the argument it claimed to borrow from.
 
-Then unit 08 picks up exactly where this leaves off: `'de` is a struct lifetime
-that names the buffer the input lives in, and `impl<'de: 'a, 'a>` in
-`de/impls.rs` is the outlives bound from this unit doing load-bearing work.
+**Why a signature needs the annotation at all.** `fn longest<'a>(a: &'a str, b:
+&'a str) -> &'a str` returns whichever argument is longer. The example calls it
+twice and the returned pointer comes from a different argument each time — so a
+caller cannot know which buffer the result points into, and the compiler will
+not read the body to find out. The signature is the entire contract. `'a` is
+not "the lifetime of `a`" and not a duration; it is a region the compiler picks,
+at most the overlap of what the two arguments cover, and the result is held to
+it. At runtime the function is a length comparison and a pointer return.
+
+**Elision writes the annotation you did not.** Three rules: every elided input
+reference gets its own lifetime; with exactly one input, the output gets it;
+with a `&self` among the inputs, the output gets `self`'s. That covers most
+signatures you will write, which is why lifetimes feel optional until suddenly
+they are not. Elision never guesses — it applies the rules or refuses, and
+`fn pick(a: &str, b: &str) -> &str` is the refusal.
+
+**A lifetime on a struct means the type is a view.** `struct Parser<'a> { input:
+&'a str, pos: usize }` is where a type stops being self-contained and starts
+describing someone else's memory. The example's `next_field` returns `Option<&'a
+str>` and the choice is deliberate: elision would have tied it to `&mut self`,
+making every field borrow the *parser* — uncollectable while parsing continues,
+and dead as soon as the cursor is dropped. Written as `'a`, the fields borrow
+the input, and the transcript reads three of them back after the parser is gone.
+
+**`'long: 'short` is a promise that fits.** It reads "`'long` outlives
+`'short`", and it is what makes returning a `&'long str` from a function that
+promises `&'short str` legal: valid-until-later satisfies required-until-sooner.
+Subtyping on lifetimes only ever shortens. serde_core writes this as
+`impl<'de: 'a, 'a>` — the input buffer outlives the borrow taken out of it —
+and that is unit 08's central signature, read here first in a five-line
+function.
+
+**`'static` is two different claims wearing one word.** `&'static str` says the
+pointed-at bytes last as long as the program, which is true of literals.
+`T: 'static` says the type contains no borrow that can expire — which `String`
+satisfies while still being dropped at the next closing brace. Neither means
+"lives forever", and reaching for `&'static str` to quiet an error usually makes
+a signature demand something no caller can supply.
+
+The rejections are where most of the teaching is, and a running program cannot
+show them, so `examples/compile_fail` grew four more cases with rustc's own
+diagnostics committed: the two-input signature elision will not complete, a
+reference returned to a dead local, a `Parser<'a>` outliving its input, and an
+ordinary `String` offered where `&'static str` was demanded. Read the E0106
+help text in particular — it prints the fixed signature with the annotations
+underlined, which is a better explanation of elision than a paragraph.
+
+**Where this touches serde_core:** section 6 of the example is the bridge. A
+parse that borrows every field out of its input instead of copying — proven by
+offsets into the one buffer, against an owned version that allocates six times —
+is what `Deserialize<'de>` does. Unit 08 gives that input buffer a name.
 """
 
 [[unit]]

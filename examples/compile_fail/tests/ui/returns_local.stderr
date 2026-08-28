@@ -1,0 +1,5 @@
+error[E0515]: cannot return reference to local variable `owned`
+  --> tests/ui/returns_local.rs:13:5
+   |
+13 |     &owned
+   |     ^^^^^^ returns a reference to data owned by the current function

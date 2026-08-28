@@ -1,0 +1,98 @@
+Lifetimes, checked against the pointers they describe.
+Addresses are compared and offsets printed, never raw addresses: the
+comparisons are the facts.
+
+1. A lifetime relates references, it does not create them
+---------------------------------------------------------
+longest(&owned, literal)   result borrows owned:   yes
+longest("ab", literal)     result borrows literal: yes
+
+One signature, two calls, and the returned pointer came from a
+different argument each time. That is why the annotation is needed at
+all: the compiler cannot see inside the body from a call site, so the
+signature has to say "the result may point into either argument".
+`'a` is not the lifetime of `owned`, and not a duration. It is a region
+the compiler chooses — at most the overlap of the two arguments' —
+and the result is held to it. At runtime this function is a length
+comparison and a pointer return; the lifetimes are gone by then.
+
+2. Elision writes the annotation you did not
+--------------------------------------------
+first_line(&text) and first_line_explicit(&text) agree: yes
+  both borrow text: yes
+doc.headline() borrows doc.text:      yes   ("headline")
+
+Three rules, and they cover most signatures. Every elided input
+reference gets its own lifetime; if there is exactly one input, the
+output gets it; if one of the inputs is `&self`, the output gets
+`self`'s and the others are ignored. Elision never guesses — it applies
+those rules or refuses. `fn pick(a: &str, b: &str) -> &str` is the
+refusal: two candidates, no `&self`, so rustc asks you to say which.
+The `missing_lifetime` case in examples/compile_fail is what it says.
+
+3. A lifetime on a struct means the type is a view
+--------------------------------------------------
+  field      offset  len
+  "alpha"         0    5
+  "beta"          6    4
+  "gamma"        11    5
+
+Three fields read after the parser was dropped, all pointing into one
+`String` at the offsets above. Nothing was allocated. `Parser<'a>` is
+not a parser that happens to hold a reference — the `'a` is part of the
+type, and it is the compiler's record that values of this type describe
+someone else's memory. Build one from a temporary and the borrow
+checker stops you: that is the `struct_outlives_input` case in
+examples/compile_fail.
+
+4. `'long: 'short` — a longer borrow fits a shorter slot
+--------------------------------------------------------
+prefer_long(&outer, &inner)  returned the long one: yes
+slot starts holding the inner borrow: "in"
+slot now holds the outer one:          yes
+
+The result is typed `&'short str` and it is pointing into `outer`,
+which lives longer than `'short`. That is fine, and the bound is what
+says so: a promise valid until later satisfies a requirement of valid
+until sooner. The direction is the part to hold onto — subtyping on
+lifetimes only ever shortens. `Slot<'short>` shows the same coercion in
+a field, and the assignment that would fail is the reverse one: an
+`&'short str` cannot be stored where `&'long str` is required.
+serde_core writes this bound as `impl<'de: 'a, 'a>` — the input buffer
+outlives the borrow taken out of it, which is unit 08.
+
+5. `'static` is about the referent, not about the value
+-------------------------------------------------------
+read after its block ended: "baked into the binary"
+String satisfies T: 'static (it borrows nothing): yes
+...and is still dropped at the end of this function, 42 bytes and all
+
+Two different things wear the same word. `&'static str` says the
+*pointed-at bytes* last as long as the program — true of literals,
+which is why the reference survived its block. `T: 'static` says the
+type contains no borrow that can expire, which a `String` satisfies
+despite being freed a few lines from now. Neither one means "lives
+forever", and reaching for `&'static str` to quiet an error usually
+makes the signature demand something the caller cannot supply. The
+`not_static` case in examples/compile_fail is that mistake meeting a
+perfectly ordinary `String`.
+
+6. Borrowing out of the input, which is unit 08
+-----------------------------------------------
+  key        value        offset  value shares the input buffer
+  name       serde_core        5  borrowed yes / owned no
+  version    1.0.229          24  borrowed yes / owned no
+  deps       0                37  borrowed yes / owned no
+
+Same parse twice. The borrowed values sit at offsets inside the one
+input buffer; the owned ones are six fresh allocations holding equal
+bytes. The signature is the entire difference — `fn borrowed_pairs(input:
+&str) -> Vec<(&str, &str)>` elides to one lifetime shared by the input
+and everything in the result, so the compiler already knows those pairs
+cannot outlive the text.
+
+That is serde's zero-copy story with the serde removed. In unit 08 the
+input is a format's buffer, the lifetime has a name — `'de` — and
+`Deserialize<'de>` is the trait that says a type can be built by
+borrowing out of it. Everything there is a longer version of this
+function's signature.

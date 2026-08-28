@@ -19,6 +19,7 @@ collect_str = { path = "../examples/collect_str" }
 compile_fail = { path = "../examples/compile_fail" }
 default_methods = { path = "../examples/default_methods" }
 error_custom = { path = "../examples/error_custom" }
+lifetime_basics = { path = "../examples/lifetime_basics" }
 move_and_borrow = { path = "../examples/move_and_borrow" }
 num_widening = { path = "../examples/num_widening" }
 ok_and_error = { path = "../examples/ok_and_error" }
