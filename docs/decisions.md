@@ -192,6 +192,61 @@ happened here, which is the entirely preventable one.
 
 ---
 
+## D6 — Deploy: GitHub Pages, from the Actions artifact
+
+**Decision: publish `site/` to GitHub Pages from a workflow that rebuilds it on
+every push to `main`. No committed build output, no third-party host.**
+
+### Measured
+
+The generated site, with the playground built (2026-08-31):
+
+| | raw | gzipped |
+|---|---:|---:|
+| whole site, 42 files | 16.0 MB | 1.09 MB |
+| largest page, `de/impls.rs` | 2.70 MB | 171 KB |
+| `de/value.rs` | 2.52 MB | 123 KB |
+| playground wasm | 232 KB | — |
+
+Pages serves everything gzipped, so the number that reaches a reader is the
+right-hand column. The largest page in the project is 171 KB over the wire —
+about a third of a typical news article — and it carries 3,173 lines of
+highlighted source with 122 annotations beside them. The 16 MB raw figure is
+never transferred; it exists because syntect emits a `<span>` per token.
+
+Against Pages' limits (1 GB published, 10 minutes to build, 100 GB/month) the
+site is three orders of magnitude clear on every axis. Nothing here justifies a
+paid host or a CDN.
+
+### Why not commit `site/`
+
+The obvious alternative — build locally, commit the output, let Pages serve the
+branch — was rejected for the same reason `coverage.json` is not committed: it
+is derived. A committed `site/` is a second copy of every annotation, in a form
+nobody edits, that silently goes stale the moment someone pushes an annotation
+without rebuilding. It would also add 16 MB of generated HTML to the history on
+every content commit, in a repo whose entire point is a 12,000-line source tree
+and the prose beside it.
+
+### Why the deploy repeats the coverage gate
+
+`pages.yml` runs `cargo xtask coverage` before it builds, which `ci.yml` also
+runs. The duplication is deliberate: CI gates *what merges*, and the deploy
+gates *what the public URL serves*. They are the same check today because the
+deploy only ever runs on `main`, but a store with a gap reaching the published
+site is a worse failure than one reaching a branch, and it costs four seconds to
+make that impossible independently of how the commit arrived.
+
+### Cost accepted
+
+The playground is rebuilt on every deploy rather than cached as an artifact from
+the CI run, which spends about a minute of runner time re-doing work `ci.yml`
+just did. Sharing it would couple the two workflows through artifact retention
+and a `workflow_run` trigger, for a saving measured in seconds of wall-clock on
+a site that deploys a handful of times a day.
+
+---
+
 ## Still open
 
 - **D4 — scroll-sync UX** between the source pane and the explanation pane:

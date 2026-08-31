@@ -242,6 +242,15 @@ fn main() -> Result<()> {
     )?;
     write(&out.join("static").join("syntax.css"), &syntax_css(&hl)?)?;
 
+    // GitHub Pages runs Jekyll over an uploaded tree unless this file exists,
+    // which would silently drop anything beginning with an underscore.
+    write(&out.join(".nojekyll"), "")?;
+
+    // A shields.io endpoint badge, derived from the store on every build so
+    // the README figure cannot drift from the coverage gate. Served from the
+    // deployed site; shields fetches it and renders the badge.
+    write(&out.join("badge.json"), &badge_json(&store))?;
+
     println!(
         "wrote {} pages to {}  ({:.1}% annotated, {} annotations)",
         store.files.len() + store.course.len() + 2,
@@ -747,6 +756,25 @@ fn syntax_css(hl: &Highlighter) -> Result<String> {
          @media (prefers-color-scheme: dark) {{\n  :root:not([data-theme=\"light\"]) {{\n{dark}\n  }}\n}}\n\
          :root[data-theme=\"dark\"] {{\n{dark}\n}}\n"
     ))
+}
+
+/// The coverage figure as a shields.io endpoint payload.
+///
+/// Green only at 100%: the promise this project makes is "every line", and a
+/// badge that reads healthy at 97% would be advertising the wrong thing.
+fn badge_json(store: &Store) -> String {
+    let percent = store.percent();
+    let colour = if percent >= 100.0 {
+        "brightgreen"
+    } else if percent >= 90.0 {
+        "yellow"
+    } else {
+        "orange"
+    };
+    format!(
+        "{{\"schemaVersion\":1,\"label\":\"lines annotated\",\
+         \"message\":\"{percent:.1}%\",\"color\":\"{colour}\"}}\n"
+    )
 }
 
 /// Recursively copies `from` into `to`, creating directories as needed.

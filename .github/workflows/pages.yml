@@ -1,0 +1,73 @@
+# Deploys the generated site to GitHub Pages.
+#
+# This is a deploy, not a gate: .github/workflows/ci.yml (mirrored by
+# .githooks/pre-push) is what verifies the tree. The one gate repeated here is
+# `cargo xtask coverage`, because a store with a gap or a broken cross-reference
+# must never reach the public URL even if it somehow reached main.
+#
+# Pages must be switched to "GitHub Actions" as its source once, in the
+# repository settings; until then this workflow builds and the deploy step
+# fails with a message saying exactly that.
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Contents to read the tree, pages + id-token for the deployment itself.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time, and never cancel one midway: a cancelled deploy can
+# leave the site on a half-uploaded artifact.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Must match the exact pin in playground/Cargo.toml, as in ci.yml.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.127
+
+      - name: Coverage
+        run: cargo xtask coverage --json
+
+      # Without this the site still builds, but every example renders as
+      # "playground unavailable" — which is not what gets published.
+      - name: Build playground
+        run: cargo xtask wasm
+
+      - name: Build site
+        run: cargo site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

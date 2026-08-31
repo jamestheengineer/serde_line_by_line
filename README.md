@@ -1,5 +1,11 @@
 # serde_line_by_line
 
+[![ci](https://github.com/jamestheengineer/serde_line_by_line/actions/workflows/ci.yml/badge.svg)](https://github.com/jamestheengineer/serde_line_by_line/actions/workflows/ci.yml)
+[![pages](https://github.com/jamestheengineer/serde_line_by_line/actions/workflows/pages.yml/badge.svg)](https://github.com/jamestheengineer/serde_line_by_line/actions/workflows/pages.yml)
+[![lines annotated](https://img.shields.io/endpoint?url=https%3A%2F%2Fjamestheengineer.github.io%2Fserde_line_by_line%2Fbadge.json)](https://jamestheengineer.github.io/serde_line_by_line/)
+
+**Read it: <https://jamestheengineer.github.io/serde_line_by_line/>**
+
 A guided walkthrough of **every line** of [`serde_core`](https://crates.io/crates/serde_core) —
 the crate that holds Serde's actual trait definitions — with explanations
 side-by-side with the source and runnable micro-examples.
