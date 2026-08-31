@@ -260,6 +260,8 @@ fn main() -> Result<()> {
     // Pages serves this for any unknown path under the site.
     write(&out.join("404.html"), &NotFoundPage.render()?)?;
 
+    let links = check_links(&out)?;
+
     println!(
         "wrote {} pages to {}  ({:.1}% annotated, {} annotations)",
         // one per file, one per unit, plus the front page, the course index
@@ -269,7 +271,131 @@ fn main() -> Result<()> {
         store.percent(),
         index_count(&store),
     );
+    println!("checked {links} internal links");
     Ok(())
+}
+
+/// Verifies every internal link in the generated site resolves — to a file
+/// that exists and, where the link carries a fragment, to an `id` on that page.
+/// Returns how many were checked.
+///
+/// The coverage gate validates the store; nothing validated the *rendering* of
+/// it. A `{{ root }}` dropped from one `href` in a template produces a site
+/// that works when served from the domain root and 404s under the `/<repo>/`
+/// path Pages serves it from (D6), which is the worst place to find out. This
+/// runs on every `cargo site`, so the deploy cannot publish a broken link.
+fn check_links(out: &Path) -> Result<usize> {
+    let mut pages = Vec::new();
+    collect_html(out, &mut pages)?;
+
+    let mut ids: BTreeMap<PathBuf, Vec<String>> = BTreeMap::new();
+    for page in &pages {
+        let html = std::fs::read_to_string(page)?;
+        ids.insert(page.clone(), attr_values(&html, "id=\""));
+    }
+
+    let mut checked = 0;
+    let mut broken = Vec::new();
+    for page in &pages {
+        let html = std::fs::read_to_string(page)?;
+        let dir = page.parent().context("page has no parent")?;
+        let mut refs = attr_values(&html, "href=\"");
+        refs.extend(attr_values(&html, "src=\""));
+        for r in refs {
+            // Absolute and external references are out of scope: the 404 page
+            // deliberately links to `/`, and nothing else points off-site.
+            if r.starts_with("http") || r.starts_with("mailto:") || r.starts_with('/') {
+                continue;
+            }
+            checked += 1;
+            let (path, fragment) = match r.split_once('#') {
+                Some((p, f)) => (p, Some(f)),
+                None => (r.as_str(), None),
+            };
+            let target = if path.is_empty() {
+                page.clone()
+            } else {
+                normalize(&dir.join(path))
+            };
+            if !target.exists() {
+                broken.push(format!("{}: {r} -> missing file", rel(out, page)));
+                continue;
+            }
+            if let Some(f) = fragment {
+                let has = ids.get(&target).is_some_and(|v| v.iter().any(|i| i == f));
+                if !has {
+                    broken.push(format!("{}: {r} -> no such id", rel(out, page)));
+                }
+            }
+        }
+    }
+
+    if !broken.is_empty() {
+        for b in broken.iter().take(20) {
+            eprintln!("  broken link: {b}");
+        }
+        anyhow::bail!(
+            "{} broken internal link(s) in {}",
+            broken.len(),
+            out.display()
+        );
+    }
+    Ok(checked)
+}
+
+/// Every `.html` file under `dir`, recursively.
+fn collect_html(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            collect_html(&path, out)?;
+        } else if path.extension().is_some_and(|e| e == "html") {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
+/// Values of one double-quoted attribute, found by scanning for `needle`
+/// (e.g. `href="`). The generator writes the markup, so there is no
+/// hand-authored HTML here to trip a scan this simple.
+fn attr_values(html: &str, needle: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = html;
+    while let Some(at) = rest.find(needle) {
+        rest = &rest[at + needle.len()..];
+        match rest.find('"') {
+            Some(end) => {
+                out.push(rest[..end].to_string());
+                rest = &rest[end + 1..];
+            }
+            None => break,
+        }
+    }
+    out
+}
+
+/// Resolves `.` and `..` without touching the filesystem, so a link is checked
+/// as written rather than as a symlink happens to resolve it.
+fn normalize(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for part in path.components() {
+        match part {
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+fn rel(base: &Path, path: &Path) -> String {
+    path.strip_prefix(base)
+        .unwrap_or(path)
+        .display()
+        .to_string()
 }
 
 /// The course track: an index and one page per unit.
