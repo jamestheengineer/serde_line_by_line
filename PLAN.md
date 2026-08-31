@@ -294,6 +294,21 @@ serde_line_by_line/
 | **7 — Course track** | Ordering, prereq DAG, ~12 supplementary units | — | Course track walkable start to finish |
 | **8 — Ship** | Deploy, polish, contribution docs | — | Public URL |
 
+**All eight phases are done.** The site is live at
+<https://jamestheengineer.github.io/serde_line_by_line/>, rebuilt and deployed
+from the annotation store on every push to `main` (D6). Both tracks are
+complete: 12,037 lines claimed by 468 annotations, 14 course units written.
+
+Two more gates went in during phase 8. Listed beside the coverage gate from
+phase 0, they are what makes the promises in this document checkable rather
+than stated:
+
+| gate | what it makes impossible |
+|---|---|
+| `cargo xtask coverage` | an unclaimed line, an overlap, a dangling reference, a prereq cycle |
+| the site's own link check | a rendered link that resolves locally and 404s under the deployed path |
+| the wasm output check | an example that prints one thing in CI and another on the site |
+
 Phase 1 is deliberately a full vertical slice: it forces the schema, the renderer,
 the WASM pipeline, and the writing voice to all be proven against real content
 *before* 1,000 more annotations are committed to a format that might be wrong.
