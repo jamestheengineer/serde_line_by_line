@@ -14,11 +14,12 @@ Along the way it teaches Rust: lifetimes, trait design, associated types,
 generic bounds, `macro_rules!`, and `no_std` engineering, using one of the most
 carefully written crates in the ecosystem as the worked example.
 
-> **Status: the reference track is complete — every line of `serde_core` is
-> annotated.** All 19 files are at 100%, listed in `annotations/manifest.toml`,
-> so the coverage gate hard-fails on any gap or overlap.
+> **Status: live, and complete on both tracks.** Every line of `serde_core` is
+> annotated — all 19 files at 100%, listed in `annotations/manifest.toml`, so
+> the coverage gate hard-fails on any gap or overlap — and the site rebuilds and
+> deploys to the URL above on every push to `main`.
 >
-> **Phase 7 is complete: all 14 course units are written**, and the track is
+> **All 14 course units are written**, and the track is
 > walkable start to finish. Five of them are supplementary in whole or in part:
 > ownership and lifetime basics entirely, since serde_core exercises lifetimes
 > only in their advanced forms and ordinary ownership not at all, and

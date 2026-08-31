@@ -328,7 +328,16 @@ measurements behind each:
    Nothing needs a backend at request time once examples run as WASM and
    highlighting is precomputed.
 
-**Still open:**
+4. **D4 — no scroll syncing.** The question assumed two panes that can drift
+   apart; one annotation is one grid row holding both its code and its prose,
+   so there is a single scroller and nothing to sync. Pairing is done with
+   hover tints in CSS.
 
-4. Scroll-sync UX between source and explanation panes: anchored jumps vs
-   continuous sync. Deferred to phase 1, to be tried against real content.
+**Resolved in phase 8:**
+
+5. **D5 — the CI gates run in a pre-push hook**, not only on the runner.
+6. **D6 — the site deploys to GitHub Pages** from the Actions artifact on every
+   push to `main`. `site/` stays uncommitted: it is derived, and a committed
+   copy goes stale the first time an annotation lands without a rebuild.
+
+**Still open:** nothing.

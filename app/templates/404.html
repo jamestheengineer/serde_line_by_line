@@ -1,0 +1,56 @@
+{#
+  Served by GitHub Pages for any unknown path under the site.
+
+  Deliberately standalone: it does not extend base.html and pulls in no
+  stylesheet. Every other page knows how deep it sits and builds a relative
+  `root` from that; a 404 is rendered at whatever depth the reader mistyped, so
+  a relative asset path would resolve to nothing. The styles below are a small
+  copy of the ones in app.css, which is the accepted cost of that.
+#}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Not found — serde line by line</title>
+<style>
+  :root { color-scheme: light dark;
+          --bg:#fff; --fg:#1c1e21; --muted:#6b7280; --line:#e3e6ea; --accent:#b7410e; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#14171a; --fg:#e6e8ea; --muted:#9aa4af; --line:#262c32; --accent:#ff8a5c; }
+  }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font: 15px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         display:flex; align-items:center; justify-content:center; min-height:100vh; }
+  main { max-width: 34rem; padding: 2rem; }
+  h1 { font-size: 1.4rem; margin: 0 0 .6rem; }
+  p { color: var(--muted); margin: 0 0 1rem; }
+  code { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+         border:1px solid var(--line); border-radius:4px; padding:1px 5px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>No such page</h1>
+  <p>
+    Nothing is annotated at that address. The reference track has one page per
+    source file under <code>file/</code>, and the course track one per unit
+    under <code>course/</code> &mdash; both are linked from the front page.
+  </p>
+  <p><a id="home" href="/">Back to the start</a></p>
+</main>
+<script>
+  // The site is path-independent by design: it runs at the domain root under
+  // `cargo dev` and under /<repo>/ on Pages. A 404 cannot know its own depth,
+  // so the way home is computed rather than written down.
+  (function () {
+    var link = document.getElementById("home");
+    if (location.hostname.endsWith("github.io")) {
+      var repo = location.pathname.split("/")[1];
+      if (repo) link.href = "/" + repo + "/";
+    }
+  })();
+</script>
+</body>
+</html>

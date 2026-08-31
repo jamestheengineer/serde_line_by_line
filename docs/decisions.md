@@ -136,6 +136,36 @@ UX, which is where it belongs.
 
 ---
 
+## D4 — Scroll sync: the question was dissolved, not answered
+
+**Decision: no scroll syncing. One annotation is one grid row holding its code
+and its prose, and the page scrolls as a single document.**
+
+The plan deferred this to phase 1 as a choice between anchored jumps and
+continuous sync. Both answers assume two independently scrolling panes that can
+drift apart and have to be re-aligned — an assumption the layout removed. A
+`.block` is a two-column grid row: source on the left, explanation on the right,
+top-aligned, sharing a scroll container. There is nothing to sync because there
+is only one scroller.
+
+What the two-pane designs were really buying is the ability to tell, at a
+glance, which prose belongs to which lines. That is a *pairing* problem, and
+pairing is cheaper to solve than syncing: hovering either half tints the other
+and draws an accent edge down the pair (`:has(.code:hover) .note` and its
+mirror), and the line under the cursor gets its own tint. Twelve lines of CSS,
+no JavaScript, no scroll listener, and it degrades to a plain document on a
+browser without `:has`.
+
+The cost is that a very long annotation leaves whitespace beside a short span of
+code, and one 3,000-line file is one very long page — 171 KB gzipped for
+`de/impls.rs` (D6). Both were judged better than a scroll listener that has to
+be right at 60 Hz on a page with 122 anchors.
+
+Below 900 px the grid collapses to one column and the prose follows its code,
+which is the behaviour a synced-pane design cannot offer at all.
+
+---
+
 ## D5 — CI is enforced before the push, not after it
 
 **Decision:** `.githooks/pre-push` runs the same gates as
@@ -249,6 +279,4 @@ a site that deploys a handful of times a day.
 
 ## Still open
 
-- **D4 — scroll-sync UX** between the source pane and the explanation pane:
-  anchored jumps versus continuous sync. Deferred to phase 1, where it can be
-  tried against real content rather than argued in the abstract.
+Nothing. D4, the last open question, is resolved above.

@@ -129,6 +129,12 @@ struct UnitPage {
     track: String,
 }
 
+/// The 404 page. Standalone — see the comment at the top of the template for
+/// why it carries its own styles instead of extending `base.html`.
+#[derive(Template)]
+#[template(path = "404.html")]
+struct NotFoundPage;
+
 #[derive(Template)]
 #[template(path = "index.html")]
 struct IndexPage {
@@ -251,9 +257,14 @@ fn main() -> Result<()> {
     // deployed site; shields fetches it and renders the badge.
     write(&out.join("badge.json"), &badge_json(&store))?;
 
+    // Pages serves this for any unknown path under the site.
+    write(&out.join("404.html"), &NotFoundPage.render()?)?;
+
     println!(
         "wrote {} pages to {}  ({:.1}% annotated, {} annotations)",
-        store.files.len() + store.course.len() + 2,
+        // one per file, one per unit, plus the front page, the course index
+        // and the 404.
+        store.files.len() + store.course.len() + 3,
         out.display(),
         store.percent(),
         index_count(&store),
