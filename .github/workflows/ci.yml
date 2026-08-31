@@ -74,7 +74,11 @@ jobs:
       - name: Build examples for wasm32
         run: cargo build --target wasm32-unknown-unknown $(printf -- '-p %s ' $(ls examples))
 
-      # Builds the playground and runs wasm-bindgen over it.
+      # Builds the playground, runs wasm-bindgen over it, and then runs every
+      # example out of the built module under node, diffing each against the
+      # transcript the `Examples` job above asserts natively. Compiling for
+      # wasm32 and passing natively do not add up to "the browser prints what
+      # the explanation claims"; this is the step that checks that.
       - name: Build playground
         run: cargo xtask wasm
 

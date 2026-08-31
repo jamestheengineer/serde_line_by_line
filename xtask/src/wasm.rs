@@ -74,6 +74,41 @@ pub fn run(repo: &Path) -> Result<()> {
         println!("  {name:<22} {:>7.1} KB", size as f64 / 1024.0);
     }
     println!("wrote {}", out.display());
+
+    verify(repo)?;
+    Ok(())
+}
+
+/// Runs every example out of the module just built and diffs it against the
+/// transcript `cargo test` asserts.
+///
+/// CI has always compiled the examples for the browser and run them natively —
+/// two facts that do not add up to the one that matters, which is that the
+/// output a reader sees on the site is the output the explanation claims. A
+/// `#[cfg(target_arch)]` branch, or anything that formats differently on
+/// wasm32, would have slipped straight through.
+///
+/// Skipped, loudly, without node. Skipping leaves the wasm build exactly as
+/// verified as it was before this existed.
+fn verify(repo: &Path) -> Result<()> {
+    if Command::new("node").arg("--version").output().is_err() {
+        println!("  ! node not found — skipping the wasm output check");
+        return Ok(());
+    }
+
+    let harness = repo.join("target").join("wasm-smoke.mjs");
+    let source = include_str!("wasm_smoke.mjs").replace("__REPO__", &repo.display().to_string());
+    std::fs::write(&harness, source).with_context(|| format!("writing {}", harness.display()))?;
+
+    let out = Command::new("node")
+        .arg(&harness)
+        .output()
+        .context("running node")?;
+    print!("{}", String::from_utf8_lossy(&out.stdout));
+    if !out.status.success() {
+        eprint!("{}", String::from_utf8_lossy(&out.stderr));
+        bail!("the playground's output does not match the committed transcripts");
+    }
     Ok(())
 }
 

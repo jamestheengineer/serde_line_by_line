@@ -113,6 +113,12 @@ Rules, in order of how easy they are to forget:
    — that test is the only thing standing between a wrong explanation and a
    green build.
 
+`cargo xtask wasm` finishes by running every example out of the built module
+under node and diffing it against `expected.txt`, so an example that formats
+differently on wasm32 fails the build rather than quietly printing something
+else on the site. That check is skipped, with a message, if node is not
+installed.
+
 Examples that must *fail* to compile — borrow errors, lifetime mismatches — are
 not separate crates. They are `.rs` files under
 `examples/compile_fail/tests/ui/`, checked with `trybuild` against a committed
@@ -146,8 +152,8 @@ two files reference each other so neither is edited alone:
 | `cargo clippy --workspace --all-targets -- -D warnings` | lints |
 | `cargo test --workspace` | every example against its transcript, trybuild cases |
 | `cargo xtask coverage --json` | vendor integrity, gaps, overlaps, dangling refs, cycles |
-| `cargo site` | the site still builds from the store |
-| wasm build + `cargo xtask wasm` | every example still compiles for the browser |
+| `cargo site` | the site builds, and every internal link in it resolves |
+| wasm build + `cargo xtask wasm` | every example compiles for the browser **and** produces the same output there as it does natively |
 
 The hook stops at the first failure, because one broken gate cascades into the
 rest and five screens of fallout buries the line that has to be fixed. Bypass it
