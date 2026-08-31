@@ -1,0 +1,144 @@
+The iterator protocol, from the one method it actually requires.
+Sections 4, 5 and 6 are the crate's three iterator lessons, reduced
+to code that runs.
+
+1. The trait is one method — everything else is provided
+--------------------------------------------------------
+collect()          ["alpha", "beta", "gamma"]
+count()            3
+map + max_by_key   Some("gamma")
+enumerate + last   Some((2, "gamma"))
+
+One `next` was written. `collect`, `count`, `max_by_key`, `enumerate`
+and `last` all came with the trait, and every one of them is defined in
+terms of calling `next` until it returns `None`. `for f in it` is not
+syntax for a collection — it is `IntoIterator::into_iter` followed by a
+loop over `next`, which is why it works on anything that implements
+this and on nothing that does not.
+
+2. Nothing happens until someone calls next()
+---------------------------------------------
+  built map(...).filter(...)         closure ran 0 times
+  one next() -> Some(1)              closure ran 1 time
+  find(|sq| *sq > 8) -> Some(9)      closure ran 3 times of 8
+
+Building the chain ran nothing: `map` and `filter` return *values* —
+`Map<Iter<u64>, {closure}>` and a `Filter` wrapped around it — that
+hold the source and the closure and do no work. Each `next` on the
+outer one calls `next` on the inner one, exactly as often as it must.
+`find` stopped at the third element because the answer was known then;
+nothing after it was squared. This is why a chain of ten adapters over
+a million items allocates nothing and touches only what it needs, and
+why forgetting to consume one is a warning rather than a slow program.
+
+3. size_hint — a claim the caller allocates against
+---------------------------------------------------
+  slice.iter()                 (5, Some(5))
+  .map(square)                 (5, Some(5))
+  .filter(is_odd)              (0, Some(5))
+  .chain(slice.iter())         (10, Some(10))
+  Fields::new(record)          (0, None)
+
+collect() from map:    5 items, capacity 5
+collect() from filter: 5 items, capacity 8
+
+Same five values both times. `map` cannot change how many there are,
+so it forwards the exact hint and `collect` allocates once, for five.
+`filter` can only say "between none and five", `collect` believes the
+lower bound, and the `Vec` reaches five by doubling — the capacity
+above is the growth showing. (Capacities are this std's behaviour, not
+a promise.) `Fields` reports the default `(0, None)`, because the
+trait's provided `size_hint` is the honest answer for anything that has
+to look at the data to know.
+
+serde_core's `private/size_hint.rs` is this exact question at the other
+end of the pipe. `from_bounds` returns `Some` only when the two bounds
+agree — "at least 3, at most 100" is discarded rather than guessed at —
+and `cautious` then caps whatever survives at one megabyte's worth of
+elements, because past that point the number came from the input file
+and a four-byte header should not be able to ask for a gigabyte.
+
+4. After None, the trait promises nothing — hence Fuse
+------------------------------------------------------
+five next() calls, unfused: [Some(1), Some(2), None, Some(99), None]
+five next() calls, fused:   [Some(1), Some(2), None, None, None]
+the 99 came back after None:  yes
+what a `for` loop would see: [1, 2]
+
+The `for` loop never notices, because it stops at the first `None` and
+never asks again. That is what makes this a good bug: it is invisible
+to the common case and only appears when the loop is somewhere else.
+
+Which is exactly serde's situation. In `SeqDeserializer` the loop
+belongs to the `Visitor`, and a visitor may call `next_element_seed`
+as many times as it likes, including past the end — then `end()` calls
+`count()` on the same iterator afterwards to check the length. A
+resurrecting iterator would make those two disagree. So the field is
+typed `iter: iter::Fuse<I>`, not `I`: `Fuse` latches a flag the first
+time it sees `None` and returns `None` forever after, which is the
+promise the trait declines to make. It is one word in a struct
+definition and it is load-bearing.
+
+5. Two Options as a state machine, not a cursor
+-----------------------------------------------
+  call     yields           size_hint
+  next()   Some("version")  Some(2)
+  next()   Some("1.0.229")  Some(1)
+  next()   None             Some(0)
+  next()   None             Some(0)
+
+`take` moves the value out and leaves `None` behind, so the sequence
+key, value, end, end is a consequence of the two fields rather than
+something a counter has to be kept in step with. An index would need a
+`match` with arms that cannot happen; here the impossible states are
+unrepresentable, and the borrow checker is what verifies nothing is
+handed out twice — you cannot `take` from a `None` and get a value.
+`size_hint` is derived from the same two fields, which is why it can
+always return `Some` and the caller in `deserialize_seq` can `unwrap`
+it without a comment apologising.
+
+6. Asking twice, then stopping
+------------------------------
+  input       len==1  count==1  two nexts
+  "a"            yes       yes        yes
+  "é"             no       yes        yes
+  ""              no        no         no
+  "ab"            no        no         no
+  "€10"           no        no         no
+
+on a 10,000-character string, same answer (yes), different cost:
+  chars().count() == 1   visited 10000 characters
+  two nexts              visited 2 characters
+
+The third cautionary tale, and the smallest. `visit_str` for `char`
+has to decide whether the input holds exactly one character, and the
+two obvious spellings are each wrong in their own way: `len() == 1`
+asks about bytes and rejects every accented letter, and
+`chars().count() == 1` walks the whole thing — ten thousand characters
+above to answer a question about the first two, and a ten-megabyte
+input decoded end to end before it says no.
+
+Taking two items and matching on the pair costs two `next` calls
+whatever the input is, and reads as the question rather than as a
+proxy for it. That is the shape worth stealing: when you want to know
+how many items there are only up to some small number, ask for that
+many and look at what came back. Anything else — empty, or two or more
+— falls through to one error carrying the string that was there.
+
+7. Why there are no closures here to look at
+--------------------------------------------
+A closure has one call signature. `|s: &str| ...` takes a `&str` and
+nothing else, and that is the whole reason serde is built out of
+visitors instead. A `Visitor` is what you would write if a closure
+could have twenty-seven entry points with twenty-seven different
+argument types — `visit_bool(bool)`, `visit_u64(u64)`,
+`visit_str(&str)`, `visit_seq(impl SeqAccess)` — and be handed to a
+`Deserializer` that picks one after it has seen the data.
+
+So the trade is visible: application code would pass a closure and take
+one shape of input; serde passes a trait object's worth of methods and
+takes any of them. The cost is that a visitor is thirty lines and a
+closure is one, which is what `serde_derive` exists to write for you.
+The `closure_kinds` example is the other half of this unit, and it is
+where `Fn`, `FnMut` and `FnOnce` are actually taught, because there is
+nothing in this crate to point at for them.

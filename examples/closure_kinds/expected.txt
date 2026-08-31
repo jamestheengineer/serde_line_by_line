@@ -1,0 +1,171 @@
+Closures, from what they compile to. Section 5 is why serde is built
+out of visitors instead, and section 6 counts what the crate writes.
+
+1. A closure is a struct the compiler wrote
+-------------------------------------------
+  closure                            words
+  || 29             (no capture)         0
+  || name.len()     (&String)            1
+  move || name.as_ptr() (String)         3
+  String (for comparison)                3
+
+borrowing closure read the original: yes
+moved closure holds the same buffer:  yes
+
+The sizes are the whole lesson. A closure with nothing to remember is
+zero bytes — it exists only in the type system, and calling it compiles
+to calling a function. Capturing by reference costs one pointer.
+Capturing by value costs whatever the value costs, and the `String`
+went in the way it goes anywhere else: three words copied, the same
+heap buffer, no allocation. What varies is not how closures work; it is
+what you asked to be remembered.
+
+Nothing here is magic syntax. `|n| n + captured` is a struct with one
+field and one method, and the only reason you cannot name its type is
+that the compiler never gave it a name to say.
+
+2. Three traits, because there are three receivers
+--------------------------------------------------
+  trait     receiver     may                      callable
+  FnOnce    self         move its captures out    once
+  FnMut     &mut self    mutate its captures      many, exclusively
+  Fn        &self        read its captures        many, shared
+
+Fn:     map_three(|n| n + offset) -> [101, 102, 103]
+FnMut:  log after two calls        -> ["ALPHA", "BETA"]
+FnOnce: finish(move || owned)      -> "moved out of the closure"
+
+one closure, three bounds: Fn [2, 4, 6]  FnMut [2]  FnOnce "42"
+
+The three traits are not three kinds of closure. They are three
+questions about the one method: does calling it need to consume the
+struct, mutate it, or only read it? So they nest — `Fn: FnMut` and
+`FnMut: FnOnce` — and every closure implements as many of them as its
+body allows. `|n| n * 2` implements all three, which is why `plain`
+went into all three functions above.
+
+The direction matters when you are the one writing the bound. Ask for
+`FnOnce` and you may call it once but almost anything may be passed;
+ask for `Fn` and you may call it whenever you like, including from
+several threads, but a closure that counts something is refused. Take
+the weakest bound that does the job — `Option::unwrap_or_else` asks for
+`FnOnce` because it calls at most once, and `Iterator::map` asks for
+`FnMut` because it calls repeatedly but never concurrently.
+
+3. Every closure is its own type — hence Box<dyn Fn>
+----------------------------------------------------
+add_one and also_add_one agree on 10: yes
+through Vec<Box<dyn Fn>> on 10:       [11, 11, 30]
+
+  value                              words
+  add_one (the closure itself)           0
+  scaled  (captures one usize)           1
+  fn(u32) -> u32 pointer                 1
+  Box<dyn Fn(u32) -> u32>                2
+  PhantomData<u32>                       0
+
+A `Box<dyn Fn>` is two words wide whatever it holds: a pointer to the
+closure and a pointer to its vtable. That is the cost of putting
+different closures in one `Vec` — an allocation each and an indirect
+call — and the reason `impl Fn` is the default choice. A generic
+`F: Fn(u32) -> u32` is compiled once per closure type, with the body
+inlined and the zero-sized ones vanishing entirely, which is unit 11's
+monomorphization arriving from the other direction: there, one macro
+wrote many impls; here, one function becomes many machine functions.
+
+The two `add_one` closures above are a special case worth knowing: a
+closure that captures nothing has nothing to carry, so it coerces to a
+plain `fn(u32) -> u32` and several of them can share one `Vec` after
+all. Give either of them a capture and that door closes — which is the
+`closure_types_differ` case in `examples/compile_fail`, where rustc
+says it plainly: no two closures, even if identical, have the same
+type.
+
+`PhantomData` measuring zero next to a non-capturing closure is not a
+coincidence. Both are types carrying no data, and serde uses the first
+exactly where you would use the second — `impl DeserializeSeed for
+PhantomData<T>` is the seed that captured nothing.
+
+4. What is captured is decided one variable at a time
+-----------------------------------------------------
+closure holds record.name; record.hits still mutable: yes (now 1)
+move || over a u32: closure reached (2, 4), outer stayed 1
+counter(41) returned a closure: 42 43
+
+Three separate things people call "capture". *What* is captured is
+whatever the body names — `record.name`, not all of `record`, which is
+an edition 2021 change and the fix for closures that used to lock a
+whole struct. *How* it is captured is the weakest mode the body needs:
+shared, then mutable, then by value. `move` overrides only that second
+question, forcing by-value, and it is what makes a closure that
+outlives its scope possible at all — `counter` returns something that
+still works after every local in it is gone, because the local moved
+into the struct that was returned.
+
+And `move` on a `Copy` type is a copy. The closure started from the
+same 1 the outer variable held, reached 4 across two calls, and the
+outer variable never moved. The keyword does not mean "share";
+it means "take a value of your own", which for `u32` is a duplicate
+and for `String` is the only copy there is.
+
+5. A closure has one signature — serde needs twenty-seven
+---------------------------------------------------------
+drive(Str) -> "field: a string of 5 bytes"
+drive(Num) -> "field: the number 229"
+
+size of Describe, captures included: 3 words
+
+Try to write `drive` taking a closure and the design collapses at the
+first line: `|v| ...` takes one type of argument, and the whole problem
+is that the driver does not know which type it has until it has looked.
+Passing two closures would work for two cases and not for twenty-seven,
+and they could not share captured state without cloning it.
+
+So `Visitor` is the closure with twenty-seven entry points —
+`visit_bool(self, bool)`, `visit_str(self, &str)`, `visit_seq(self,
+impl SeqAccess)`, and the rest — every one taking `self` by value,
+because exactly one of them will ever run. That is `FnOnce`, written
+out longhand and multiplied by the data model.
+
+`DeserializeSeed` is the other half of the analogy and closer still:
+`fn deserialize(self, deserializer: D)` is a `FnOnce` that carries
+captured state into the deserialization and returns a value. Its impl
+for `PhantomData<T>` is the one that captured nothing — zero words,
+same as `|| 29` in section 1 — which is why the common case costs
+nothing to pass around.
+
+The price is honest: a visitor is thirty lines where a closure is one.
+`serde_derive` exists to write those thirty lines, and that is most of
+what it does.
+
+6. The thirteen closures in serde_core, and their bounds
+--------------------------------------------------------
+  file           n  closure                                    bound
+  de/impls.rs    6  map_err(|_| Error::invalid_value(..))      FnOnce
+  de/impls.rs    2  map(|vec| ..) / map(|()| ..)               FnOnce
+  de/impls.rs    1  ok_or_else(|| Error::custom(..))           FnOnce
+  de/impls.rs    2  |(ip, port)| SocketAddrV4::new(..)         FnOnce
+  ser/mod.rs     2  try_for_each(|item| serialize_element(..)) FnMut
+                13  in 12,037 lines                            no Fn at all
+
+Thirteen closures in two files, and the shape of the list is the
+point. Eleven are `FnOnce` positions — an error constructor on a path
+that has already failed, run at most once. Two are `FnMut`, both of
+them the same line in `collect_seq` and `collect_map`, capturing the
+serializer mutably to feed it one element at a time. None is an `Fn`.
+
+Two of them are worth a second look: the `|(ip, port)|` pair are
+arguments to `parse_socket_impl!`, passed through the macro as `$new:
+expr` and landing in `.map($new)` inside the generated impl. A closure
+crossing a macro boundary is unit 11 and this unit meeting — and they
+capture nothing, so they are constructors that could have been function
+pointers, written as closures because the tuple pattern is neater.
+
+The number that is not in the table is the one that matters most:
+serde_core declares zero `Fn`, `FnMut` or `FnOnce` bounds of its own,
+and zero `dyn Fn`. It never asks you for a closure. Where a library
+built around callbacks would take one, this crate takes a `Serialize`,
+a `Visitor`, or a `DeserializeSeed` — a named type with named methods,
+which can have twenty-seven of them, can be implemented for a type you
+do not own, and can be generated by a derive macro. Closures buy
+brevity at one call site. Traits buy everything this crate needed.

@@ -12,13 +12,15 @@ carefully written crates in the ecosystem as the worked example.
 > annotated.** All 19 files are at 100%, listed in `annotations/manifest.toml`,
 > so the coverage gate hard-fails on any gap or overlap.
 >
-> Phase 7 is under way: the course track is walkable end to end, 13 of its 14
-> units written. Ownership and borrowing and lifetime basics are the two
-> supplementary units so far — written from scratch, with runnable examples and
-> eight committed compile-fail cases between them, because serde_core exercises
-> lifetimes only in their advanced forms and ordinary ownership not at all. The
-> one still marked *planned* is iterators and closures, which needs the same
-> treatment rather than more annotations. See
+> **Phase 7 is complete: all 14 course units are written**, and the track is
+> walkable start to finish. Five of them are supplementary in whole or in part:
+> ownership and lifetime basics entirely, since serde_core exercises lifetimes
+> only in their advanced forms and ordinary ownership not at all, and
+> `PhantomData`, errors and iterators-and-closures in part — the crate writes
+> thirteen closures in twelve thousand lines and declares no `Fn` bound at all.
+> That material is written from scratch, with runnable examples and twelve
+> committed compile-fail cases, and every unit labels which of it came from the
+> crate and which did not. See
 > **[PLAN.md](PLAN.md)** for the roadmap and
 > **[docs/decisions.md](docs/decisions.md)** for the architecture calls.
 >
@@ -33,7 +35,7 @@ carefully written crates in the ecosystem as the worked example.
 > $ cargo xtask coverage
 > TOTAL                        12037    12037     468 100.0%
 >
-> course track: 13/14 units written
+> course track: 14/14 units written
 > ```
 
 ---

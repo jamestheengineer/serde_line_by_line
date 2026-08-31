@@ -607,30 +607,90 @@ exactly what this crate opted out of, so the written material covers it.
 id = "14-iterators-and-closures"
 title = "Iterators and closures"
 supplement = "partial"
-status = "planned"
+status = "written"
 prereqs = ["13-errors-and-control-flow"]
 rust_features = ["iterators", "closures", "option"]
-examples = []
+examples = ["iterator_by_hand", "closure_kinds", "compile_fail"]
 summary = """
-Mostly supplementary. serde_core consumes iterators carefully in a few places
-and writes essentially no closures, so the crate supplies three good cautionary
-tales and none of the fundamentals.
+serde_core consumes iterators carefully in exactly three places and writes
+thirteen closures in twelve thousand lines, so the crate supplies three good
+cautionary tales and none of the fundamentals. Both halves are written from
+scratch, and the closure half explains why the crate has no closures to show.
 """
 body = """
-The three annotations in this unit are worth reading on their own: a
-`SeqDeserializer` that wraps its iterator in `Fuse` for a reason you should not
-skip, a visitor that calls `next()` twice because both alternatives are wrong,
-and a two-state machine built out of `Option::take`. All three are about the
-*edges* of iteration — exhaustion, restarting, taking a value out of a place
-that must then be empty.
+The three annotations here are worth reading on their own, and they are all
+about the *edges* of iteration rather than the protocol: a `SeqDeserializer`
+that wraps its iterator in `Fuse`, a visitor that calls `next()` twice because
+both alternatives are wrong, and a two-state machine built out of
+`Option::take`. `examples/iterator_by_hand` is those three reduced to code that
+runs, with the protocol underneath them supplied.
 
-None of them teach the iterator protocol, and the crate has no closures to speak
-of. `Fn`, `FnMut`, `FnOnce`, capture modes, and the adapter chains that make up
-most day-to-day Rust are absent by nature: this is generic trait code, not
-application code.
+**The one method.** `Iterator` requires `next`, and provides about seventy
+methods on top of it. The example writes a `Fields<'a>` splitter — one `next`,
+yielding borrows of its input the way unit 07's `Parser` did — and then calls
+`collect`, `count`, `max_by_key`, `enumerate` and `last` on it without writing
+another line. `for x in it` is not syntax over collections; it is
+`IntoIterator::into_iter` followed by a loop over `next`, which is why it works
+on anything with this one method and nothing without it. It is also why `for x
+in v` *moves* `v` — the impl it picks takes `self` — and that is the first of
+the unit's compile-fail cases.
 
-Planned material: the `Iterator` trait and what implementing it by hand feels
-like, the adapters worth knowing, the three closure traits and why there are
-three, and what a closure actually compiles to — which connects back to
-monomorphization from unit 11.
+**Adapters are values, not work.** Building `map(..).filter(..)` runs nothing:
+the closure count in the example is still zero after the chain is built, one
+after a single `next`, and three out of eight when `find` gets its answer at the
+third element. `size_hint` is the claim that travels with the chain — `map`
+forwards it exactly, `filter` can only say "between none and five", and
+`collect` allocates against the lower bound. That is the same question
+`private/size_hint.rs` answers from the other end of the pipe, where the number
+came out of an input file and `cautious` caps it.
+
+**What the trait does not promise.** Nothing in `Iterator` says what happens
+after the first `None`, and a `for` loop cannot tell, because it stops there and
+never asks again. The example's `Resurrecting` iterator yields, stops, and
+starts again — legal — and a fused copy of it does not. That is the whole reason
+`SeqDeserializer` stores `iter: iter::Fuse<I>`: the loop belongs to the
+`Visitor`, which may ask past the end, and `end()` calls `count()` on the same
+iterator afterwards to check the length. One word in a struct definition,
+load-bearing.
+
+**Then closures, which the crate cannot teach at all.** `examples/closure_kinds`
+starts from what a closure is: a struct the compiler wrote, holding what it
+captured, with one method. Its size is the size of its captures — zero words
+when it captures nothing, one for a `&String`, three for a `String` moved in —
+and there are three traits because there are three ways that one method can take
+`self`. `FnOnce` takes `self` and may move its captures out; `FnMut` takes `&mut
+self` and may change them; `Fn` takes `&self` and may only read. They nest, so
+`|n| n * 2` implements all three, and the rule when you are writing the bound is
+to ask for the weakest one that does the job.
+
+Two more facts that surprise people, both made observable: every closure has its
+own anonymous type, so two identical ones cannot share a `Vec` unless they
+capture nothing and coerce to `fn` pointers; and `move` decides only *how* a
+variable is captured, not *what* — since edition 2021 the compiler takes
+`record.name` rather than all of `record`, and `move` on a `Copy` type makes a
+copy, so a moved counter and the original count separately.
+
+**Where this lands in serde.** A closure has exactly one call signature, and the
+whole problem a `Deserializer` faces is that it does not know which type it
+holds until it has looked. That is why serde is built out of visitors: a
+`Visitor` is the closure with twenty-seven entry points, every `visit_*` taking
+`self` by value because exactly one of them will run — `FnOnce`, written
+longhand and multiplied by the data model. `DeserializeSeed` is closer still,
+`fn deserialize(self, deserializer: D)` being a `FnOnce` that carries captured
+state in, and its impl for `PhantomData<T>` is the seed that captured nothing,
+zero-sized exactly as a non-capturing closure is.
+
+The inventory is the honest ending. serde_core writes thirteen closures, all of
+them arguments handed straight to a std combinator: eleven in `FnOnce` positions
+(`map_err`, `map`, `ok_or_else`, and two constructors passed through
+`parse_socket_impl!`), and two `FnMut` — the `try_for_each` line in
+`collect_seq` and its twin in `collect_map`. It declares no `Fn` bound of its
+own and no `dyn Fn` anywhere. It never asks you for a closure; it asks for a
+type with named methods, which can have twenty-seven of them and can be written
+by a derive macro.
+
+Four compile-fail cases carry the rejections a running program cannot show: a
+`for` loop consuming the vector it was handed, a `push` while a loop over the
+same vector is alive, two identical closures refused from one `vec![]`, and a
+counting closure offered where `Fn` was demanded.
 """

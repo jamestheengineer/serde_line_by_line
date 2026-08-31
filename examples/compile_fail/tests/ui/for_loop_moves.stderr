@@ -1,0 +1,18 @@
+error[E0382]: borrow of moved value: `names`
+  --> tests/ui/for_loop_moves.rs:20:26
+   |
+14 |     let names = vec![String::from("alpha"), String::from("beta")];
+   |         ----- move occurs because `names` has type `Vec<String>`, which does not implement the `Copy` trait
+15 |
+16 |     for name in names {
+   |                 ----- `names` moved due to this implicit call to `.into_iter()`
+...
+20 |     println!("{} names", names.len());
+   |                          ^^^^^ value borrowed here after move
+   |
+note: `into_iter` takes ownership of the receiver `self`, which moves `names`
+  --> $RUST/core/src/iter/traits/collect.rs
+help: consider iterating over a slice of the `Vec<String>`'s content to avoid moving into the `for` loop
+   |
+16 |     for name in &names {
+   |                 +

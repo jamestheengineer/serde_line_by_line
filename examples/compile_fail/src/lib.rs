@@ -5,7 +5,8 @@
 //! first borrow and the conflicting use both underlined, is the lesson.
 //!
 //! This is the harness for every unit that has one, so each case names the unit
-//! it belongs to: units 06 and 07 so far, ownership errors and lifetime errors.
+//! it belongs to: units 06, 07 and 14 so far — ownership errors, lifetime
+//! errors, and the two ways an iterator or a closure is refused.
 //!
 //! Each case lives in `tests/ui/` as a complete program that must **fail** to
 //! compile. `trybuild` builds every one of them under `cargo test`, asserts the
@@ -96,6 +97,34 @@ const CASES: &[Case] = &[
         source: include_str!("../tests/ui/not_static.rs"),
         stderr: include_str!("../tests/ui/not_static.stderr"),
     },
+    Case {
+        unit: "14",
+        name: "for_loop_moves",
+        lesson: "`for x in v` consumes v, because that is the impl it picked.",
+        source: include_str!("../tests/ui/for_loop_moves.rs"),
+        stderr: include_str!("../tests/ui/for_loop_moves.stderr"),
+    },
+    Case {
+        unit: "14",
+        name: "push_while_iterating",
+        lesson: "Pushing to a Vec while a loop over it is still running.",
+        source: include_str!("../tests/ui/push_while_iterating.rs"),
+        stderr: include_str!("../tests/ui/push_while_iterating.stderr"),
+    },
+    Case {
+        unit: "14",
+        name: "closure_types_differ",
+        lesson: "Two closures, identical text, one Vec. Two types.",
+        source: include_str!("../tests/ui/closure_types_differ.rs"),
+        stderr: include_str!("../tests/ui/closure_types_differ.stderr"),
+    },
+    Case {
+        unit: "14",
+        name: "closure_mutates_under_fn",
+        lesson: "A closure that counts, offered where `Fn` was demanded.",
+        source: include_str!("../tests/ui/closure_mutates_under_fn.rs"),
+        stderr: include_str!("../tests/ui/closure_mutates_under_fn.stderr"),
+    },
 ];
 
 /// Every example exposes `run() -> String` rather than printing, so the same
@@ -103,10 +132,10 @@ const CASES: &[Case] = &[
 pub fn run() -> String {
     let mut out = String::new();
     out.push_str(
-        "Eight programs that must not compile, and what rustc says about them.\n\
-         Four belong to unit 06 and four to unit 07; each is labelled with its\n\
-         unit. The diagnostics below are committed output, checked against the\n\
-         real compiler by trybuild on every `cargo test`.\n",
+        "Twelve programs that must not compile, and what rustc says about them.\n\
+         Four belong to unit 06, four to unit 07 and four to unit 14; each is\n\
+         labelled with its unit. The diagnostics below are committed output,\n\
+         checked against the real compiler by trybuild on every `cargo test`.\n",
     );
 
     for case in CASES {
@@ -126,14 +155,20 @@ pub fn run() -> String {
     }
 
     out.push_str(
-        "\nThe pattern across all eight: the compiler is not tracking your style,\n\
+        "\nThe pattern across all twelve: the compiler is not tracking your style,\n\
          it is tracking whether a pointer can outlive what it points at, or two\n\
          writers can reach one place. The unit 06 cases are that question asked\n\
          about a value — who owns it, who may look. The unit 07 cases are the\n\
          same question asked about a *signature*, where the compiler has only\n\
          what you wrote to reason from: two of them are fixed by writing a\n\
          lifetime parameter, and two by admitting the data really does die\n\
-         first, so a reference to it cannot be what you return.\n",
+         first, so a reference to it cannot be what you return.\n\n\
+         The unit 14 cases are the same two questions arriving through syntax\n\
+         that hides them. `for x in v` is a move because `IntoIterator` takes\n\
+         `self`; an iterator is a live borrow for as long as the loop runs; and\n\
+         the last two are about closures being ordinary values with ordinary\n\
+         types — one type each, and one of `Fn`, `FnMut` or `FnOnce` depending\n\
+         on what the body does to what it captured.\n",
     );
 
     out

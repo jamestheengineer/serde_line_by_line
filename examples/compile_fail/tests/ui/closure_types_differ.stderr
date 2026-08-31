@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+  --> tests/ui/closure_types_differ.rs:23:31
+   |
+20 |     let add_one = move |n: u32| n + bump;
+   |                   ------------- the expected closure
+21 |     let also_add_one = move |n: u32| n + bump;
+   |                        ------------- the found closure
+22 |
+23 |     let table = vec![add_one, also_add_one];
+   |                               ^^^^^^^^^^^^ expected closure, found a different closure
+   |
+   = note: expected closure `{closure@$DIR/tests/ui/closure_types_differ.rs:20:19: 20:32}`
+              found closure `{closure@$DIR/tests/ui/closure_types_differ.rs:21:24: 21:37}`
+   = note: no two closures, even if identical, have the same type
+   = help: consider boxing your closure and/or using it as a trait object
