@@ -127,6 +127,11 @@ wasm build — and refuses the push if any fail, which takes a couple of seconds
 warm. `git push --no-verify` skips it when that is what you want. The reasoning
 is in [`docs/decisions.md`](docs/decisions.md) under D5.
 
+[`docs/contributing.md`](docs/contributing.md) covers the rest: how to add an
+annotation, how to add an example that runs both under `cargo test` and in the
+browser, what the coverage gate checks, and the one rule about the vendored
+tree — never edit it, because every annotation is keyed to its line numbers.
+
 ## Licensing
 
 Project content and code: **MIT OR Apache-2.0**.
