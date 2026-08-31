@@ -103,6 +103,8 @@ struct NavFile {
 #[derive(Template)]
 #[template(path = "course.html")]
 struct CoursePage {
+    page_title: String,
+    description: String,
     units: Vec<NavUnit>,
     written: usize,
     total_units: usize,
@@ -115,6 +117,8 @@ struct CoursePage {
 #[derive(Template)]
 #[template(path = "unit.html")]
 struct UnitPage {
+    page_title: String,
+    description: String,
     units: Vec<NavUnit>,
     unit: NavUnit,
     body_html: String,
@@ -138,6 +142,8 @@ struct NotFoundPage;
 #[derive(Template)]
 #[template(path = "index.html")]
 struct IndexPage {
+    page_title: String,
+    description: String,
     nav: Vec<NavFile>,
     total_lines: u32,
     claimed_lines: u32,
@@ -154,6 +160,8 @@ struct IndexPage {
 #[derive(Template)]
 #[template(path = "file.html")]
 struct FilePage {
+    page_title: String,
+    description: String,
     nav: Vec<NavFile>,
     file: String,
     percent: f64,
@@ -187,6 +195,16 @@ fn main() -> Result<()> {
     let nav = build_nav(&store);
 
     let index = IndexPage {
+        page_title: "serde line by line".to_string(),
+        description: one_line(&format!(
+            "Every line of serde_core {} annotated: {} lines claimed by {} explanations, \
+             beside the source, with runnable examples — and a {}-unit Rust course read out \
+             of the same annotations.",
+            vendor::SOURCE_ID.trim_start_matches("serde_core-"),
+            store.total_lines(),
+            index_count(&store),
+            store.course.len(),
+        )),
         nav: build_nav(&store),
         total_lines: store.total_lines(),
         claimed_lines: store.claimed_lines(),
@@ -223,6 +241,13 @@ fn main() -> Result<()> {
         let units = store.units_for(file);
 
         let page = FilePage {
+            page_title: format!("{file} — serde line by line"),
+            description: format!(
+                "{file} from serde_core {}, annotated line by line: {} lines, {} explanations.",
+                vendor::SOURCE_ID.trim_start_matches("serde_core-"),
+                lines,
+                units.len(),
+            ),
             nav: nav_for(&nav),
             file: file.clone(),
             percent: percent_of(units, *lines),
@@ -302,9 +327,14 @@ fn check_links(out: &Path) -> Result<usize> {
         let mut refs = attr_values(&html, "href=\"");
         refs.extend(attr_values(&html, "src=\""));
         for r in refs {
-            // Absolute and external references are out of scope: the 404 page
-            // deliberately links to `/`, and nothing else points off-site.
-            if r.starts_with("http") || r.starts_with("mailto:") || r.starts_with('/') {
+            // Out of scope: anything not naming a file in this tree. The 404
+            // page deliberately links to `/`, and the favicon is an inline
+            // `data:` SVG so the site never requests a file for it.
+            if r.starts_with("http")
+                || r.starts_with("mailto:")
+                || r.starts_with("data:")
+                || r.starts_with('/')
+            {
                 continue;
             }
             checked += 1;
@@ -341,6 +371,27 @@ fn check_links(out: &Path) -> Result<usize> {
         );
     }
     Ok(checked)
+}
+
+/// A summary flattened into one line for a `<meta>` tag: newlines collapsed,
+/// cut at a word boundary near 200 characters. Markdown emphasis is left as
+/// written — search results and link previews render it as plain text, and
+/// stripping it would need a parser for the two asterisks it saves.
+fn one_line(text: &str) -> String {
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() <= 200 {
+        return flat;
+    }
+    let cut = flat
+        .char_indices()
+        .take_while(|(i, _)| *i < 200)
+        .map(|(i, _)| i)
+        .last()
+        .unwrap_or(0);
+    let trimmed = flat[..cut]
+        .rsplit_once(' ')
+        .map_or(&flat[..cut], |(a, _)| a);
+    format!("{trimmed}…")
 }
 
 /// Every `.html` file under `dir`, recursively.
@@ -417,6 +468,12 @@ fn write_course(
         .collect();
 
     let index = CoursePage {
+        page_title: "Course track — serde line by line".to_string(),
+        description: one_line(
+            "A Rust course read out of serde_core: 14 units in teaching order, from why a \
+             data model exists to the macros that generate a third of the crate. What it \
+             cannot teach is labelled as supplementary.",
+        ),
         units: nav.iter().map(clone_unit).collect(),
         written: store
             .course
@@ -458,6 +515,8 @@ fn write_course(
             .collect();
 
         let page = UnitPage {
+            page_title: format!("{} — serde line by line", unit.title),
+            description: one_line(&unit.summary),
             units: nav.iter().map(clone_unit).collect(),
             unit: clone_unit(&nav[i]),
             body_html: markdown::render(&unit.body),
