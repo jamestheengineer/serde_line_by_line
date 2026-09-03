@@ -9,7 +9,7 @@ use serde::Serialize;
 use slbl_core::schema::{
     Annotation, CourseFile, CourseUnit, Kind, LineRange, Manifest, Supplement, Track, UnitStatus,
 };
-use slbl_core::vendor::{self, SOURCE_ID};
+use slbl_core::vendor;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
@@ -76,16 +76,16 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
 
     // 1. Vendor integrity. Everything downstream is keyed to these line numbers.
     vendor::verify(repo)?;
+    let source_id = vendor::load_pin(repo)?.source_id();
 
     let source_files = vendor::source_files(repo)?;
     let known_files: HashSet<&str> = source_files.iter().map(String::as_str).collect();
 
     let manifest = Manifest::load(&repo.join("annotations").join("manifest.toml"))?;
-    if manifest.source != SOURCE_ID {
+    if manifest.source != source_id {
         bail!(
-            "manifest source {:?} does not match pinned source {:?}",
+            "manifest source {:?} does not match pinned source {source_id:?}",
             manifest.source,
-            SOURCE_ID
         );
     }
     let complete: HashSet<&str> = manifest.complete.iter().map(String::as_str).collect();
@@ -97,7 +97,8 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
 
     let features = load_feature_vocabulary(repo)?;
     let examples = load_example_names(repo)?;
-    let annotations = slbl_core::read_annotations(repo)?;
+    check_example_pins(repo, &vendor::load_pin(repo)?.version, &mut diag)?;
+    let annotations = slbl_core::read_annotations(repo, &source_id)?;
 
     // 2. Identity and cross-reference integrity.
     let mut by_id: HashMap<&str, &Annotation> = HashMap::new();
@@ -260,6 +261,7 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
     // 5. The course track: the registry, and every annotation that points at it.
     let course = check_course(
         repo,
+        &source_id,
         &annotations,
         &known_files,
         &features,
@@ -268,7 +270,7 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
     )?;
 
     let report = Report {
-        source: SOURCE_ID.to_string(),
+        source: source_id.clone(),
         total_lines,
         claimed_lines,
         annotations: annotations.len(),
@@ -298,6 +300,7 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
 /// whether serde_core actually supplies any of it.
 fn check_course(
     repo: &Path,
+    source_id: &str,
     annotations: &[Annotation],
     known_files: &HashSet<&str>,
     features: &BTreeSet<String>,
@@ -306,11 +309,10 @@ fn check_course(
 ) -> Result<Vec<UnitCoverage>> {
     let path = repo.join("annotations").join("course.toml");
     let course = CourseFile::load(&path)?;
-    if course.source != SOURCE_ID {
+    if course.source != source_id {
         bail!(
-            "course registry source {:?} does not match pinned source {:?}",
+            "course registry source {:?} does not match pinned source {source_id:?}",
             course.source,
-            SOURCE_ID
         );
     }
 
@@ -508,6 +510,46 @@ fn load_feature_vocabulary(repo: &Path) -> Result<BTreeSet<String>> {
         bail!("no feature slugs found in {}", path.display());
     }
     Ok(out)
+}
+
+/// Every example that depends on the crate must pin the version the
+/// annotations describe.
+///
+/// The examples build against the published crate rather than the vendored
+/// copy, so nothing but this connects the two. An example running a different
+/// release than the one being explained is the same drift the vendor checksum
+/// exists to prevent, arriving through the other door — and `cargo xtask bump`
+/// retargets these manifests, so a mismatch means a bump was left half-done.
+fn check_example_pins(repo: &Path, version: &str, diag: &mut Diagnostics) -> Result<()> {
+    let want = format!("{} = \"={version}\"", vendor::CRATE_NAME);
+    let dir = repo.join("examples");
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    let mut paths: Vec<_> = std::fs::read_dir(&dir)?
+        .collect::<std::io::Result<Vec<_>>>()?
+        .into_iter()
+        .map(|e| e.path().join("Cargo.toml"))
+        .filter(|p| p.is_file())
+        .collect();
+    paths.sort();
+    for path in paths {
+        let text = std::fs::read_to_string(&path)?;
+        let Some(line) = text.lines().find(|l| {
+            l.trim_start()
+                .starts_with(&format!("{} ", vendor::CRATE_NAME))
+        }) else {
+            continue;
+        };
+        if line.trim() != want {
+            diag.error(format!(
+                "{}: pins `{}` but the vendored source is {version}",
+                path.strip_prefix(repo).unwrap_or(&path).display(),
+                line.trim(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn load_example_names(repo: &Path) -> Result<HashSet<String>> {

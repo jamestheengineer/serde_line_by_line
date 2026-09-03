@@ -9,4 +9,6 @@ publish = false
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 slbl_core = { path = "../core" }
+toml = "0.9"

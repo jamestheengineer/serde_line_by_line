@@ -308,6 +308,8 @@ than stated:
 | `cargo xtask coverage` | an unclaimed line, an overlap, a dangling reference, a prereq cycle |
 | the site's own link check | a rendered link that resolves locally and 404s under the deployed path |
 | the wasm output check | an example that prints one thing in CI and another on the site |
+| the example version pin check | an example running a different `serde_core` release than the annotations describe |
+| `cargo xtask bump` | a source version moving without every line range moving with it |
 
 Phase 1 is deliberately a full vertical slice: it forces the schema, the renderer,
 the WASM pipeline, and the writing voice to all be proven against real content
@@ -324,7 +326,7 @@ compression proven in phase 2.
 | risk | mitigation |
 |---|---|
 | **Content volume dwarfs engineering.** ~1,195 annotations is the real project; the app is a few weeks. | Keep the renderer cheap and the content portable. Never let UI work block writing. |
-| **Line-range brittleness.** Any edit to vendored source invalidates annotations. | Checksum gate in CI. Version bumps are explicit migrations with a remapping tool. |
+| **Line-range brittleness.** Any edit to vendored source invalidates annotations. | Checksum gate in CI. Version bumps are explicit migrations, performed by `cargo xtask bump` ([D7](docs/decisions.md), [migration.md](docs/migration.md)). |
 | **Macro-heavy files become tedious.** `de/impls.rs` could read as 106 near-identical entries. | `kind = "macro-use"` renders compactly and links to the def. Prove this in phase 2 before committing to phase 5. |
 | **Course track over-claims.** Pretending serde_core teaches all of Rust would be dishonest. | §2 is committed to the repo. Supplementary units are labeled as such in the UI. |
 | **Scope creep to `serde` / `serde_derive`.** | Out of scope for v1. Revisit only after the reference track hits 100%. |
@@ -355,4 +357,17 @@ measurements behind each:
    push to `main`. `site/` stays uncommitted: it is derived, and a committed
    copy goes stale the first time an annotation lands without a rebuild.
 
+7. **D7 — a version bump remaps boundaries, not ranges**, and rewrites the
+   annotation store textually rather than through a serializer. `cargo xtask
+   bump <version>` fetches and checksum-verifies the release, aligns every
+   file, carries all 468 ranges across, and reports the ones whose code changed
+   underneath them. This is the "remapping tool" §10 promised; the runbook is
+   [`docs/migration.md`](docs/migration.md).
+
 **Still open:** nothing.
+
+> As of the last check, `serde_core` 1.0.229 is still the newest published
+> release, so there is nothing to bump *to*. The migration path is built and
+> exercised — `1.0.229 → 1.0.228` and back returns the tree byte for byte, and
+> `1.0.220 → 1.0.229` is verified as a dry run because it is the hard shape: a
+> file added, a file removed, eleven annotations whose contents moved.

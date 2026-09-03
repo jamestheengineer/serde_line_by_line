@@ -200,7 +200,7 @@ fn main() -> Result<()> {
             "Every line of serde_core {} annotated: {} lines claimed by {} explanations, \
              beside the source, with runnable examples — and a {}-unit Rust course read out \
              of the same annotations.",
-            vendor::SOURCE_ID.trim_start_matches("serde_core-"),
+            store.version,
             store.total_lines(),
             index_count(&store),
             store.course.len(),
@@ -212,7 +212,7 @@ fn main() -> Result<()> {
         percent_label: format!("{:.1}", store.percent()),
         annotations: store.by_file.values().map(Vec::len).sum(),
         course_units: store.course.len(),
-        source_id: vendor::SOURCE_ID.to_string(),
+        source_id: store.source_id.clone(),
         root: "./".to_string(),
         current: String::new(),
         track: "reference".to_string(),
@@ -220,7 +220,7 @@ fn main() -> Result<()> {
     write(&out.join("index.html"), &index.render()?)?;
 
     let defs = macro_defs(&store);
-    let root = vendor::vendor_root(&repo);
+    let root = vendor::vendor_root(&repo)?;
 
     // Highlighted once for the whole build: the reference track renders each
     // file on its own page, and the course track pulls spans out of a dozen
@@ -244,7 +244,7 @@ fn main() -> Result<()> {
             page_title: format!("{file} — serde line by line"),
             description: format!(
                 "{file} from serde_core {}, annotated line by line: {} lines, {} explanations.",
-                vendor::SOURCE_ID.trim_start_matches("serde_core-"),
+                store.version,
                 lines,
                 units.len(),
             ),
@@ -254,7 +254,7 @@ fn main() -> Result<()> {
             percent_label: format!("{:.1}", percent_of(units, *lines)),
             lines: *lines,
             blocks: blocks_for(units, highlighted, &defs, file),
-            source_id: vendor::SOURCE_ID.to_string(),
+            source_id: store.source_id.clone(),
             root: "../".to_string(),
             current: file.clone(),
             track: "reference".to_string(),
@@ -482,7 +482,7 @@ fn write_course(
             .count(),
         total_units: store.course.len(),
         course_annotations: nav.iter().map(|u| u.annotations).sum(),
-        source_id: vendor::SOURCE_ID.to_string(),
+        source_id: store.source_id.clone(),
         root: "../".to_string(),
         track: "course".to_string(),
     };
@@ -536,7 +536,7 @@ fn write_course(
                 .collect(),
             next: nav.get(i + 1).map(clone_unit).into_iter().collect(),
             blocks,
-            source_id: vendor::SOURCE_ID.to_string(),
+            source_id: store.source_id.clone(),
             root: "../".to_string(),
             track: "course".to_string(),
         };

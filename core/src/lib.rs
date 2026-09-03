@@ -4,6 +4,7 @@
 //! loading live here rather than inside any one consumer. Both the coverage
 //! gate (`xtask`) and the site generator (`app`) read through this crate.
 
+pub mod remap;
 pub mod schema;
 pub mod vendor;
 
@@ -13,7 +14,6 @@ use schema::{
 };
 use std::collections::BTreeMap;
 use std::path::Path;
-use vendor::SOURCE_ID;
 
 /// One annotation resolved against the pinned source: its parsed line range and
 /// the source text it claims.
@@ -36,6 +36,12 @@ pub struct Store {
     /// Dependency order over the source files, from the course registry. Used
     /// to sequence annotations drawn from several files into one unit.
     pub reading_order: Vec<String>,
+    /// The pinned crate version, e.g. "1.0.229". Read from `vendor/pin.toml`
+    /// rather than compiled in, so a bump moves it in one place.
+    pub version: String,
+    /// `"serde_core-1.0.229"` — what every annotation file's `source` field
+    /// must match.
+    pub source_id: String,
 }
 
 impl Store {
@@ -148,7 +154,13 @@ impl Store {
 /// This does *not* enforce coverage — that is the coverage gate's job. The site
 /// generator must be able to render a partially annotated crate.
 pub fn load(repo: &Path) -> Result<Store> {
-    let mut store = Store::default();
+    let pin = vendor::load_pin(repo)?;
+    let source_id = pin.source_id();
+    let mut store = Store {
+        version: pin.version.clone(),
+        source_id: source_id.clone(),
+        ..Store::default()
+    };
 
     for rel in vendor::source_files(repo)? {
         let n = vendor::line_count(repo, &rel)?;
@@ -157,22 +169,22 @@ pub fn load(repo: &Path) -> Result<Store> {
 
     let manifest = Manifest::load(&repo.join("annotations").join("manifest.toml"))?;
     anyhow::ensure!(
-        manifest.source == SOURCE_ID,
-        "manifest source {:?} does not match pinned source {SOURCE_ID:?}",
+        manifest.source == source_id,
+        "manifest source {:?} does not match pinned source {source_id:?}",
         manifest.source
     );
     store.complete = manifest.complete;
 
     let course = CourseFile::load(&repo.join("annotations").join("course.toml"))?;
     anyhow::ensure!(
-        course.source == SOURCE_ID,
-        "course registry source {:?} does not match pinned source {SOURCE_ID:?}",
+        course.source == source_id,
+        "course registry source {:?} does not match pinned source {source_id:?}",
         course.source
     );
     store.reading_order = course.reading_order;
     store.course = course.units;
 
-    for annotation in read_annotations(repo)? {
+    for annotation in read_annotations(repo, &source_id)? {
         let range = LineRange::parse(&annotation.lines)
             .with_context(|| format!("annotation {}", annotation.id))?;
         store
@@ -190,7 +202,10 @@ pub fn load(repo: &Path) -> Result<Store> {
 }
 
 /// Reads and validates every annotation file, without resolving line ranges.
-pub fn read_annotations(repo: &Path) -> Result<Vec<Annotation>> {
+///
+/// `source_id` is passed in rather than read from the pin so that the bump
+/// tool can load a store still keyed to the outgoing version.
+pub fn read_annotations(repo: &Path, source_id: &str) -> Result<Vec<Annotation>> {
     let dir = repo.join("annotations");
     let mut entries: Vec<_> = std::fs::read_dir(&dir)
         .with_context(|| format!("reading {}", dir.display()))?
@@ -221,8 +236,8 @@ pub fn read_annotations(repo: &Path) -> Result<Vec<Annotation>> {
             parsed.schema
         );
         anyhow::ensure!(
-            parsed.source == SOURCE_ID,
-            "{}: source {:?} does not match pinned {SOURCE_ID:?}",
+            parsed.source == source_id,
+            "{}: source {:?} does not match pinned {source_id:?}",
             path.display(),
             parsed.source
         );

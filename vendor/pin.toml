@@ -1,4 +1,4 @@
-# Regenerate with `cargo xtask pin`.
+# Regenerate with `cargo xtask pin`; change the version with `cargo xtask bump`.
 # src_tree_sha256 protects annotation line ranges: if it moves, the
 # coverage gate fails until the change is an explicit migration.
 version = "1.0.229"

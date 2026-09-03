@@ -110,8 +110,8 @@ Two ways to read it:
 | `annotations/course.toml` | the course track's units, ordering, and honesty labels |
 | `examples/` | micro-example crates, CI-verified |
 | `app/` | Axum + Askama reader |
-| `xtask/` | coverage gate, build and WASM pipeline |
-| `docs/` | style guide, Rust-feature vocabulary, contributing |
+| `xtask/` | coverage gate, version-bump migration, build and WASM pipeline |
+| `docs/` | style guide, Rust-feature vocabulary, migration runbook, contributing |
 | `.githooks/` | pre-push hook running the CI gates locally |
 
 ## Working on this
@@ -132,6 +132,12 @@ is in [`docs/decisions.md`](docs/decisions.md) under D5.
 annotation, how to add an example that runs both under `cargo test` and in the
 browser, what the coverage gate checks, and the one rule about the vendored
 tree — never edit it, because every annotation is keyed to its line numbers.
+
+Moving to a newer `serde_core` is the one change that rewrites the whole store
+at once, so it is a tool rather than a chore: `cargo xtask bump <version>`
+verifies the release against the crates.io index, carries every line range
+across the diff, and reports the annotations whose code changed underneath them.
+[`docs/migration.md`](docs/migration.md) is the runbook.
 
 ## Licensing
 

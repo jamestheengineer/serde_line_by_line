@@ -277,6 +277,59 @@ a site that deploys a handful of times a day.
 
 ---
 
+## D7 — a version bump remaps boundaries, not ranges
+
+PLAN.md's risk table promised that a `serde_core` version bump would be "an
+explicit migration with a remapping tool". `cargo xtask bump` is that tool. Two
+things about it were decided rather than obvious.
+
+### Boundaries, not ranges
+
+The naive remapper moves each annotation's `start` and `end` independently
+through the diff. It is wrong in a way that only shows up at scale: an
+annotation ending at old line 40 and one starting at old line 41 are adjacent by
+construction, and mapping the two endpoints separately lets an insertion at that
+seam land inside neither, or inside both. On a file that merely shifted, the
+result is dozens of one-line gaps and overlaps — and coverage, the gate that is
+supposed to catch exactly this, fires several hundred errors that all describe
+the same bug.
+
+So the map is over *boundaries*. Each old boundary gets one new position, both
+ends are pinned (boundary 0 to 0, the last to end-of-file), and an annotation's
+range is read off two of them. Adjacency survives by construction, and a tiling
+partition stays tiling — asserted directly in `core/src/remap.rs`.
+
+Which side of a boundary an *insertion* falls on is genuinely ambiguous, and the
+first rule tried — always attach it to the following annotation — turned the
+most ordinary edit there is, a line rewritten in place, into an annotation whose
+line was deleted and whose replacement belonged to its neighbour. The deletions
+decide instead: an insertion sitting against deleted lines on one side only is
+that side's replacement text.
+
+### Textual rewriting, not serialization
+
+The obvious implementation reads each `annotations/*.toml` with the `toml`
+crate, edits the `lines` field, and writes it back. That reflows every
+multi-line `body` into an escaped single-line string, drops the column
+alignment, and loses the comments: a migration that moves three line ranges
+arrives as a diff touching all 4,000 lines of `de_impls.toml`.
+
+The whole value of a migration is that a human can read its diff and see which
+ranges moved. So the rewriter is textual — it substitutes two kinds of value and
+copies every other byte — and carries just enough of a TOML parser to know when
+`lines = ` is a key and when it is a line of somebody's prose. The real
+`1.0.229 → 1.0.228` migration touches 21 files and 21 lines.
+
+### What is deliberately not automated
+
+Nothing rewrites an explanation, drops an annotation without being asked twice,
+or decides where a new source file belongs in the teaching order. The tool's job
+ends at "these 11 annotations now cover different code"; see
+[`migration.md`](migration.md).
+
+---
+
 ## Still open
 
-Nothing. D4, the last open question, is resolved above.
+Nothing. D4, the last open question, was resolved above; D7 closes the last
+piece of tooling PLAN.md promised.

@@ -40,11 +40,14 @@ should not require a wasm target.
 
 ## The one rule about vendored source
 
-`vendor/serde_core-1.0.229/` is third-party code under MIT/Apache-2.0. **Never
-edit it.** Annotations are keyed to line numbers in that tree; a one-line edit
-silently shifts every annotation below it. The checksum gate in
-`cargo xtask coverage` exists to make this impossible to do by accident, and a
-version bump is an explicit migration, not a routine change.
+`vendor/serde_core-<version>/` is third-party code under MIT/Apache-2.0.
+**Never edit it.** Annotations are keyed to line numbers in that tree; a
+one-line edit silently shifts every annotation below it. The checksum gate in
+`cargo xtask coverage` exists to make this impossible to do by accident.
+
+A version bump is a migration, not a routine change, and it has a tool:
+`cargo xtask bump <version>`. Read [`migration.md`](migration.md) before
+running one — the ranges move mechanically, the prose does not.
 
 ## Adding an annotation
 

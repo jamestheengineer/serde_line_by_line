@@ -40,7 +40,7 @@ impl FileStats {
 }
 
 pub fn run(repo: &Path) -> Result<()> {
-    let root = vendor::vendor_root(repo);
+    let root = vendor::vendor_root(repo)?;
     let mut stats: Vec<FileStats> = Vec::new();
 
     for rel in vendor::source_files(repo)? {
