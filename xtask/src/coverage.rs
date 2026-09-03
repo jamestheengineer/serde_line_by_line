@@ -373,9 +373,15 @@ fn check_course(
     }
 
     // A prereq that lives in a later unit means the course track asks the
-    // reader to know something it has not taught yet. That is a content
-    // problem, not a build failure, so it is a warning with enough detail to
-    // fix: either move the annotation or re-order the units.
+    // reader to know something it has not taught yet, and the renderer shows
+    // them a "leans on something the course has not reached" notice where it
+    // happens. This was a warning while the count was working its way down
+    // from 33; it is a hard failure now that it is zero, for the same reason
+    // `manifest.toml` turns coverage gaps into failures once a file is
+    // complete. The fix is never to re-order the units — unit 12 depends on
+    // unit 11 eight times over, so swapping a pair trades one violation set
+    // for a larger one — it is to move the annotation whose placement is
+    // wrong, usually a framing annotation parked after the items that need it.
     let unit_of: HashMap<&str, &str> = annotations
         .iter()
         .filter_map(|a| Some((a.id.as_str(), a.course_unit.as_deref()?)))
@@ -389,7 +395,7 @@ fn check_course(
                 continue;
             };
             if there > here {
-                diag.warn(format!(
+                diag.error(format!(
                     "{}: depends on {p}, which the course track does not reach until {}",
                     a.id, course.units[*there].id
                 ));

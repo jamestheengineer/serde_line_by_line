@@ -73,6 +73,15 @@ prose; `private/content.rs` is the same model expressed as a Rust enum, which
 makes the shape concrete and also shows the two variants it turns out not to
 have.
 
+The model is read twice, once from each side, and both readings are in this
+unit. `ser/mod.rs` lists the 29 types a value can claim to be; `de/mod.rs` lists
+the same 29 read back, and differs in exactly two places — strings and byte
+arrays arrive in three flavours rather than one, which is the sentence the whole
+deserializing half is built on, and the reason unit 08 exists. Read alongside it
+is the choice between `deserialize_any` and the typed hints: a fork that decides
+which formats a hand-written impl can ever support, taken long before anything
+about lifetimes matters.
+
 Watch for the seam this creates. The data structure chooses which model type it
 looks like, the format chooses what that type costs, and neither choice is
 visible to the other side. `is_human_readable` is the one place the seam leaks,
@@ -175,7 +184,9 @@ demanding `T: Serialize` would reject arrays of unserializable types for no
 reason. `Box<T>` is bounded on `Box<T>: Serialize`-adjacent shapes rather than
 on `T` in the deserializing direction, and `Cell<T>` inherits a `Copy` bound
 from the operation it has to perform rather than from the trait it is
-implementing.
+implementing. Both of those bounds are written inside `macro_rules!` bodies, so
+their annotations sit in unit 11 with the macros that generate them — the claim
+is worth carrying there, because a bound inside a macro is still a bound.
 
 Bounds in `where` position instead of inline are usually a readability choice,
 but not always: `where` is the only place you can bound something that is not a
@@ -475,7 +486,8 @@ whole `IntoDeserializer` module.
 """
 body = """
 `de/value.rs` exists to turn values you already have into deserializers, and it
-is the best blanket-impl case study in the crate: one trait, roughly 30 impls,
+is the best blanket-impl case study in the crate: one trait — `IntoDeserializer`,
+declared back in unit 03 for its associated type — and roughly 30 impls,
 several of them written as blankets over anything satisfying a bound. Reading
 them together shows the technique and its cost — a blanket impl is a commitment
 you cannot narrow later without breaking downstream code.
@@ -522,7 +534,20 @@ a time.
 
 Hygiene is the other half. Every path inside these macros is fully qualified —
 `$crate::de::Error`, not `Error` — because the caller's scope is unknown and a
-name that resolves during testing may not resolve where the macro is used.
+name that resolves during testing may not resolve where the macro is used. The
+`__private` modules those paths land in are read here for the same reason: they
+are the namespace the expansions aim at, not plumbing you would notice
+otherwise.
+
+One macro in this unit declares a trait rather than an impl. `declare_error_trait!`
+exists because a supertrait list cannot be `#[cfg]`-ed, so both `ser::Error` and
+`de::Error` are written once and instantiated twice, with and without `std`.
+That is why `de::Error`'s two required-reading methods — `custom`, and the
+`invalid_type`/`invalid_value` pair every format's messages come out of — are
+annotated in this unit and not in unit 13: the trait arrives with the macro that
+declares it, and unit 13 revisits the design once the whole crate has leaned on
+it. `tri!`, serde's replacement for `?`, first shows up here for the same
+reason — it is a macro, and the collection impls are where you meet it.
 
 Read the definitions first and the invocations second. The reference track
 renders runs of invocations as compact rows under one definition for exactly
@@ -590,7 +615,10 @@ afterwards.
 
 `de::Error` adds `invalid_type` and `invalid_value`, which read the input back
 to you in the message. Getting those right is most of the difference between a
-usable deserializer and one that says "invalid value" and stops.
+usable deserializer and one that says "invalid value" and stops. Both traits are
+declared by `declare_error_trait!` and were read in unit 11 alongside it; this
+unit is where the design they add up to is worth judging, now that every impl in
+the crate has been seen calling into them.
 
 Then the control-flow half. serde_core does not use `?`. `lib.rs` sets
 `#![deny(clippy::question_mark_used)]`, making it a compile error crate-wide,
@@ -618,12 +646,14 @@ cautionary tales and none of the fundamentals. Both halves are written from
 scratch, and the closure half explains why the crate has no closures to show.
 """
 body = """
-The three annotations here are worth reading on their own, and they are all
-about the *edges* of iteration rather than the protocol: a `SeqDeserializer`
-that wraps its iterator in `Fuse`, a visitor that calls `next()` twice because
-both alternatives are wrong, and a two-state machine built out of
-`Option::take`. `examples/iterator_by_hand` is those three reduced to code that
-runs, with the protocol underneath them supplied.
+serde_core's three careful uses of an iterator are all about the *edges* of
+iteration rather than the protocol: a `SeqDeserializer` that wraps its iterator
+in `Fuse`, a visitor that calls `next()` twice because both alternatives are
+wrong, and a two-state machine built out of `Option::take`. The last two are
+annotated here; `SeqDeserializer` itself is read in unit 04, where its bounds
+are the lesson, and the `Fuse` in it is picked up again below.
+`examples/iterator_by_hand` is those three reduced to code that runs, with the
+protocol underneath them supplied.
 
 **The one method.** `Iterator` requires `next`, and provides about seventy
 methods on top of it. The example writes a `Fields<'a>` splitter — one `next`,

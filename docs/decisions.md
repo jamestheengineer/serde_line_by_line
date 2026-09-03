@@ -329,7 +329,67 @@ ends at "these 11 annotations now cover different code"; see
 
 ---
 
+## D8 — a course-track forward reference is a build failure
+
+Phase 7 exited on "course track walkable start to finish". It was not, and the
+coverage gate had been saying so in a channel nobody was required to read: 33
+`prereqs` edges pointed at annotations in units later than the one containing
+them, emitted as warnings. The renderer was honest about it too — `unit.html`
+prints *"Leans on X, which the course does not reach until Y"* — so the site
+carried 33 notices telling readers, in effect, that the ordering was wrong.
+
+### Re-ordering the units is not the fix
+
+The tempting reading is that a unit is in the wrong place. It is not. Counting
+every cross-unit prereq edge in the store, rather than only the violating ones,
+settles it:
+
+| candidate | edges fixed | edges broken |
+|---|---:|---:|
+| swap units 11 and 12 | 3 | 8 |
+| move unit 13 to sit after unit 10 | 5 | 4 |
+
+Unit 12 (`no_std` and cfg) leans on unit 11 (`macro_rules!`) eight times, so
+pulling 11 later to satisfy three edges costs eight. Every other swap behaves
+the same way: the unit order encodes a teaching progression that is already
+close to a topological sort, and the violations are not distributed like an
+ordering error. They are distributed like misfiling.
+
+### What was actually wrong
+
+Three shapes, and 30 of the 33 edges fall into them:
+
+1. **A framing annotation parked after the items that need it.** `de::Error`'s
+   `custom` and `invalid_type`/`invalid_value` sat in unit 13, while units 10,
+   11 and 12 contained impls that call them. The `Deserializer` doc-contract —
+   the `deserialize_any`-versus-hints fork — sat in unit 08 for one paragraph
+   about `'de`, while unit 03 declared the trait it documents and unit 05 read
+   an impl that turns on the distinction.
+2. **A macro definition later than a macro that builds on it.** Four bounds
+   lessons in unit 04 (`box_forwarded_impl!`, `parse_socket_impl!`, the array
+   table, `Cell<T>`) rest on macro definitions annotated in unit 11.
+3. **A type's definition later than an impl on it.** `SeqDeserializer` was
+   annotated in unit 14 for its `Fuse`, two units after the hand-written `Clone`
+   that only makes sense once you have seen the struct.
+
+The fix was 31 `course_unit` changes and six unit introductions rewritten to
+match — including unit 01, which now reads the data model from both directions,
+and unit 11, which now says why a trait's methods are annotated in the
+`macro_rules!` unit: the trait arrives with `declare_error_trait!`, the macro
+that declares it, because a supertrait list cannot be `#[cfg]`-ed.
+
+### Why it is an error now
+
+It was a warning while the number was 33 and coming down. Leaving it a warning
+at zero would let it climb back, and the same argument already applies elsewhere
+in this repo: `manifest.toml` turns a coverage gap from a warning into a hard
+failure the moment a file is declared complete. A unit that leans forward is a
+content bug with a reader-visible symptom, which is exactly what a gate is for.
+
+---
+
 ## Still open
 
 Nothing. D4, the last open question, was resolved above; D7 closes the last
-piece of tooling PLAN.md promised.
+piece of tooling PLAN.md promised, and D8 closes the last promise PLAN.md made
+that was not yet enforced.

@@ -305,7 +305,7 @@ than stated:
 
 | gate | what it makes impossible |
 |---|---|
-| `cargo xtask coverage` | an unclaimed line, an overlap, a dangling reference, a prereq cycle |
+| `cargo xtask coverage` | an unclaimed line, an overlap, a dangling reference, a prereq cycle, a course unit that leans on one the reader has not reached |
 | the site's own link check | a rendered link that resolves locally and 404s under the deployed path |
 | the wasm output check | an example that prints one thing in CI and another on the site |
 | the example version pin check | an example running a different `serde_core` release than the annotations describe |
@@ -363,6 +363,22 @@ measurements behind each:
    file, carries all 468 ranges across, and reports the ones whose code changed
    underneath them. This is the "remapping tool" §10 promised; the runbook is
    [`docs/migration.md`](docs/migration.md).
+
+**Resolved after phase 8:**
+
+8. **D8 — the course track's forward references are a build failure, not a
+   warning.** Phase 7 exited on "course track walkable start to finish", and
+   the coverage gate quietly disagreed: 33 prereq edges pointed at units the
+   reader had not reached, and the renderer showed a *"leans on something the
+   course does not reach until …"* notice at each one. Re-ordering units cannot
+   fix this — unit 12 depends on unit 11 eight times, so swapping a pair trades
+   one violation set for a larger one. The cause was almost always a framing
+   annotation parked after the items that need it: the `de::Error` methods sat
+   in unit 13 while units 10–12 called them, the `Deserializer` doc-contract sat
+   in unit 08 while unit 03 declared the trait, and four macro definitions sat
+   in unit 04 while their base macros were in unit 11. 31 annotations moved,
+   six unit introductions were rewritten to match, and the check is now a hard
+   failure so the count cannot climb back off zero.
 
 **Still open:** nothing.
 
