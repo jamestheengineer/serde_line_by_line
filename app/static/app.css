@@ -16,6 +16,7 @@
   --accent-soft: #f3e3dc;
   --ok: #2f7d43;
   --doc: #4a6fa5;
+  --comment: #6f7885;
   --pair: #fdf6f1;      /* paired pane, on hover */
   --pair-edge: #e8b79c;  /* accent edge marking the pair */
   --pair-line: #ffeeda;  /* the single line under the cursor */
@@ -37,6 +38,7 @@
     --accent-soft: #33231c;
     --ok: #5ec27a;
     --doc: #7ea6d8;
+    --comment: #7d8894;
     --pair: #1d2329;
     --pair-edge: #7a4a32;
     --pair-line: #33281d;
@@ -56,6 +58,7 @@
   --accent-soft: #33231c;
   --ok: #5ec27a;
   --doc: #7ea6d8;
+  --comment: #7d8894;
   --pair: #1d2329;
   --pair-edge: #7a4a32;
   --pair-line: #33281d;
@@ -338,10 +341,46 @@ main { padding: 0 0 80px; min-width: 0; }
   padding: 6px 0 2px 52px;
 }
 
-/* Doc comments are 29% of serde_core and are what most annotations discuss, so
-   they get their own colour rather than sharing one with ordinary comments.
-   Two classes beats syntect's single `.comment`, so order does not matter. */
-.s-comment.s-documentation { color: var(--doc); }
+/* ---------- code vs comment ----------
+
+   The reader's basic question on a source pane is "am I looking at code or at
+   prose?", and serde_core makes it a real question: 29% of the crate is doc
+   comment, and whole blocks are nothing else. So comments get a hue of their
+   own — doc comments blue, ordinary comments grey — and real code keeps the
+   syntax palette at full strength.
+
+   The selectors carry three classes on purpose. syntect's dark theme nests its
+   rules under `:root[data-theme="dark"]`, which lifts its bare `.s-comment`
+   above a two-class override — that is why doc comments were grey in dark mode
+   and blue in light. Matching class-for-class keeps the override winning in
+   both themes, and app.css loads after syntax.css so ties go to us.
+
+   Colour carries the distinction alone: syntect's light theme also italicised
+   comments, but 3,545 italic monospace lines is a worse read than a blue one,
+   and dark mode never had the italics anyway. */
+
+.s-comment.s-line.s-documentation,
+:root .s-comment.s-block.s-documentation {
+  color: var(--doc);
+  font-style: normal;
+}
+
+.s-comment.s-line.s-double-slash,
+:root .s-comment.s-block {
+  color: var(--comment);
+  font-style: normal;
+}
+
+/* The `//!`, `///` and `//` markers themselves. They are structure rather than
+   prose, so they take the comment's colour and step back from it — and they
+   need their own rules because the marker span is not scoped as
+   documentation, so it would otherwise keep the theme's grey. */
+.s-comment.s-documentation .s-punctuation.s-definition.s-comment,
+.s-comment.s-double-slash .s-punctuation.s-definition.s-comment,
+.s-comment.s-block .s-punctuation.s-definition.s-comment {
+  color: inherit;
+  opacity: 0.6;
+}
 
 /* ---------- pane pairing ----------
 
