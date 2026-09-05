@@ -229,22 +229,35 @@ diagnostics, and `rust-lldb` for stepping. The browser gets pre-compiled WASM.
 This is the "every line" promise. Navigation mirrors the source tree.
 
 **Course track** — a curated path through the *same* annotations, ordered by
-teaching progression rather than file layout. Sequence sketch:
+teaching progression rather than file layout. As shipped, 14 units:
 
-| unit | topic | drawn from | supplement needed |
-|---|---|---|---|
-| 01 | Why serialization needs a data model | `ser/mod.rs` head | — |
-| 02 | Traits and supertraits | `ser/mod.rs` | — |
-| 03 | Associated types | `ser/mod.rs`, `de/mod.rs` | — |
-| 04 | Generic bounds and `where` | `ser/impls.rs` | — |
-| 05 | **Ownership and borrowing** | — | **yes, fully supplementary** |
-| 06 | Lifetimes I: the basics | — | **yes** |
-| 07 | Lifetimes II: `'de` and zero-copy | `de/mod.rs` | — |
-| 08 | `PhantomData` and variance | `de/value.rs` | partial |
-| 09 | Blanket impls and coherence | `de/mod.rs` | — |
-| 10 | `macro_rules!` | `de/impls.rs` | — |
-| 11 | `no_std` and feature gates | `crate_root.rs`, `lib.rs` | — |
-| 12 | **Errors, iterators, closures** | — | **yes, fully supplementary** |
+| unit | topic | drawn from | annots | supplement |
+|---|---|---|---:|---|
+| 01 | Why serialization needs a data model | `ser/mod.rs`, `de/mod.rs` | 11 | — |
+| 02 | Traits and supertraits | `ser/mod.rs` | 4 | — |
+| 03 | Associated types | `de/value.rs`, `de/mod.rs`, `ser/mod.rs` | 33 | — |
+| 04 | Generic bounds and `where` clauses | `de/value.rs`, `ser/impls.rs` | 11 | — |
+| 05 | Default methods, and what silence means | `ser/mod.rs` | 9 | — |
+| 06 | **Ownership and borrowing** | — | 0 | **fully supplementary** |
+| 07 | **Lifetimes I: the basics** | — | 0 | **fully supplementary** |
+| 08 | Lifetimes II: `'de` and zero-copy | `de/value.rs`, `de/impls.rs`, `de/mod.rs` | 24 | — |
+| 09 | `PhantomData` and variance | `de/value.rs`, `de/impls.rs` | 9 | partial |
+| 10 | Blanket impls and coherence | `de/value.rs`, `de/mod.rs` | 12 | — |
+| 11 | `macro_rules!` | `de/impls.rs`, `ser/impls.rs`, `macros.rs` | 53 | — |
+| 12 | `no_std` and feature gates | `de/impls.rs`, `crate_root.rs` | 22 | — |
+| 13 | Errors and control flow | `de/impls.rs`, `de/value.rs` | 12 | partial |
+| 14 | Iterators and closures | `de/impls.rs`, `de/value.rs` | 2 | partial |
+
+The sketch this replaced had 12 units. Three things moved during phase 7.
+Default methods earned a unit of its own rather than a section inside generic
+bounds; the two fully supplementary lifetime and ownership units landed
+adjacent, which pushed everything after them down a number; and "errors,
+iterators, closures" split in two, because the crate leans on them very
+differently. It has a real error design to study — two `Error` traits built by
+`declare_error_trait!`, and `tri!` in place of `?` crate-wide — but only three
+careful uses of an iterator and thirteen closures in twelve thousand lines. Both
+units end up `partial`, but for opposite reasons: unit 13 supplements what the
+crate opted out of, unit 14 supplies fundamentals the crate never shows.
 
 Units marked supplementary are where serde_core genuinely does not exercise the
 feature (§2). Writing them honestly — rather than pretending serde_core teaches
