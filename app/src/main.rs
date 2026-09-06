@@ -162,6 +162,42 @@ struct IndexPage {
 }
 
 #[derive(Template)]
+#[template(path = "expand.html")]
+struct ExpandPage {
+    page_title: String,
+    description: String,
+    cases: Vec<ExpandCase>,
+    first_source: String,
+    first_expansion: String,
+    derive_version: String,
+    untouched_lines: u32,
+    source_id: String,
+    root: String,
+    track: String,
+}
+
+struct ExpandCase {
+    name: String,
+    title: String,
+    source: String,
+    body_html: String,
+    code: Vec<Line>,
+}
+
+#[derive(serde::Deserialize)]
+struct CaseFile {
+    #[serde(rename = "case")]
+    cases: Vec<CaseMeta>,
+}
+
+#[derive(serde::Deserialize)]
+struct CaseMeta {
+    name: String,
+    title: String,
+    body: String,
+}
+
+#[derive(Template)]
 #[template(path = "glossary.html")]
 struct GlossaryPage {
     page_title: String,
@@ -324,6 +360,7 @@ fn main() -> Result<()> {
 
     write_course(&out, &store, &highlighted_files, &defs)?;
     write_glossary(&out, &repo, &store, &hl)?;
+    write_expand(&out, &repo, &store, &hl)?;
 
     // Copied rather than embedded: the playground is a binary artefact, and it
     // may legitimately be absent — the site must build without a wasm
@@ -351,8 +388,8 @@ fn main() -> Result<()> {
     println!(
         "wrote {} pages to {}  ({:.1}% annotated, {} annotations)",
         // one per file, one per unit, plus the front page, the course index,
-        // the glossary and the 404.
-        store.files.len() + store.course.len() + 4,
+        // the glossary, the expansion page and the 404.
+        store.files.len() + store.course.len() + 5,
         out.display(),
         store.percent(),
         index_count(&store),
@@ -516,6 +553,79 @@ fn rel(base: &Path, path: &Path) -> String {
 /// Nothing here is a second copy of the content — a unit page is the unit's own
 /// framing followed by its annotations, pulled out of up to a dozen files and
 /// re-ordered by the prereq graph.
+/// The expansion page: `serde_derive` run over a handful of inputs.
+///
+/// The expansions are computed here, at build time, by the same `expand` crate
+/// the tests assert and the wasm module wraps. So the page is right with
+/// JavaScript off, and the module only makes it editable.
+fn write_expand(out: &Path, repo: &Path, store: &Store, hl: &Highlighter) -> Result<()> {
+    let path = repo.join("expand").join("cases.toml");
+    let text =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    let meta: CaseFile =
+        toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+
+    let mut cases = Vec::new();
+    for m in &meta.cases {
+        let source = expand::case(&m.name).with_context(|| {
+            format!(
+                "cases.toml describes {:?}, which is not in expand/cases/",
+                m.name
+            )
+        })?;
+        cases.push(ExpandCase {
+            name: m.name.clone(),
+            title: m.title.clone(),
+            source: source.trim_end().to_string(),
+            body_html: markdown::render(&m.body),
+            code: hl
+                .file(source)
+                .with_context(|| format!("highlighting case {}", m.name))?,
+        });
+    }
+    // The other direction: a case with no prose would render as an unlabelled
+    // block, which is the kind of thing nobody notices for six months.
+    for (name, _) in expand::CASES {
+        anyhow::ensure!(
+            meta.cases.iter().any(|m| m.name == *name),
+            "expand/cases/{name}.rs has no entry in expand/cases.toml"
+        );
+    }
+
+    let first = cases.first().context("expand/cases.toml is empty")?;
+    let first_source = first.source.clone();
+    let first_expansion = expand::expand(&first_source, expand::Derive::Serialize);
+
+    let derive_source = vendor::load_pin(repo)?.get("serde_derive")?.clone();
+    let derive_root = derive_source.dir(repo);
+    let untouched_lines = vendor::source_files_in(&derive_root)?
+        .iter()
+        .filter(|f| *f != "src/lib.rs")
+        .filter_map(|f| vendor::line_count_in(&derive_root, f).ok())
+        .sum();
+
+    let page = ExpandPage {
+        page_title: "What #[derive(Serialize)] turns into — serde line by line".to_string(),
+        description: format!(
+            "serde_derive {} expanding {} worked examples, live in the browser.",
+            derive_source.version,
+            cases.len()
+        ),
+        cases,
+        first_source,
+        first_expansion,
+        derive_version: derive_source.version.clone(),
+        untouched_lines,
+        source_id: store.source_id.clone(),
+        root: "../".to_string(),
+        track: "expand".to_string(),
+    };
+    let dir = out.join("expand");
+    std::fs::create_dir_all(&dir)?;
+    write(&dir.join("index.html"), &page.render()?)?;
+    Ok(())
+}
+
 /// The borrowed-vocabulary page (D9).
 ///
 /// One page rather than one per entry: a glossary is read by jumping into it,

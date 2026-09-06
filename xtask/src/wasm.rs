@@ -1,4 +1,9 @@
-//! Builds the example playground for the browser (decision D1).
+//! Builds the browser modules (decision D1).
+//!
+//! Two of them. `playground` holds the micro-examples and is loaded wherever
+//! one appears; `expander` holds `serde_derive` itself and is several times
+//! the size, so it is fetched only on pages that show an expansion. Merging
+//! them would make every example page pay for an expander it never calls.
 //!
 //! Output lands in `app/static/wasm/`, which the site generator copies. The
 //! two steps are kept separate on purpose: `cargo site` must work without a
@@ -11,8 +16,11 @@ use std::process::Command;
 
 const TARGET: &str = "wasm32-unknown-unknown";
 
+/// The wasm packages, in build order.
+const MODULES: &[&str] = &["playground", "expander"];
+
 pub fn run(repo: &Path) -> Result<()> {
-    let expected = pinned_version(repo)?;
+    let expected = pinned_version(repo, "playground")?;
     let actual = cli_version()?;
 
     // D1's accepted cost. A mismatch produces confusing failures deep in the
@@ -26,14 +34,37 @@ pub fn run(repo: &Path) -> Result<()> {
              cargo install wasm-bindgen-cli --version {expected}"
         );
     }
+    // Both modules load into the same page context, so a version skew between
+    // them is a glue mismatch at runtime rather than a build failure.
+    for module in MODULES {
+        let pinned = pinned_version(repo, module)?;
+        if pinned != expected {
+            bail!(
+                "{module}/Cargo.toml pins wasm-bindgen {pinned}, \
+                 but playground/Cargo.toml pins {expected}"
+            );
+        }
+    }
 
-    println!("building playground for {TARGET} (wasm-bindgen {expected})");
+    let out = repo.join("app").join("static").join("wasm");
+    std::fs::create_dir_all(&out)?;
+    for module in MODULES {
+        build_module(repo, module, &out, &expected)?;
+    }
+    println!("wrote {}", out.display());
+
+    verify(repo)?;
+    Ok(())
+}
+
+fn build_module(repo: &Path, package: &str, out: &Path, bindgen: &str) -> Result<()> {
+    println!("building {package} for {TARGET} (wasm-bindgen {bindgen})");
     let status = Command::new(env!("CARGO"))
         .current_dir(repo)
         .args([
             "build",
             "--package",
-            "playground",
+            package,
             "--release",
             "--target",
             TARGET,
@@ -41,41 +72,35 @@ pub fn run(repo: &Path) -> Result<()> {
         .status()
         .context("running cargo build")?;
     if !status.success() {
-        bail!("cargo build failed for the playground");
+        bail!("cargo build failed for {package}");
     }
 
     let wasm = repo
         .join("target")
         .join(TARGET)
         .join("release")
-        .join("playground.wasm");
+        .join(format!("{package}.wasm"));
     if !wasm.is_file() {
         bail!("expected {} to exist after the build", wasm.display());
     }
 
-    let out = repo.join("app").join("static").join("wasm");
-    std::fs::create_dir_all(&out)?;
-
     let status = Command::new("wasm-bindgen")
         .args(["--target", "web", "--no-typescript", "--out-dir"])
-        .arg(&out)
+        .arg(out)
         .arg(&wasm)
         .status()
         .context("running wasm-bindgen (is wasm-bindgen-cli on PATH?)")?;
     if !status.success() {
-        bail!("wasm-bindgen failed");
+        bail!("wasm-bindgen failed for {package}");
     }
 
-    for name in ["playground_bg.wasm", "playground.js"] {
-        let path = out.join(name);
+    for name in [format!("{package}_bg.wasm"), format!("{package}.js")] {
+        let path = out.join(&name);
         let size = std::fs::metadata(&path)
             .with_context(|| format!("{} was not produced", path.display()))?
             .len();
         println!("  {name:<22} {:>7.1} KB", size as f64 / 1024.0);
     }
-    println!("wrote {}", out.display());
-
-    verify(repo)?;
     Ok(())
 }
 
@@ -96,8 +121,24 @@ fn verify(repo: &Path) -> Result<()> {
         return Ok(());
     }
 
-    let harness = repo.join("target").join("wasm-smoke.mjs");
-    let source = include_str!("wasm_smoke.mjs").replace("__REPO__", &repo.display().to_string());
+    run_smoke(
+        repo,
+        "wasm-smoke.mjs",
+        include_str!("wasm_smoke.mjs"),
+        "the playground's output does not match the committed transcripts",
+    )?;
+    run_smoke(
+        repo,
+        "expand-smoke.mjs",
+        include_str!("expand_smoke.mjs"),
+        "the browser's expansions do not match expand/expected.txt",
+    )?;
+    Ok(())
+}
+
+fn run_smoke(repo: &Path, name: &str, script: &str, failure: &str) -> Result<()> {
+    let harness = repo.join("target").join(name);
+    let source = script.replace("__REPO__", &repo.display().to_string());
     std::fs::write(&harness, source).with_context(|| format!("writing {}", harness.display()))?;
 
     let out = Command::new("node")
@@ -107,15 +148,15 @@ fn verify(repo: &Path) -> Result<()> {
     print!("{}", String::from_utf8_lossy(&out.stdout));
     if !out.status.success() {
         eprint!("{}", String::from_utf8_lossy(&out.stderr));
-        bail!("the playground's output does not match the committed transcripts");
+        bail!("{failure}");
     }
     Ok(())
 }
 
-/// Reads the exact pin from `playground/Cargo.toml` so there is one source of
+/// Reads the exact pin from a module's `Cargo.toml` so there is one source of
 /// truth for the version.
-fn pinned_version(repo: &Path) -> Result<String> {
-    let path = repo.join("playground").join("Cargo.toml");
+fn pinned_version(repo: &Path, package: &str) -> Result<String> {
+    let path = repo.join(package).join("Cargo.toml");
     let text =
         std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
     for line in text.lines() {
@@ -128,7 +169,7 @@ fn pinned_version(repo: &Path) -> Result<String> {
                 }
             }
             bail!(
-                "playground/Cargo.toml must pin wasm-bindgen exactly, e.g. \
+                "{package}/Cargo.toml must pin wasm-bindgen exactly, e.g. \
                  wasm-bindgen = \"=0.2.127\"; found: {line}"
             );
         }

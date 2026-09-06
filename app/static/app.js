@@ -89,6 +89,67 @@
     });
   });
 
+  // ---- expansion playground -----------------------------------------------
+  // A second module, loaded on its own (D1's shape, not its size): this one
+  // carries serde_derive and is three times the playground. A reader who never
+  // opens this page never fetches it.
+  var expanderPending = null;
+  function expander() {
+    if (!expanderPending) {
+      expanderPending = import(root + "static/wasm/expander.js").then(function (mod) {
+        return mod.default().then(function () { return mod; });
+      });
+    }
+    return expanderPending;
+  }
+
+  var expandForm = document.querySelector("[data-expander]");
+  if (expandForm) {
+    var input = expandForm.querySelector(".expand-input");
+    var output = expandForm.querySelector(".expand-output");
+    var status = expandForm.querySelector(".expand-status");
+    var cases = expandForm.querySelectorAll("[data-case]");
+
+    function runExpansion() {
+      var derive = expandForm.querySelector("[name=derive]:checked").value;
+      status.textContent = "expanding…";
+      expander().then(
+        function (mod) {
+          try {
+            output.textContent = mod.expand(input.value, derive);
+            status.textContent = "serde_derive " + mod.derive_version();
+          } catch (err) {
+            output.textContent = "";
+            status.textContent = "error: " + err;
+          }
+        },
+        function () {
+          status.textContent = "";
+          output.textContent =
+            "The expander module is not in this build.\n\n" +
+            "Build it with:  cargo xtask wasm && cargo site";
+        }
+      );
+    }
+
+    expandForm.querySelector(".expand-run").addEventListener("click", runExpansion);
+    expandForm.querySelectorAll("[name=derive]").forEach(function (radio) {
+      radio.addEventListener("change", runExpansion);
+    });
+    cases.forEach(function (button) {
+      button.addEventListener("click", function () {
+        input.value = button.dataset.source;
+        cases.forEach(function (b) { b.classList.remove("on"); });
+        button.classList.add("on");
+        runExpansion();
+      });
+    });
+    // Ctrl/Cmd+Enter from the editor, the shortcut anyone will try first.
+    input.addEventListener("keydown", function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { runExpansion(); }
+    });
+  }
+
   // Deep link: ?run=<example> runs it on load. Also how the build verifies the
   // module actually executes in a browser.
   var wanted = new URLSearchParams(location.search).get("run");

@@ -1,0 +1,88 @@
+# Prose for the expansion page. The inputs themselves are the .rs files in
+# cases/; this is what each one is here to show.
+#
+# Kept beside the cases rather than in the renderer for the same reason
+# annotations are data: the explanation is the expensive artefact, and it must
+# not be welded to the first UI that displays it.
+
+schema = 1
+
+[[case]]
+name = "struct_rename"
+title = "A struct, renamed"
+body = """
+The ordinary case, and the one worth reading first. `rename_all = "camelCase"`
+does not survive into the generated code as a rule — it is applied at expansion
+time, so the emitted `serialize_field` call carries the literal `"xCoord"`.
+There is no runtime renaming machinery because there is no runtime rename.
+
+`skip_serializing_if` becomes an `if` around one field, and the field count
+passed to `serialize_struct` becomes an arithmetic expression evaluated per
+value: `false as usize + 1 + if Option::is_none(&self.label) { 0 } else { 1 }`.
+That expression is how a self-describing format learns the map length before
+the fields are written.
+"""
+
+[[case]]
+name = "enum_internally_tagged"
+title = "An internally tagged enum"
+body = """
+`#[serde(tag = "type")]` is the representation with the most generated code,
+because deserializing it requires reading the tag before knowing which variant's
+fields to expect — and the tag can arrive anywhere in the map.
+
+Watch what comes out on the `Deserialize` side: serde buffers the content into
+its private `Content` type, finds the tag, then replays the buffer into the
+right variant. Untagged and adjacent representations share that machinery. This
+is the concrete reason `serde_core` carries a `private::de` module that no user
+ever names.
+"""
+
+[[case]]
+name = "enum_untagged"
+title = "An untagged enum"
+body = """
+No tag at all: deserialization tries each variant in order and takes the first
+that succeeds. The generated code buffers the input once and re-runs it against
+each variant, which is why untagged enums cost more than they look and why
+their error messages are famously unhelpful — by the time the last variant
+fails, the specific reasons of all the earlier ones are gone.
+"""
+
+[[case]]
+name = "tuple_struct"
+title = "A newtype"
+body = """
+The smallest interesting expansion. A one-field tuple struct serializes as its
+inner value — `serialize_newtype_struct`, not a one-element sequence — so
+`Meters(1.5)` is JSON `1.5` and not `[1.5]`. The `Deserialize` half is a
+visitor with `visit_newtype_struct`, which is the hook that makes the
+transparency work in both directions.
+"""
+
+[[case]]
+name = "generic_borrowed"
+title = "Generics, and a borrowed field"
+body = """
+Two things at once. The type parameter `T` picks up a `T: Serialize` bound that
+was not written by hand — the bound inference in `bound.rs` walks the field
+types and adds what each one needs.
+
+The `#[serde(borrow)]` field is the more interesting half: `&'a str` forces a
+relationship between the struct's `'a` and the `'de` the impl introduces, and
+the generated header says `impl<'de: 'a, 'a, T> Deserialize<'de>`. That
+constraint is the whole zero-copy story in one line of generated code.
+"""
+
+[[case]]
+name = "attribute_error"
+title = "A mistake, in serde's own words"
+body = """
+`rename_all = "nope"` is not a rename rule, and the expansion is a
+`compile_error!` carrying serde's own diagnostic — the full list of rules it
+would have accepted.
+
+This is worth a case of its own because it is the same code path: a derive that
+fails still returns tokens, and the tokens are an error the compiler will
+report at the right span. Nothing on this page invents an error message.
+"""

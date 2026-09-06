@@ -1,6 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["core", "xtask", "app", "playground", "examples/*"]
+members = ["core", "xtask", "app", "playground", "expand", "expander", "examples/*"]
+# Vendored third-party crates are read, quoted and copied — never built in
+# place. `expand` compiles a patched copy out of OUT_DIR instead.
+exclude = ["vendor"]
 
 [workspace.package]
 edition = "2021"
@@ -16,4 +19,18 @@ strip = true
 codegen-units = 1
 
 [profile.release.package.playground]
+opt-level = "z"
+
+# The expander carries serde_derive, syn and prettyplease; it is the one
+# module where size actually bites.
+[profile.release.package.expander]
+opt-level = "z"
+
+[profile.release.package.expand]
+opt-level = "z"
+
+[profile.release.package.syn]
+opt-level = "z"
+
+[profile.release.package.prettyplease]
 opt-level = "z"

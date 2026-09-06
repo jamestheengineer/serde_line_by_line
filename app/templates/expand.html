@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block sidebar %}
+    <div class="nav-head">cases</div>
+    <ul class="unitnav">
+    {% for c in cases %}
+      <li><a href="#case-{{ c.name }}"><code>{{ c.name }}</code></a></li>
+    {% endfor %}
+    </ul>
+{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>What <code>#[derive(Serialize)]</code> turns into</h1>
+  <p class="lede">
+    The expansion below is produced by <code>serde_derive</code>
+    {{ derive_version }} itself, running in your browser &mdash; not by a
+    description of it. Edit the input and it re-expands.
+  </p>
+</section>
+
+<section class="expander" data-expander>
+  <div class="expand-cases">
+    {% for c in cases %}<button type="button" class="case{% if loop.first %} on{% endif %}" data-case="{{ c.name }}" data-source="{{ c.source }}">{{ c.name }}</button>{% endfor %}
+  </div>
+
+  <div class="expand-panes">
+    <div class="expand-pane">
+      <div class="codehead">
+        <span class="range">input</span>
+        <span class="derive-toggle">
+          <label><input type="radio" name="derive" value="Serialize" checked> Serialize</label>
+          <label><input type="radio" name="derive" value="Deserialize"> Deserialize</label>
+        </span>
+      </div>
+      <textarea class="expand-input" spellcheck="false" rows="10">{{ first_source }}</textarea>
+      <div class="expand-actions">
+        <button type="button" class="run expand-run">Expand</button>
+        <span class="expand-status"></span>
+      </div>
+    </div>
+
+    <div class="expand-pane">
+      <div class="codehead"><span class="range">expansion</span></div>
+      <pre class="expand-output"><code>{{ first_expansion }}</code></pre>
+    </div>
+  </div>
+</section>
+
+<section class="tracknote">
+  <h2>How this works</h2>
+  <p>
+    <code>serde_derive</code> is a proc-macro crate: its modules are private
+    behind two entry points, and a proc-macro crate cannot be linked as an
+    ordinary dependency. The build copies the
+    <a href="{{ root }}glossary/index.html">pinned</a> tree and applies five
+    edits to one file &mdash; taking <code>proc_macro2</code>&rsquo;s token
+    stream instead of the compiler&rsquo;s &mdash; leaving the other
+    {{ untouched_lines }} lines exactly as published. Nothing here reimplements
+    anything.
+  </p>
+  <p>
+    Every case on this page is expanded natively in CI and diffed against a
+    committed transcript, then expanded again out of this wasm module and
+    diffed against the same file. What you are reading is asserted to be what
+    the compiler would really generate.
+  </p>
+</section>
+
+{% for c in cases %}
+<section class="block" id="case-{{ c.name }}">
+  <div class="code">
+    <div class="codehead"><span class="range">{{ c.name }}</span></div>
+    <div class="src">
+    {%- for line in c.code %}
+      <div class="ln" data-n="{{ line.number }}"><span class="num">{{ line.number }}</span><code>{{ line.html|safe }}</code></div>
+    {%- endfor %}
+    </div>
+  </div>
+  <div class="note">
+    <div class="kind">case</div>
+    <h2>{{ c.title }}</h2>
+    <div class="prose">{{ c.body_html|safe }}</div>
+  </div>
+</section>
+{% endfor %}
+{% endblock %}

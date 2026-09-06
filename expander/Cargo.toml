@@ -1,0 +1,14 @@
+[package]
+name = "expander"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Pinned exactly, for the same reason the playground is (D1).
+wasm-bindgen = "=0.2.127"
+expand = { path = "../expand" }

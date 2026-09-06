@@ -16,7 +16,8 @@ git config core.hooksPath .githooks     # runs the CI gates before each push
 cargo xtask coverage                    # should report 100.0% and exit 0
 ```
 
-For the browser playground you also need:
+For the browser modules — the example playground and the derive expander —
+you also need:
 
 ```
 rustup target add wasm32-unknown-unknown
@@ -30,7 +31,7 @@ a confusing failure deep in the generated glue (decision D1).
 Then:
 
 ```
-cargo xtask wasm    # build the playground
+cargo xtask wasm    # build the playground and the expander
 cargo site          # generate site/
 cargo dev           # serve it at http://127.0.0.1:8080
 ```
@@ -180,3 +181,39 @@ decisions are only recorded in it. Measurements go in the message or in
 
 Contributions are dual-licensed **MIT OR Apache-2.0**, matching the project and
 the vendored crate. By contributing you agree your work is licensed that way.
+
+## Expansion cases
+
+`expand/` runs the pinned `serde_derive` over the inputs in `expand/cases/`,
+natively and in the browser, and both are diffed against `expand/expected.txt`.
+
+To add a case:
+
+1. Write the input as `expand/cases/<name>.rs` — just the item, with its
+   `#[serde(...)]` attributes. No `#[derive]` line: the harness applies both.
+2. Add a matching `[[case]]` to `expand/cases.toml` saying what it demonstrates.
+   The site build fails if a case has no prose or prose has no case.
+3. Regenerate the transcript and **read the diff**:
+
+   ```
+   cargo test -p expand -- --ignored
+   ```
+
+4. `cargo xtask wasm` re-checks that the browser produces the same bytes.
+
+The transcript is generated output, but it is reviewed like written content.
+It is the only record of what `serde_derive` actually emits, and a diff nobody
+reads is a diff that can hide a change in what the site teaches.
+
+### Why `expand/build.rs` patches a copy
+
+`serde_derive` is a proc-macro crate; its modules are private and a proc-macro
+crate cannot be linked as an ordinary dependency. The build copies the pinned
+tree into `OUT_DIR` and applies five named edits to `lib.rs`, plus a mechanical
+`crate::` → `crate::serde_derive_lib::` rewrite. `vendor/` itself is never
+touched — it is checksum-pinned, and that pin is what makes every line range in
+this repo trustworthy.
+
+Each edit must apply. If upstream changes shape, the build fails naming the
+edit that no longer matches, rather than quietly producing an expander that is
+subtly not `serde_derive`.

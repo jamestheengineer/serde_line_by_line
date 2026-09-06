@@ -1,0 +1,33 @@
+[package]
+name = "expand"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+# serde_derive's own rustdoc carries doctests that `use serde_derive;` — they
+# are upstream's tests of a crate that is not a dependency here, and compiling
+# them proves nothing about this one. `expand` has no doctests of its own; its
+# behaviour is asserted by tests/expected.rs against a committed transcript.
+doctest = false
+
+[dependencies]
+# No `proc-macro` feature anywhere: that is what puts proc-macro2 into its
+# fallback implementation and lets serde_derive's own code run off the
+# compiler thread — natively here, and in the browser through `expander`.
+proc-macro2 = { version = "1.0.107", default-features = false }
+quote = { version = "1.0.47", default-features = false }
+syn = { version = "3.0.3", default-features = false, features = [
+    "clone-impls",
+    "derive",
+    "parsing",
+    "printing",
+    "full",
+] }
+# 0.2 is built on syn 2 and will not compile against serde_derive's syn 3.
+prettyplease = "0.3"
+
+[build-dependencies]
+toml = "0.9"
+serde = { version = "1", features = ["derive"] }

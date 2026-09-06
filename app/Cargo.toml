@@ -23,6 +23,11 @@ anyhow = "1"
 askama = "0.16"
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 slbl_core = { path = "../core" }
+# The expansion page renders a real expansion at build time, so the page is
+# correct with JavaScript off and the wasm module only makes it interactive.
+expand = { path = "../expand" }
+toml = "0.9"
+serde = { version = "1", features = ["derive"] }
 # default-features = false avoids the `onig` C dependency; fancy-regex is pure Rust.
 syntect = { version = "5", default-features = false, features = ["default-fancy"] }
 

@@ -238,9 +238,14 @@ checked against the transcripts" gate extends to expansions unchanged.
 
 | build | raw | gzipped |
 |---|---:|---:|
-| expander, with `prettyplease` | 1,231,302 | **360,520** |
-| expander, raw `to_string()` | 1,043,425 | 313,192 |
+| the spike's expander | 1,231,302 | 360,520 |
+| **as shipped in N3** | 779,798 | **253,693** |
 | the existing playground, for scale | 237,754 | 82,363 |
+
+The shipped module is 30% smaller than the spike measured, because the spike
+built `syn` and `prettyplease` at the workspace default while only the leaf
+crate carried `opt-level = "z"`. Per-package profile entries for the
+dependencies is the whole difference.
 
 Both at the playground's own profile: `opt-level = "z"`, LTO, stripped, one
 codegen unit. Roughly 4.4× the current payload, and 47 KB of that buys

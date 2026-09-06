@@ -1,0 +1,1 @@
+struct Meters(f64);
