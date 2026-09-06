@@ -388,8 +388,133 @@ content bug with a reader-visible symptom, which is exactly what a gate is for.
 
 ---
 
+## D9 — borrowed vocabulary is quoted and pinned, not annotated
+
+**Decision:** a `serde_derive` track, if it is built, treats `syn`, `quote` and
+`proc-macro2` as **glossary sources**: vendored and checksum-pinned like any
+other source, quoted verbatim in glossary entries, and never claimed by the
+coverage gate. The promise on the front page becomes *every line of every
+annotated crate is claimed; borrowed vocabulary is quoted, pinned, and named as
+borrowed.*
+
+Recorded now because it is the prerequisite for the track (see
+[`derive-track-scope.md`](derive-track-scope.md) §3), it is cheap to settle, and
+it invalidates the rest of that estimate if it goes the other way.
+
+### Measured
+
+Measured 2026-09-06 against `serde_derive-1.0.229` and `syn-3.0.3`.
+
+The wall looked like 60,484 lines — `syn` 51,753, `proc-macro2` 6,029, `quote`
+2,702, five times this whole project. It is not that, and the difference is the
+whole decision.
+
+| | |
+|---|---:|
+| distinct root items `serde_derive` borrows | **53** |
+| uses of them across the crate | 414 |
+| share of those uses in the top 12 items | **67%** |
+| lines of `syn` that *define* the borrowed items | **520** |
+| average definition length | 12 lines |
+
+The top of the distribution is `Type` (69 uses), `Data` (30), `Generics` (22),
+`ExprPath` (22), `WherePredicate` (21), `Path` (19), `Fields` (18),
+`GenericParam` (17), `GenericArgument` (17), `Lifetime` (16), `Result` (15),
+`Ident` (12). The tail is 34 items used once each.
+
+### The finding that decided it
+
+`serde_derive` never calls `syn`'s parser. It is handed an already-parsed
+`DeriveInput` and walks it. So the 51,233 lines of `syn` that are *not* those
+definitions are not lines a `serde_derive` reader is missing — they are lines
+that ran before the story starts.
+
+And the definitions themselves are the good part. `DeriveInput` is five fields
+with syn's own doc comment attached:
+
+```rust
+ast_struct! {
+    /// Data structure sent to a `proc_macro_derive` macro.
+    pub struct DeriveInput {
+        pub attrs: Vec<Attribute>,
+        pub vis: Visibility,
+        pub ident: Ident,
+        pub generics: Generics,
+        pub data: Data,
+    }
+}
+```
+
+A reader who has seen that has what they need to follow `ser.rs`. A reader who
+has read prose *about* it does not. This project's whole thesis is that you show
+people the real code; a glossary that paraphrases would be the one place it
+stopped doing that.
+
+The largest borrowed definition is `Expr` at 167 lines, and `serde_derive`
+touches it three times, only for `Expr::Group` and `Expr::Lit`. Two of the 53
+have no definition to quote: `syn::Ident` is `pub use proc_macro2::Ident`
+(`ident.rs:4`) and `ParseStream` is `pub type ParseStream<'a> = &'a
+ParseBuffer<'a>` (`parse.rs:225`). Both are one-liners, and both are worth
+quoting precisely because the one line is the surprising part.
+
+### Mechanism
+
+A glossary source is pinned exactly like a coverage source and differs in one
+respect: it is absent from `manifest.toml`, so no file of it is ever declared
+complete and the exhaustiveness check never runs against it.
+
+- `glossary/syn.toml` — one entry per borrowed item, each carrying the `file`
+  and `lines` of its definition in the pinned tree, plus a short body. Same
+  shape as an annotation, different table.
+- Annotations gain `glossary = ["syn::Data", "syn::Fields"]`, cited the way
+  `macro_def` is cited today: a rendering input, so the reader can open the
+  definition inline instead of leaving for docs.rs.
+
+Two gates, both extensions of ones that exist:
+
+| gate | what it makes impossible |
+|---|---|
+| glossary references resolve | an annotation citing vocabulary that has no entry |
+| the pin covers glossary sources too | a quoted definition that has drifted from the version it claims to quote |
+
+The second is the one that matters. A quoted definition is a line range in a
+pinned tree, which is exactly what `src_tree_sha256` already protects and what
+`cargo xtask bump` already remaps. The glossary costs no new machinery — it
+reuses D7's.
+
+### Rejected
+
+**Annotate `syn` too.** 51,753 lines, 4.3× the current project, to explain a
+parser that `serde_derive` never invokes. This is the scope creep §10 of
+PLAN.md warns about, wearing a plausible face.
+
+**Annotate only the 520 lines, as a normal coverage source.** Tempting — the
+definitions would be claimed, and the numbers are small. It breaks the
+invariant that makes the coverage table mean anything: a file claimed at 4%
+with no intention of ever reaching 100% turns `manifest.toml`'s completeness
+distinction into a judgment call. The gate's value is that it is not one.
+
+**Link to docs.rs and say nothing.** Free, and it sends the reader out of the
+site at the exact moment they are confused, to a page that shows the type
+without the reason it is shaped that way. It also silently makes the front-page
+promise false rather than narrower.
+
+### What it does not cover
+
+The glossary explains the vocabulary `serde_derive` reads. It does not explain
+how `syn` parses tokens into it, and does not pretend to — the entry for
+`ParseNestedMeta` can say what a nested-meta callback receives without
+explaining the parser that calls it. A reader who wants that is a `syn`
+line-by-line reader, and that is a different project.
+
+---
+
 ## Still open
 
-Nothing. D4, the last open question, was resolved above; D7 closes the last
-piece of tooling PLAN.md promised, and D8 closes the last promise PLAN.md made
-that was not yet enforced.
+Nothing in the shipped project. D4, the last open question there, was resolved
+above; D7 closes the last piece of tooling PLAN.md promised, and D8 closes the
+last promise PLAN.md made that was not yet enforced.
+
+D9 settles the prerequisite for a `serde_derive` track. **Whether to build that
+track at all is undecided** — the estimate and the two shapes it could take are
+in [`derive-track-scope.md`](derive-track-scope.md).

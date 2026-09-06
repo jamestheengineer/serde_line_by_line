@@ -53,33 +53,27 @@ Density bounds, for honesty: 450 if the four enum representations compress
 against each other better than expected, 580 if `internals/attr.rs` refuses to
 take large spans.
 
-## 3. The syn wall — the decision that matters
+## 3. The syn wall — settled (D9)
 
 `serde_derive` reads `syn`, `quote` and `proc-macro2` as vocabulary. Line one of
-the real work is a `syn::DeriveInput`.
+the real work is a `syn::DeriveInput`, and the three crates together are 60,484
+lines — five times this entire project. Annotating them is out of the question,
+and the front-page promise cannot quietly come to mean "every line except the
+sixty thousand the reader actually has to understand."
 
-| crate | lines |
-|---|---:|
-| `syn` 3.0.3 | 51,753 |
-| `proc-macro2` 1.0.107 | 6,029 |
-| `quote` 1.0.47 | 2,702 |
-| **total** | **60,484** |
+Measured, the wall is not a wall. `serde_derive` borrows **53 distinct items**,
+uses them 414 times with 67% of that traffic in the top twelve, and the `syn`
+source that *defines* all 53 is **520 lines** — averaging 12 each, less than
+`de/value.rs`. The rest of `syn` is the parser, which `serde_derive` never
+calls: it is handed a parsed `DeriveInput` and walks it.
 
-That is **five times this entire project**. It cannot be annotated, and the
-promise on the front page — every line claimed — cannot quietly be allowed to
-mean "every line except the sixty thousand the reader actually has to
-understand."
+So the borrowed types get quoted verbatim from a pinned tree, in a glossary that
+the coverage gate never claims and the pin still protects. The promise becomes
+*every line of every annotated crate is claimed; borrowed vocabulary is quoted,
+pinned, and named as borrowed.* Full reasoning, the rejected alternatives and
+the mechanism are in [`decisions.md`](decisions.md) under **D9**.
 
-So the honest form of the promise changes: *every line of `serde_derive` is
-claimed; `syn` is vocabulary.* That needs a mechanism, not just a sentence — a
-glossary of the borrowed types (`DeriveInput`, `Data`, `Field`, `Generics`,
-`Meta`, `Span`, `TokenStream`, `ToTokens`) that an annotation cites the way it
-currently cites a `macro-def`, with the coverage gate failing on a citation
-that does not resolve. Schema addition, renderer support, one more gate.
-
-**If this is not settled first, the track is not finishable.** It is the same
-shape as D8: a promise that reads fine in prose and is a build failure in
-practice.
+This was the item that could have made the track unfinishable. It does not.
 
 ## 4. Engineering deltas
 
@@ -106,8 +100,8 @@ already is.
 The payoff was a spike, and the spike ran — see §9. It works: the expander
 runs in the browser, live.
 
-**A glossary.** §3. One session, and the editorial decision costs more than
-the code.
+**A glossary.** §3 and D9. One session; the mechanism reuses D7's pin and
+remap, so the code is the small half.
 
 **A cross-crate course DAG.** D8's forward-reference check orders units within
 one crate. Two crates means a reader reaching `#[derive(Serialize)]` codegen
@@ -158,10 +152,15 @@ second 100% it has to defend on every bump.
 
 ## 8. Recommendation
 
-Settle §3 before anything else; it is cheap to decide and it invalidates the
-rest if it goes the other way. The wasm spike is done (§9) and it came back
-better than hoped, so the remaining choice is between §6 and §7 — and the
-site's first readers should weigh in, since it has not had any yet.
+Both prerequisites are now discharged. §3 is settled as D9 — the vocabulary
+problem is 53 quoted definitions, not 60,484 unannotatable lines — and the wasm
+spike (§9) came back better than hoped, with `serde_derive` expanding live in
+the browser and its output byte-identical to the host's.
+
+Nothing structural is left to find out. The remaining choice is between §6 and
+§7 — the full reference track or the narrative one — and that is a question
+about appetite, not feasibility. The site's first readers should weigh in,
+since it has not had any yet.
 
 ## 9. The wasm spike, run
 
