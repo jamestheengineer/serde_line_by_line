@@ -400,3 +400,60 @@ measurements behind each:
 > exercised — `1.0.229 → 1.0.228` and back returns the tree byte for byte, and
 > `1.0.220 → 1.0.229` is verified as a dry run because it is the hard shape: a
 > file added, a file removed, eleven annotations whose contents moved.
+
+---
+
+## 11. The narrative derive track
+
+Phases 0–8 answered "what is every line of `serde_core` for?". They left the
+question most readers actually arrive with unanswered: **what does
+`#[derive(Serialize)]` turn into?**
+
+The measurement for answering it exhaustively is in
+[`docs/derive-track-scope.md`](docs/derive-track-scope.md): ~500 annotations
+and 15–19 sessions, a project the size of this one. **We are not doing that.**
+We are doing §7 of that document — the narrative track.
+
+### What it is
+
+Eight to ten units that follow **one struct and one enum** from a
+`syn::DeriveInput` to an emitted `impl`, citing `serde_derive` line ranges as
+the path goes through them, and ending with the expansion running live in the
+browser.
+
+It is a **narrative source**, and that word is load-bearing. `serde_derive` is
+not declared complete in `manifest.toml`, no file of it is claimed exhaustively,
+and the coverage gate never asks it to be. The front page keeps its promise by
+naming what each source is:
+
+> Every line of every *annotated* crate is claimed. `serde_derive` is walked,
+> not claimed. Borrowed vocabulary is quoted, pinned, and named as borrowed
+> ([D9](docs/decisions.md)).
+
+Coverage over a narrative source would be a lie told in a number, and the
+number is the thing this project has been careful about from phase 0.
+
+### Why this shape and not the big one
+
+The 500-annotation version commits the project to a second 100% it defends on
+every bump, for a crate whose interesting content is not evenly distributed: 43
+attribute parsers in `internals/attr.rs` are worth one unit between them, and
+`de/identifier.rs` is worth three on its own. A narrative picks the path
+through, and the path is what a reader wants. If it lands well, phases 2–6 of
+the big version are still available, and the machinery below is exactly what
+they would need.
+
+### Roadmap
+
+| phase | scope | exit criteria |
+|---|---|---|
+| **N1 — Multi-source foundation** | `pin.toml` grows from one pin to a list of sources with roles; vendor `serde_derive` 1.0.229 and `syn` 3.0.3; generalize `vendor.rs`, `coverage.rs`, `bump.rs` | `cargo xtask coverage` still reports `serde_core` at 12,037/12,037 and now verifies three pinned trees; a role a gate does not know is a build failure |
+| **N2 — Glossary** | [D9](docs/decisions.md): `glossary/*.toml`, the `glossary` field on annotations, renderer support | 53 entries, every citation resolves, a quoted definition that drifts from its pinned tree fails the gate |
+| **N3 — Expansion harness** | The [§9](docs/derive-track-scope.md) patch applied by `xtask`, native golden transcripts, a second wasm module fetched only on derive pages | An expansion on the site is byte-identical to the host's, and the harness crate's version is asserted equal to the pin |
+| **N4 — The narrative** | 8–10 units, one struct and one enum, end to end | Walkable start to finish; every cited range resolves; no forward references (the D8 check, across two sources) |
+| **N5 — Ship** | Track navigation, the restated promise, `README` | The three tracks are each reachable and each honest about what they claim |
+
+N1 is deliberately first and deliberately boring: every later phase needs a
+source that is not `serde_core`, and the pin is the thing that has protected
+every line range in this repo since phase 0. It does not get loosened to make
+room.
