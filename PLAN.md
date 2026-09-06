@@ -342,7 +342,7 @@ compression proven in phase 2.
 | **Line-range brittleness.** Any edit to vendored source invalidates annotations. | Checksum gate in CI. Version bumps are explicit migrations, performed by `cargo xtask bump` ([D7](docs/decisions.md), [migration.md](docs/migration.md)). |
 | **Macro-heavy files become tedious.** `de/impls.rs` could read as 106 near-identical entries. | `kind = "macro-use"` renders compactly and links to the def. Prove this in phase 2 before committing to phase 5. |
 | **Course track over-claims.** Pretending serde_core teaches all of Rust would be dishonest. | §2 is committed to the repo. Supplementary units are labeled as such in the UI. |
-| **Scope creep to `serde` / `serde_derive`.** | Out of scope for v1. Revisit only after the reference track hits 100%. |
+| **Scope creep to `serde` / `serde_derive`.** | Out of scope for v1. The reference track has since hit 100%, so the revisit was done and measured: [`docs/derive-track-scope.md`](docs/derive-track-scope.md). It is a comparable project, not an increment, and it is gated on one decision — `syn` is 51,753 lines the reader needs and nobody can annotate. |
 
 **Resolved in phase 0** — see [`docs/decisions.md`](docs/decisions.md) for the
 measurements behind each:
