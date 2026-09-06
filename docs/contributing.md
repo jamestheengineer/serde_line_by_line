@@ -5,6 +5,7 @@ schema, the coverage gate, the site generator — exists to keep roughly 1,200
 explanations honest and to stop them from welding themselves to the first UI we
 tried. Read [`annotation-style.md`](annotation-style.md) before writing content
 and [`decisions.md`](decisions.md) before changing how any of it is built.
+Borrowed vocabulary has its own conventions: [`glossary-style.md`](glossary-style.md).
 
 ## Setup
 

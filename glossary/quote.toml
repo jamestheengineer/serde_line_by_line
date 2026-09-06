@@ -1,0 +1,68 @@
+# The quote vocabulary: the output side of serde_derive.
+#
+# Glossary source (D9) — quoted from the pinned tree, never claimed.
+
+schema = 1
+source = "quote-1.0.47"
+
+[[entry]]
+id    = "quote::ToTokens"
+file  = "src/to_tokens.rs"
+lines = "12-76"
+title = "What can be interpolated"
+see_also = ["quote::quote", "proc_macro2::TokenStream"]
+body = """
+The trait behind `#var`. Implemented for syn's nodes and for primitives, and
+implemented by hand in `serde_derive` for its own fragment types — which is
+how a half-built expression can be dropped into a template as if it were a
+syntax node.
+"""
+
+[[entry]]
+id    = "quote::TokenStreamExt"
+file  = "src/ext.rs"
+lines = "5-57"
+title = "Appending to a stream"
+see_also = ["proc_macro2::TokenStream", "quote::ToTokens"]
+body = """
+Extension methods for pushing tokens onto a `TokenStream`. `serde_derive`
+imports it anonymously — `as _` — because it wants the methods and never names
+the trait.
+"""
+
+[[entry]]
+id    = "quote::format_ident"
+file  = "src/format.rs"
+lines = "110-125"
+title = "Building a name"
+see_also = ["proc_macro2::Ident", "proc_macro2::Span"]
+body = """
+`format!` for identifiers, with span control. Where names like `__field0` and
+`__Visitor` come from, and the double underscore is a deliberate
+collision-avoidance convention rather than a syn requirement.
+"""
+
+[[entry]]
+id    = "quote::quote"
+file  = "src/lib.rs"
+lines = "483-488"
+title = "The code generator"
+see_also = ["quote::ToTokens", "quote::quote_spanned", "proc_macro2::TokenStream"]
+body = """
+Builds a `TokenStream` from a template, interpolating `#var` and repeating
+`#(...)*`. 265 uses in `serde_derive`: this macro is the output side of the
+whole crate. Note it is defined twice — once under `#[cfg(doc)]` for readable
+rustdoc, once for real.
+"""
+
+[[entry]]
+id    = "quote::quote_spanned"
+file  = "src/lib.rs"
+lines = "622-628"
+title = "`quote!` with a chosen span"
+see_also = ["quote::quote", "proc_macro2::Span"]
+body = """
+The same template language, with every generated token given a span you pick.
+`serde_derive` uses it so that a type error in generated code points at the
+user's field rather than at the middle of the derive.
+"""

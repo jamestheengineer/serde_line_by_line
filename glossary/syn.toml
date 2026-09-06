@@ -1,0 +1,620 @@
+# The syn vocabulary serde_derive reads.
+#
+# These are quotations, not annotations: syn is a glossary source (D9), pinned
+# and never claimed. Each entry names the lines that define the item, and the
+# renderer reads the text from the pinned tree rather than from this file — a
+# copy here would be a second thing to keep true.
+
+schema = 1
+source = "syn-3.0.3"
+
+[[entry]]
+id    = "syn::AngleBracketedGenericArguments"
+file  = "src/path.rs"
+lines = "197-207"
+title = "What is inside the angle brackets"
+see_also = ["syn::GenericArgument", "syn::PathArguments"]
+body = """
+The arguments plus the optional turbofish `::`. `serde_derive` reads these to
+find the `T` in `Option<T>` and to rewrite lifetimes when a field is borrowed.
+"""
+
+[[entry]]
+id    = "syn::Attribute"
+file  = "src/attr.rs"
+lines = "176-182"
+title = "One `#[...]`"
+see_also = ["syn::Meta", "syn::meta::ParseNestedMeta"]
+body = """
+The brackets, the style (outer or inner), and the meta inside. Everything
+`#[serde(...)]` does starts as one of these, and `internals/attr.rs` is 1,818
+lines of turning them into settings.
+"""
+
+[[entry]]
+id    = "syn::Data"
+file  = "src/derive.rs"
+lines = "22-36"
+title = "Struct, enum, or union"
+see_also = ["syn::DataStruct", "syn::DataUnion", "syn::Fields", "syn::Variant"]
+body = """
+Which of the three shapes the input is. `serde_derive` matches all three:
+structs and enums get code, unions get an error, and that error is the first
+thing either expansion emits. Every branch downstream of this point is really
+a branch on which arm matched here.
+"""
+
+[[entry]]
+id    = "syn::DataStruct"
+file  = "src/derive.rs"
+lines = "38-46"
+title = "A struct's body"
+see_also = ["syn::Fields", "syn::Data"]
+body = """
+Fields plus the tokens around them. The `fields` is where the work is; the
+`semi_token` distinguishes `struct A(u8);` from `struct A { x: u8 }` and
+matters to nothing in `serde_derive` except that it exists.
+"""
+
+[[entry]]
+id    = "syn::DataUnion"
+file  = "src/derive.rs"
+lines = "58-65"
+title = "The shape that gets refused"
+see_also = ["syn::Data", "syn::Error"]
+body = """
+Unions carry named fields like a struct, and `serde_derive` still refuses
+them: there is no way to know which variant is live, so no correct `Serialize`
+exists. The refusal is a one-line `Error` early in both expansions.
+"""
+
+[[entry]]
+id    = "syn::DeriveInput"
+file  = "src/derive.rs"
+lines = "10-20"
+title = "What a derive macro is handed"
+see_also = ["syn::Data", "syn::Generics", "syn::Attribute"]
+body = """
+The whole input to `#[derive(Serialize)]`, already parsed. Five fields: the
+outer attributes, the visibility, the name, the generics, and the body.
+`serde_derive` never parses Rust — it is given this and walks it, which is why
+syn's parser is vocabulary here and not subject matter.
+"""
+
+[[entry]]
+id    = "syn::Error"
+file  = "src/error.rs"
+lines = "107-109"
+title = "A parse error that becomes a compiler error"
+see_also = ["syn::Result", "syn::spanned::Spanned"]
+body = """
+A span and a message. Its `to_compile_error` turns into a `compile_error!`
+invocation, which is how every `#[serde(...)]` mistake reaches the user as a
+normal rustc diagnostic pointing at the right token.
+"""
+
+[[entry]]
+id    = "syn::Expr"
+file  = "src/expr.rs"
+lines = "138-306"
+title = "Every expression form there is"
+see_also = ["syn::ExprLit", "syn::ExprPath", "syn::Member"]
+body = """
+The largest syntax tree enum in syn, and `serde_derive` touches exactly two
+variants: `Lit`, to read `#[serde(default = "...")]` values, and `Group`, to
+see through invisible delimiters. The other forty are here because `syn`
+models the whole language and this project models `serde_derive`.
+"""
+
+[[entry]]
+id    = "syn::ExprLit"
+file  = "src/expr.rs"
+lines = "571-578"
+title = "A literal in expression position"
+see_also = ["syn::Lit", "syn::Expr"]
+body = """
+Attributes plus a `Lit`. Reached when an attribute value has been parsed as an
+expression and `serde_derive` needs the string back out of it.
+"""
+
+[[entry]]
+id    = "syn::ExprPath"
+file  = "src/expr.rs"
+lines = "636-647"
+title = "A path used as a value"
+see_also = ["syn::Path", "syn::QSelf"]
+body = """
+`Option::is_none` as an expression rather than a type.
+`#[serde(skip_serializing_if = "Option::is_none")]` becomes one of these,
+which is why the attribute takes a string and not a bare path: it is parsed on
+demand, in the right position.
+"""
+
+[[entry]]
+id    = "syn::Field"
+file  = "src/data.rs"
+lines = "184-206"
+title = "One field, with everything attached"
+see_also = ["syn::Attribute", "syn::Member", "syn::Type"]
+body = """
+Attributes, visibility, optional name, and type. The optional `ident` is the
+whole tuple-vs-named distinction in one `Option`. `serde_derive` reads the
+attributes for the `#[serde(...)]` options and the type for the bounds it will
+need to infer.
+"""
+
+[[entry]]
+id    = "syn::Fields"
+file  = "src/data.rs"
+lines = "29-49"
+title = "Named, unnamed, or none"
+see_also = ["syn::Field", "syn::Member"]
+body = """
+The three shapes a struct or variant body can take: `{ a: u8 }`, `(u8)`, or
+nothing. This enum is why `serde_derive` can treat a tuple struct and a named
+struct with one code path — the difference collapses into how each field is
+addressed.
+"""
+
+[[entry]]
+id    = "syn::GenericArgument"
+file  = "src/path.rs"
+lines = "172-195"
+title = "One argument in a path"
+see_also = ["syn::Type", "syn::Lifetime"]
+body = """
+A lifetime, a type, a const, or an associated-type binding. `serde_derive`
+cares about the first two: replacing a lifetime here is how it retargets a
+borrowed field's type onto `'de`.
+"""
+
+[[entry]]
+id    = "syn::GenericParam"
+file  = "src/generics.rs"
+lines = "37-57"
+title = "Lifetime, type, or const"
+see_also = ["syn::TypeParam", "syn::LifetimeParam", "syn::Generics"]
+body = """
+One parameter of the three kinds. `serde_derive` walks these to decide what to
+bound: type parameters get `Serialize`, lifetimes get carried into the impl,
+const parameters get passed through untouched.
+"""
+
+[[entry]]
+id    = "syn::Generics"
+file  = "src/generics.rs"
+lines = "18-35"
+title = "The parameters and their bounds"
+see_also = ["syn::GenericParam", "syn::WhereClause", "syn::TypeGenerics"]
+body = """
+Everything between the angle brackets plus the `where` clause. `serde_derive`
+clones this, adds a `T: Serialize` bound per type parameter, and splits it
+three ways for the impl header. The bound inference in `bound.rs` is most of
+what this type is used for.
+"""
+
+[[entry]]
+id    = "syn::Ident"
+file  = "src/ident.rs"
+lines = "8-12"
+title = "syn's ident is proc-macro2's"
+see_also = ["proc_macro2::Ident", "proc_macro2::Span"]
+body = """
+One line: `pub use proc_macro2::Ident`. Worth an entry precisely because the
+one line is the surprising part — there is no separate syn ident type, and an
+`Ident` built in `serde_derive` is the same object the lexer produced.
+"""
+
+[[entry]]
+id    = "syn::Index"
+file  = "src/expr.rs"
+lines = "1129-1136"
+title = "A tuple field's position"
+see_also = ["syn::Member"]
+body = """
+A `u32` with a span. It exists because `self.0` written as a plain integer
+literal would come out as `self.0usize` or trip the float lexer on `self.0.1`;
+`Index` prints the bare index correctly.
+"""
+
+[[entry]]
+id    = "syn::Lifetime"
+file  = "src/lifetime.rs"
+lines = "10-23"
+title = "A lifetime, apostrophe and all"
+see_also = ["syn::LifetimeParam", "proc_macro2::Ident"]
+body = """
+An apostrophe token plus an ident, kept separate because `'` and `de` are two
+tokens to the lexer. The generated `impl<'de> Deserialize<'de>` builds one of
+these by hand.
+"""
+
+[[entry]]
+id    = "syn::LifetimeParam"
+file  = "src/generics.rs"
+lines = "59-68"
+title = "A declared lifetime"
+see_also = ["syn::Lifetime", "syn::GenericParam"]
+body = """
+The `'a` in `struct S<'a>`, with any bounds on it. `Deserialize` generation
+cares intensely: every borrowed field forces a relationship between the
+struct's lifetimes and the `'de` the impl introduces.
+"""
+
+[[entry]]
+id    = "syn::Lit"
+file  = "src/lit.rs"
+lines = "23-62"
+title = "The literal kinds"
+see_also = ["syn::LitStr", "syn::ExprLit"]
+body = """
+String, byte string, byte, char, int, float, bool, or verbatim. `serde_derive`
+reads `Str` almost exclusively — every `#[serde(...)]` value that names a
+function or a type arrives as a string literal.
+"""
+
+[[entry]]
+id    = "syn::LitStr"
+file  = "src/lit.rs"
+lines = "64-69"
+title = "A string literal that can be re-parsed"
+see_also = ["syn::Lit", "syn::parse::ParseStream"]
+body = """
+Carries the token and its span. Its `parse` method is the trick behind serde's
+attribute design: `"Option::is_none"` is stored as a string and parsed into a
+path later, with errors that still point inside the original literal.
+"""
+
+[[entry]]
+id    = "syn::Macro"
+file  = "src/mac.rs"
+lines = "14-23"
+title = "A macro invocation in the tree"
+see_also = ["syn::Path"]
+body = """
+Path, bang, delimiter, and the tokens inside. `serde_derive` sees these when a
+field type or a default expression is itself a macro call, and passes them
+through rather than trying to expand them.
+"""
+
+[[entry]]
+id    = "syn::Member"
+file  = "src/expr.rs"
+lines = "1051-1061"
+title = "How a field is addressed"
+see_also = ["syn::Index", "syn::Field"]
+body = """
+`Named(Ident)` or `Unnamed(Index)` — `self.x` or `self.0`. Generated code
+interpolates this directly, so one `quote!` template serves both struct shapes
+instead of two.
+"""
+
+[[entry]]
+id    = "syn::Meta"
+file  = "src/attr.rs"
+lines = "476-485"
+title = "The three shapes inside an attribute"
+see_also = ["syn::Attribute", "syn::meta::ParseNestedMeta"]
+body = """
+`#[path]`, `#[path = value]`, or `#[path(tokens)]`. `#[serde(...)]` is always
+the list form, so `serde_derive` reaches for `Meta::List` and then parses the
+inside itself.
+"""
+
+[[entry]]
+id    = "syn::Path"
+file  = "src/path.rs"
+lines = "12-19"
+title = "A `::`-separated path"
+see_also = ["syn::PathSegment", "syn::PathArguments"]
+body = """
+Segments, plus whether it starts with `::`. Everything from `T` to
+`std::collections::HashMap<K, V>` is one of these. `serde_derive` matches the
+last segment's ident constantly — that is how `Option<T>` is recognised as
+`Option`.
+"""
+
+[[entry]]
+id    = "syn::PathArguments"
+file  = "src/path.rs"
+lines = "129-147"
+title = "Angle-bracketed, parenthesised, or none"
+see_also = ["syn::AngleBracketedGenericArguments", "syn::GenericArgument"]
+body = """
+`<T>`, `(A) -> B`, or nothing. `serde_derive` looks for the angle-bracketed
+form to reach inside a container type; the parenthesised form is `Fn` sugar
+and is left alone.
+"""
+
+[[entry]]
+id    = "syn::PathSegment"
+file  = "src/path.rs"
+lines = "108-115"
+title = "An ident and its arguments"
+see_also = ["syn::PathArguments", "syn::Path"]
+body = """
+One `Vec` or one `HashMap<K, V>`. The arguments hang off the segment, not the
+path, which is why the type parameters of `Option<T>` are found on its final
+segment.
+"""
+
+[[entry]]
+id    = "syn::PredicateType"
+file  = "src/generics.rs"
+lines = "533-546"
+title = "A type-bounded predicate"
+see_also = ["syn::WherePredicate", "syn::TypeParamBound"]
+body = """
+`T: Serialize` in `where` position, with an optional higher-ranked `for<'a>`
+in front. This is the shape `serde_derive` builds when inferring bounds,
+because a `where` predicate can bound an arbitrary type expression and a
+parameter list can only bound a parameter.
+"""
+
+[[entry]]
+id    = "syn::QSelf"
+file  = "src/path.rs"
+lines = "274-281"
+title = "The `<T as Trait>` prefix"
+see_also = ["syn::TypePath", "syn::Type"]
+body = """
+The qualified-self of a path, carrying the type, the position of the `as`, and
+the segment index it applies to. `serde_derive` preserves it when rewriting a
+field type rather than trying to interpret it.
+"""
+
+[[entry]]
+id    = "syn::Result"
+file  = "src/error.rs"
+lines = "20-21"
+title = "syn's Result alias"
+see_also = ["syn::Error"]
+body = """
+`Result<T, syn::Error>`. Two lines, and the return type of nearly every
+function in `serde_derive` that can fail.
+"""
+
+[[entry]]
+id    = "syn::ReturnType"
+file  = "src/ty.rs"
+lines = "284-295"
+title = "`-> T`, or nothing"
+see_also = ["syn::Type"]
+body = """
+Default or explicit. Appears inside function-pointer types, which
+`serde_derive` walks when deciding whether a type borrows.
+"""
+
+[[entry]]
+id    = "syn::Token"
+file  = "src/token.rs"
+lines = "879-984"
+title = "The token table"
+see_also = ["proc_macro2::Spacing"]
+body = """
+A macro mapping every piece of Rust punctuation and every keyword to its type:
+`Token![,]` is `token::Comma`. `serde_derive` writes these in struct literals
+when constructing syntax nodes that need a comma or a colon it never saw in
+the input.
+"""
+
+[[entry]]
+id    = "syn::TraitBound"
+file  = "src/generics.rs"
+lines = "418-433"
+title = "A trait in bound position"
+see_also = ["syn::TraitBoundModifiers", "syn::Path"]
+body = """
+A path, optional `for<'a>` binder, and modifiers. `serde_derive` constructs
+these to say `T: _serde::Serialize`, which is why the path is fully qualified
+through the `_serde` alias rather than written as `Serialize`.
+"""
+
+[[entry]]
+id    = "syn::TraitBoundModifiers"
+file  = "src/generics.rs"
+lines = "446-448"
+title = "`?Sized` and friends"
+see_also = ["syn::TraitBound"]
+body = """
+Empty in this build, and `#[non_exhaustive]` so it can grow. It exists to
+carry `?` and the maybe-async modifiers; serde constructs bounds without any,
+so its role here is a field that must be filled in with a default.
+"""
+
+[[entry]]
+id    = "syn::Type"
+file  = "src/ty.rs"
+lines = "15-80"
+title = "The 20 shapes a type can take"
+see_also = ["syn::TypePath", "syn::Path", "syn::GenericArgument"]
+body = """
+The syntax tree enum with a variant per type form: paths, references, slices,
+tuples, `impl Trait`, and the rest. `serde_derive` matches on a handful —
+`Path`, `Reference`, `Slice`, `Array`, `Group` — to decide whether a field's
+type is borrowed, and treats the remainder as opaque.
+"""
+
+[[entry]]
+id    = "syn::TypeGenerics"
+file  = "src/generics.rs"
+lines = "279-284"
+title = "The type-position half of a split"
+see_also = ["syn::Generics"]
+body = """
+A borrowed view of `Generics` that prints as `<T>` rather than `<T:
+Serialize>`. Comes from `split_for_impl`, whose three-way split is exactly the
+three places an impl needs its parameters written differently.
+"""
+
+[[entry]]
+id    = "syn::TypeParam"
+file  = "src/generics.rs"
+lines = "70-80"
+title = "A type parameter and its inline bounds"
+see_also = ["syn::TypeParamBound", "syn::GenericParam"]
+body = """
+The `T: Clone` in `struct S<T: Clone>`. `serde_derive` reads the existing
+bounds and adds its own rather than replacing them, because `#[serde(bound =
+"...")]` overriding is a deliberate opt-in and silently dropping a user's
+bound would not be.
+"""
+
+[[entry]]
+id    = "syn::TypeParamBound"
+file  = "src/generics.rs"
+lines = "398-416"
+title = "What a bound can be"
+see_also = ["syn::TraitBound", "syn::Lifetime"]
+body = """
+A trait, a lifetime, or a precise-capture. `serde_derive` reads these to
+decide whether it must add its own, and preserves the ones already there.
+"""
+
+[[entry]]
+id    = "syn::TypePath"
+file  = "src/ty.rs"
+lines = "168-177"
+title = "A named type"
+see_also = ["syn::Path", "syn::QSelf", "syn::Type"]
+body = """
+A path with an optional qualified self, `<T as Trait>::Assoc`. The
+overwhelmingly common case of a field type, and where `serde_derive` looks to
+find out whether a field is an `Option`, a `Cow`, or a `PhantomData`.
+"""
+
+[[entry]]
+id    = "syn::Variant"
+file  = "src/data.rs"
+lines = "12-27"
+title = "One arm of an enum"
+see_also = ["syn::Fields", "syn::Attribute", "syn::Data"]
+body = """
+A name, its fields, its attributes, and an optional discriminant.
+`serde_derive` reads the attributes for `rename`, `skip`, `other` and the
+rest, then generates one match arm per variant — four different ways,
+depending on the enum's tagging.
+"""
+
+[[entry]]
+id    = "syn::WhereClause"
+file  = "src/generics.rs"
+lines = "493-501"
+title = "The where, if there is one"
+see_also = ["syn::WherePredicate", "syn::Generics"]
+body = """
+The `where` token and its predicates. `serde_derive` reaches for this as an
+`Option` and creates one when a struct had none, which is the common case:
+most types being derived have no `where` clause until serde adds it.
+"""
+
+[[entry]]
+id    = "syn::WherePredicate"
+file  = "src/generics.rs"
+lines = "503-520"
+title = "One clause in a where"
+see_also = ["syn::PredicateType", "syn::TypeParamBound"]
+body = """
+A lifetime predicate, a type predicate, or something syn does not model.
+`serde_derive` synthesises the type kind: for every field type that needs it,
+a `FieldTy: Serialize` predicate is appended here rather than to the parameter
+list.
+"""
+
+[[entry]]
+id    = "syn::meta::ParseNestedMeta"
+file  = "src/meta.rs"
+lines = "163-167"
+title = "A callback's view of one nested option"
+see_also = ["syn::Attribute", "syn::parse::ParseStream"]
+body = """
+The path of one option and a stream positioned just after it.
+`parse_nested_meta` calls a closure with this once per comma-separated item,
+which is how 43 different `#[serde(...)]` options are dispatched from a single
+loop.
+"""
+
+[[entry]]
+id    = "syn::parse2"
+file  = "src/lib.rs"
+lines = "1041-1045"
+title = "Tokens in, syntax tree out"
+see_also = ["syn::parse_macro_input", "proc_macro2::TokenStream"]
+body = """
+Parses a `proc_macro2::TokenStream` into any `Parse` type. This is the entry
+point a harness uses when it calls `serde_derive` outside a real macro
+expansion — `parse_macro_input!` needs the compiler's own `TokenStream` and is
+unavailable off the compiler thread.
+"""
+
+[[entry]]
+id    = "syn::parse::ParseStream"
+file  = "src/parse.rs"
+lines = "219-225"
+title = "A cursor over tokens"
+see_also = ["syn::meta::ParseNestedMeta", "syn::LitStr"]
+body = """
+`&ParseBuffer<'a>` — a type alias, and the alias is the point: parsers take a
+shared reference and advance a cursor inside it, so a parse function can be
+called speculatively without the caller losing its place.
+"""
+
+[[entry]]
+id    = "syn::parse_macro_input"
+file  = "src/parse_macro_input.rs"
+lines = "106-128"
+title = "The macro entry-point wrapper"
+see_also = ["syn::parse2", "syn::Error"]
+body = """
+Parses the compiler's `TokenStream` and, on failure, returns a
+`compile_error!` from the enclosing function. Convenient inside a real proc
+macro and unusable outside one, because it names `proc_macro::TokenStream`.
+"""
+
+[[entry]]
+id    = "syn::parse_quote"
+file  = "src/parse_quote.rs"
+lines = "79-85"
+title = "Quote, then parse"
+see_also = ["quote::quote", "syn::parse2"]
+body = """
+Builds tokens like `quote!` and immediately parses them into a syntax tree
+node. `serde_derive` uses it to construct bounds and types it would otherwise
+have to assemble field by field.
+"""
+
+[[entry]]
+id    = "syn::punctuated::Pair"
+file  = "src/punctuated.rs"
+lines = "963-972"
+title = "An item and its comma"
+see_also = ["syn::punctuated::Punctuated"]
+body = """
+One element plus the punctuation after it, or the last element with none. What
+you get when taking a `Punctuated` apart and putting it back together.
+"""
+
+[[entry]]
+id    = "syn::punctuated::Punctuated"
+file  = "src/punctuated.rs"
+lines = "44-53"
+title = "A separated sequence"
+see_also = ["syn::punctuated::Pair"]
+body = """
+Items interleaved with punctuation, with the trailing separator tracked
+separately. Fields, generic parameters and where-predicates are all one of
+these, and the trailing-comma bookkeeping is why appending a bound is a method
+call rather than string concatenation.
+"""
+
+[[entry]]
+id    = "syn::spanned::Spanned"
+file  = "src/spanned.rs"
+lines = "85-102"
+title = "Where did this node come from"
+see_also = ["proc_macro2::Span", "syn::Error"]
+body = """
+A blanket trait giving any syntax tree node the span of its full extent. Error
+messages use it: pointing at the whole offending type is more useful than
+pointing at its first token.
+"""

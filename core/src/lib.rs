@@ -247,6 +247,99 @@ pub fn read_annotations(repo: &Path, source_id: &str) -> Result<Vec<Annotation>>
     Ok(out)
 }
 
+/// One glossary entry, resolved against the pinned tree it quotes.
+#[derive(Debug, Clone)]
+pub struct GlossaryItem {
+    pub entry: schema::GlossaryEntry,
+    pub range: LineRange,
+    /// `"syn-3.0.3"` — which pinned tree the quotation comes from.
+    pub source_id: String,
+    /// The quoted lines, read from the pinned tree at load time. Never stored
+    /// in the toml: a copy in the store is a copy that can rot, and the whole
+    /// point of pinning the tree is that it does not have to be trusted twice.
+    pub quoted: String,
+}
+
+/// Reads every `glossary/*.toml`, checking each entry against the glossary
+/// source it names.
+///
+/// Two things are enforced here rather than in the gate, because a glossary
+/// the site cannot render is not a warning: the named source must be pinned
+/// with `role = "glossary"`, and every line range must exist in that tree.
+pub fn read_glossary(repo: &Path) -> Result<Vec<GlossaryItem>> {
+    let dir = repo.join("glossary");
+    if !dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    let pin = vendor::load_pin(repo)?;
+    let mut entries: Vec<_> = std::fs::read_dir(&dir)
+        .with_context(|| format!("reading {}", dir.display()))?
+        .collect::<std::io::Result<Vec<_>>>()?;
+    entries.sort_by_key(|e| e.path());
+
+    let mut out = Vec::new();
+    for dir_entry in entries {
+        let path = dir_entry.path();
+        if path.extension().is_none_or(|e| e != "toml") {
+            continue;
+        }
+        let parsed = schema::GlossaryFile::load(&path)?;
+
+        let source = pin
+            .sources
+            .iter()
+            .find(|s| s.source_id() == parsed.source)
+            .with_context(|| {
+                format!(
+                    "{}: source {:?} is not pinned in vendor/pin.toml",
+                    path.display(),
+                    parsed.source
+                )
+            })?;
+        anyhow::ensure!(
+            source.role == vendor::Role::Glossary,
+            "{}: {} is pinned as {:?}, but a glossary may only quote a glossary source \
+             (D9) — annotate it instead, or change its role",
+            path.display(),
+            parsed.source,
+            source.role
+        );
+
+        let root = source.dir(repo);
+        for entry in parsed.entries {
+            let range = LineRange::parse(&entry.lines)
+                .with_context(|| format!("{}: entry {}", path.display(), entry.id))?;
+            let file = root.join(&entry.file);
+            let text = std::fs::read_to_string(&file).with_context(|| {
+                format!(
+                    "{}: entry {} quotes {}, which is not in the pinned tree",
+                    path.display(),
+                    entry.id,
+                    entry.file
+                )
+            })?;
+            let lines: Vec<&str> = text.lines().collect();
+            anyhow::ensure!(
+                range.end as usize <= lines.len(),
+                "{}: entry {} quotes {}:{} but the file has {} lines",
+                path.display(),
+                entry.id,
+                entry.file,
+                entry.lines,
+                lines.len()
+            );
+            let quoted = lines[range.start as usize - 1..range.end as usize].join("\n");
+            out.push(GlossaryItem {
+                entry,
+                range,
+                source_id: parsed.source.clone(),
+                quoted,
+            });
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,6 +359,7 @@ mod tests {
                 rust_features: Vec::new(),
                 examples: Vec::new(),
                 prereqs: prereqs.iter().map(|s| s.to_string()).collect(),
+                glossary: Vec::new(),
                 macro_def: None,
                 body: "body".to_string(),
             },

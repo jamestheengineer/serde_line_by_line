@@ -42,6 +42,11 @@
         {% endfor %}
       </div>
       {% endif %}
+      {% if !b.glossary.is_empty() %}
+      <p class="cites">reads
+        {% for g in b.glossary %}<a href="{{ root }}glossary/index.html#{{ g.anchor }}"><code>{{ g.id }}</code></a>{% if !loop.last %}, {% endif %}{% endfor %}
+      </p>
+      {% endif %}
       {% if !b.features.is_empty() %}
       <ul class="tags">{% for f in b.features %}<li>{{ f }}</li>{% endfor %}</ul>
       {% endif %}

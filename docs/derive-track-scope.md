@@ -61,10 +61,10 @@ lines — five times this entire project. Annotating them is out of the question
 and the front-page promise cannot quietly come to mean "every line except the
 sixty thousand the reader actually has to understand."
 
-Measured, the wall is not a wall. `serde_derive` borrows **53 distinct items**,
-uses them 414 times with 67% of that traffic in the top twelve, and the `syn`
-source that *defines* all 53 is **520 lines** — averaging 12 each, less than
-`de/value.rs`. The rest of `syn` is the parser, which `serde_derive` never
+Measured, the wall is not a wall. `serde_derive` borrows **62 distinct items**
+(53 by the first count, which missed items used unqualified after a `use` — see
+the correction under D9), and the source that *defines* all of them is **1,123
+lines** across the three crates. Less than `de/value.rs`. The rest of `syn` is the parser, which `serde_derive` never
 calls: it is handed a parsed `DeriveInput` and walks it.
 
 So the borrowed types get quoted verbatim from a pinned tree, in a glossary that

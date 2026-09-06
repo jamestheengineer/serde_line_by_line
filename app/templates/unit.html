@@ -84,6 +84,11 @@
     {% if !cb.block.body_html.is_empty() %}
     <div class="prose">{{ cb.block.body_html|safe }}</div>
     {% endif %}
+    {% if !cb.block.glossary.is_empty() %}
+    <p class="cites">reads
+      {% for g in cb.block.glossary %}<a href="{{ root }}glossary/index.html#{{ g.anchor }}"><code>{{ g.id }}</code></a>{% if !loop.last %}, {% endif %}{% endfor %}
+    </p>
+    {% endif %}
     {% if !cb.block.features.is_empty() %}
     <ul class="tags">{% for f in cb.block.features %}<li>{{ f }}</li>{% endfor %}</ul>
     {% endif %}

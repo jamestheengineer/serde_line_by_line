@@ -40,6 +40,11 @@ pub struct Annotation {
     pub examples: Vec<String>,
     #[serde(default)]
     pub prereqs: Vec<String>,
+    /// Glossary ids this annotation leans on: `["syn::DeriveInput"]`. Borrowed
+    /// vocabulary is cited, never claimed (D9), so this is how a reader gets
+    /// the definition of a type the annotated crate does not define.
+    #[serde(default)]
+    pub glossary: Vec<String>,
     /// For `kind = "macro-use"` only: the id of the `macro-def` annotation this
     /// span expands. Required there and rejected elsewhere — the renderer
     /// collapses runs of uses sharing one def, so this is a rendering input,
@@ -126,6 +131,58 @@ impl Manifest {
     }
 }
 
+/// A glossary file (`glossary/<crate>.toml`).
+///
+/// Glossary entries quote a **glossary source** — a crate `serde_derive` reads
+/// as vocabulary and this project never annotates (D9). An entry is an
+/// annotation's shape minus everything that implies a claim: no `kind`, no
+/// `tracks`, no `course_unit`, and no participation in coverage. What it keeps
+/// is the part that matters, a line range in a pinned tree, so a quotation
+/// cannot drift away from the crate it says it came from.
+#[derive(Debug, Deserialize)]
+pub struct GlossaryFile {
+    pub schema: u32,
+    /// Must match a pinned source with `role = "glossary"`, e.g. "syn-3.0.3".
+    pub source: String,
+    #[serde(default, rename = "entry")]
+    pub entries: Vec<GlossaryEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GlossaryEntry {
+    /// The path an annotation cites: `"syn::DeriveInput"`. Crate-qualified
+    /// because `Ident` means two different things depending on who you ask.
+    pub id: String,
+    /// Path relative to the vendored crate root, e.g. "src/derive.rs".
+    pub file: String,
+    /// Closed range over the definition, quoted verbatim when rendered.
+    pub lines: String,
+    pub title: String,
+    /// Other glossary ids this entry leans on. Rendered as links; not a DAG
+    /// and not ordered, because a glossary is read by jumping into it.
+    #[serde(default)]
+    pub see_also: Vec<String>,
+    pub body: String,
+}
+
+impl GlossaryFile {
+    pub fn load(path: &Path) -> Result<Self> {
+        let text = std::fs::read_to_string(path)
+            .with_context(|| format!("reading glossary {}", path.display()))?;
+        let parsed: GlossaryFile =
+            toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+        if parsed.schema != SCHEMA_VERSION {
+            bail!(
+                "{}: schema {} but this build understands {SCHEMA_VERSION}",
+                path.display(),
+                parsed.schema
+            );
+        }
+        Ok(parsed)
+    }
+}
+
 /// The course track's unit registry (`annotations/course.toml`).
 ///
 /// The units are content in their own right — the framing that turns a set of
@@ -158,6 +215,11 @@ pub struct CourseUnit {
     pub status: UnitStatus,
     #[serde(default)]
     pub prereqs: Vec<String>,
+    /// Glossary ids this annotation leans on: `["syn::DeriveInput"]`. Borrowed
+    /// vocabulary is cited, never claimed (D9), so this is how a reader gets
+    /// the definition of a type the annotated crate does not define.
+    #[serde(default)]
+    pub glossary: Vec<String>,
     #[serde(default)]
     pub rust_features: Vec<String>,
     #[serde(default)]

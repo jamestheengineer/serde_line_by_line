@@ -97,6 +97,7 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
         }
     }
 
+    let glossary = check_glossary(repo, &mut diag)?;
     let features = load_feature_vocabulary(repo)?;
     let examples = load_example_names(repo)?;
     let pin = vendor::load_pin(repo)?;
@@ -141,6 +142,17 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
         }
         if a.title.trim().is_empty() {
             diag.error(format!("{}: empty title", a.id));
+        }
+        // A citation into borrowed vocabulary is the reader's only way to the
+        // definition of a type the annotated crate does not define (D9). One
+        // that resolves to nothing is a dead end the renderer cannot show.
+        for cited in &a.glossary {
+            if !glossary.contains(cited) {
+                diag.error(format!(
+                    "{}: cites glossary {cited:?}, which has no entry",
+                    a.id
+                ));
+            }
         }
         // A macro-use annotation is only cheap because it links back to the
         // macro-def that explains it. Without that link it is just an
@@ -632,6 +644,106 @@ fn find_cycle(by_id: &HashMap<&str, &Annotation>) -> Option<Vec<String>> {
     None
 }
 
+/// Does this text declare `name`, rather than merely mention it?
+///
+/// The distinction matters because syn's rustdoc names the item it documents,
+/// often several times, so "the quotation contains the word" passes for a
+/// range that points at the prose above the definition instead of at the
+/// definition. Both of this repo's first two macro entries did exactly that.
+fn declares(text: &str, name: &str) -> bool {
+    text.lines()
+        .map(str::trim_start)
+        .filter(|l| !l.starts_with("//"))
+        .any(|l| {
+            [
+                "struct ", "enum ", "trait ", "fn ", "type ", "macro_rules! ", "union ", "const ",
+            ]
+            .iter()
+            .any(|kw| {
+                l.split(kw).skip(1).any(|rest| {
+                    rest.trim_start()
+                        .strip_prefix(name)
+                        .is_some_and(|after| {
+                            !after.starts_with(|c: char| c.is_alphanumeric() || c == '_')
+                        })
+                })
+            })
+        })
+        // `syn::Ident` is `pub use proc_macro2::Ident;` — a re-export is a
+        // declaration, and its whole point is that there is nothing else.
+        || text
+            .lines()
+            .map(str::trim_start)
+            .any(|l| l.starts_with("pub use") && l.trim_end_matches(';').ends_with(name))
+}
+
+/// The glossary resolves, and nothing cites an entry that is not there.
+///
+/// `read_glossary` has already proved the harder half — that every quoted range
+/// exists in a tree pinned with `role = "glossary"` — so drift in `syn` breaks
+/// this gate the same way drift in `serde_core` breaks coverage. What is left
+/// is the bookkeeping a reader would notice: duplicate ids, and `see_also`
+/// links pointing at nothing.
+fn check_glossary(repo: &Path, diag: &mut Diagnostics) -> Result<HashSet<String>> {
+    let items = slbl_core::read_glossary(repo)?;
+    let mut ids: HashSet<String> = HashSet::new();
+    for item in &items {
+        if !ids.insert(item.entry.id.clone()) {
+            diag.error(format!("duplicate glossary id {:?}", item.entry.id));
+        }
+        if item.entry.title.trim().is_empty() {
+            diag.error(format!("{}: empty glossary title", item.entry.id));
+        }
+        if item.entry.body.trim().is_empty() {
+            diag.error(format!("{}: empty glossary body", item.entry.id));
+        }
+        if item.quoted.trim().is_empty() {
+            diag.error(format!(
+                "{}: quotes {}:{}, which is blank",
+                item.entry.id, item.entry.file, item.entry.lines
+            ));
+        }
+        // The range has to actually contain the thing it claims to define. A
+        // line range that still resolves after an upstream edit but now points
+        // at the neighbouring type is the one drift the tree hash cannot
+        // catch, because the hash is checked against the version the entry was
+        // written for and both are the same file.
+        let name = item.entry.id.rsplit("::").next().unwrap_or(&item.entry.id);
+        if !declares(&item.quoted, name) {
+            diag.error(format!(
+                "{}: quotes {}:{}, which does not declare {name} — a range that lands \
+                 in the rustdoc above a definition still resolves, and reads as one",
+                item.entry.id, item.entry.file, item.entry.lines
+            ));
+        }
+    }
+    for item in &items {
+        for other in &item.entry.see_also {
+            if !ids.contains(other) {
+                diag.error(format!(
+                    "{}: see_also {other:?} is not a glossary entry",
+                    item.entry.id
+                ));
+            }
+        }
+    }
+    if !items.is_empty() {
+        let mut by_source: BTreeMap<&str, usize> = BTreeMap::new();
+        let mut quoted = 0u32;
+        for item in &items {
+            *by_source.entry(&item.source_id).or_default() += 1;
+            quoted += item.range.line_count();
+        }
+        let parts: Vec<String> = by_source.iter().map(|(s, n)| format!("{s} {n}")).collect();
+        println!(
+            "\nglossary: {} entries quoting {quoted} lines ({})",
+            items.len(),
+            parts.join(", ")
+        );
+    }
+    Ok(ids)
+}
+
 /// Every directory under `vendor/` is pinned, and every pinned source is on
 /// disk. `verify` proves the second half; this proves the first, so a tree
 /// nobody declared cannot sit in the repo being quoted by nothing and checked
@@ -771,4 +883,57 @@ fn print_report(report: &Report, diag: &Diagnostics, kinds: &BTreeMap<String, us
         }
     }
     println!();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::declares;
+
+    /// The four ranges this check caught when it was added were all of this
+    /// shape: pointing at syn's rustdoc, which names the item repeatedly, in
+    /// the belief that they pointed at the definition below it.
+    #[test]
+    fn rustdoc_naming_an_item_is_not_declaring_it() {
+        let doc = "\
+/// Error returned when a Syn parser cannot parse the input tokens.
+///
+/// # Error reporting
+///
+/// See the documentation for [`Error::new`].";
+        assert!(!declares(doc, "Error"));
+    }
+
+    #[test]
+    fn a_definition_is_a_declaration() {
+        assert!(declares(
+            "pub struct Error {\n    messages: Vec<M>,\n}",
+            "Error"
+        ));
+        assert!(declares(
+            "#[macro_export]\nmacro_rules! quote_spanned {",
+            "quote_spanned"
+        ));
+        assert!(declares("pub enum Data {", "Data"));
+        assert!(declares(
+            "pub fn parse2<T>(tokens: TokenStream) -> Result<T> {",
+            "parse2"
+        ));
+        assert!(declares(
+            "pub type ParseStream<'a> = &'a ParseBuffer<'a>;",
+            "ParseStream"
+        ));
+    }
+
+    /// `syn::Ident` is one line of re-export, and the one line is the point.
+    #[test]
+    fn a_re_export_declares() {
+        assert!(declares("pub use proc_macro2::Ident;", "Ident"));
+    }
+
+    /// A prefix match would let `TokenStream` satisfy an entry for `Token`.
+    #[test]
+    fn a_longer_name_does_not_satisfy_a_shorter_one() {
+        assert!(!declares("pub struct TokenStream {", "Token"));
+        assert!(declares("pub struct TokenStream {", "TokenStream"));
+    }
 }

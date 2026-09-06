@@ -622,3 +622,42 @@ main { padding: 0 0 80px; min-width: 0; }
   font-size: 13.5px;
 }
 .unitsteps .next { margin-left: auto; text-align: right; }
+
+/* ---- glossary ------------------------------------------------------------
+   Borrowed vocabulary (D9). An entry is a quotation, so it is deliberately
+   not styled like an annotation block: no pane pairing, no hover tint, and
+   the code sits under the prose rather than beside it. A reader here is
+   looking something up, not reading along. */
+.glossary-group { margin: 0 0 3rem; }
+.glossary-group > h2 {
+  position: sticky; top: 0; z-index: 2;
+  margin: 0 0 1rem; padding: .6rem 0;
+  background: var(--bg); border-bottom: 1px solid var(--rule);
+  font-size: 1.05rem;
+}
+.glossary-group > h2 .dim { color: var(--dim); font-weight: 400; }
+
+.gloss {
+  margin: 0 0 2rem; padding: 0 0 1.5rem;
+  border-bottom: 1px solid var(--rule);
+}
+.gloss:last-child { border-bottom: 0; }
+.gloss header { margin: 0 0 .75rem; }
+.gloss header h3 { margin: 0; font-size: 1rem; }
+.gloss header h3 code { font-size: 1rem; color: var(--fg); }
+.gloss-title { margin: .15rem 0 0; color: var(--fg); }
+.gloss-src { margin: .15rem 0 0; font-size: .8rem; color: var(--dim); }
+.gloss-src a { color: inherit; }
+.gloss-body { margin: 0 0 .9rem; max-width: 62ch; }
+.gloss .code { margin: 0; }
+/* A quoted definition can be a 170-line syntax tree enum. Cap it and let the
+   long ones scroll rather than pushing the next entry off the screen. */
+.gloss .src { max-height: 26rem; overflow-y: auto; }
+.gloss-see { margin: .75rem 0 0; font-size: .85rem; color: var(--dim); }
+.gloss-see code { font-size: .85rem; }
+
+/* A citation into borrowed vocabulary. Deliberately quieter than .expands:
+   that link goes to an explanation this site wrote, this one goes to a
+   definition it only quotes. */
+.cites { margin: .6rem 0 0; font-size: .85rem; color: var(--dim); }
+.cites code { font-size: .85rem; }

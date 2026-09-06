@@ -1,0 +1,89 @@
+# The proc-macro2 vocabulary: tokens, spans, and the types underneath syn.
+#
+# Glossary source (D9) — quoted from the pinned tree, never claimed.
+
+schema = 1
+source = "proc-macro2-1.0.107"
+
+[[entry]]
+id    = "proc_macro2::Group"
+file  = "src/lib.rs"
+lines = "674-681"
+title = "A delimited sub-stream"
+see_also = ["proc_macro2::TokenTree"]
+body = """
+Tokens inside `()`, `[]`, `{}`, or invisible delimiters. The invisible kind is
+why `serde_derive` looks through `Type::Group` and `Expr::Group`: a
+macro-substituted type arrives wrapped in a delimiter that has no spelling.
+"""
+
+[[entry]]
+id    = "proc_macro2::Ident"
+file  = "src/lib.rs"
+lines = "967-971"
+title = "A name with a span"
+see_also = ["syn::Ident", "proc_macro2::Span"]
+body = """
+A word of Rust, keyword or not, carrying the location it came from. Comparing
+one to a string is how nearly every dispatch in `internals/attr.rs` decides
+which option it is looking at.
+"""
+
+[[entry]]
+id    = "proc_macro2::Literal"
+file  = "src/lib.rs"
+lines = "1095-1105"
+title = "A literal token"
+see_also = ["syn::Lit", "proc_macro2::TokenTree"]
+body = """
+The token-level literal, before syn interprets it. `serde_derive` builds these
+when emitting field indices and string names into generated code.
+"""
+
+[[entry]]
+id    = "proc_macro2::Spacing"
+file  = "src/lib.rs"
+lines = "825-836"
+title = "Joint or alone"
+see_also = ["proc_macro2::TokenTree"]
+body = """
+Whether a punctuation character is glued to the next one. It is the difference
+between `->` and `-` followed by `>`, and it is why multi-character operators
+must be built deliberately rather than by printing two chars.
+"""
+
+[[entry]]
+id    = "proc_macro2::Span"
+file  = "src/lib.rs"
+lines = "388-393"
+title = "A location, and a hygiene context"
+see_also = ["quote::quote_spanned", "syn::spanned::Spanned"]
+body = """
+Where a token came from, plus the resolution context that decides what names
+it can see. `Span::call_site()` appears throughout the generated code: it is
+what lets a generated `_serde` refer to the crate the user has, not one the
+macro invented.
+"""
+
+[[entry]]
+id    = "proc_macro2::TokenStream"
+file  = "src/lib.rs"
+lines = "203-214"
+title = "Tokens, off the compiler thread"
+see_also = ["proc_macro2::TokenTree", "quote::quote"]
+body = """
+The type both derives take and return. Unlike `proc_macro::TokenStream` it
+works outside a macro expansion, which is what makes `serde_derive` runnable
+in a test — or in a browser.
+"""
+
+[[entry]]
+id    = "proc_macro2::TokenTree"
+file  = "src/lib.rs"
+lines = "576-587"
+title = "One token, or a delimited group"
+see_also = ["proc_macro2::Group", "proc_macro2::Literal", "proc_macro2::Ident"]
+body = """
+Group, ident, punct, or literal. A `TokenStream` is a flat sequence of these,
+and the nesting lives inside `Group`.
+"""

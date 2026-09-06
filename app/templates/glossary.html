@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block sidebar %}
+    <div class="nav-head">vocabulary</div>
+    <ul class="unitnav">
+    {% for group in groups %}
+      <li><a href="#{{ group.anchor }}"><b>{{ group.crate_name }}</b></a></li>
+      {% for entry in group.entries %}
+      <li><a href="#{{ entry.anchor }}"><code>{{ entry.short }}</code></a></li>
+      {% endfor %}
+    {% endfor %}
+    </ul>
+{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>Borrowed vocabulary</h1>
+  <p class="lede">
+    The types <code>serde_derive</code> reads but does not define. These are
+    <b>quotations, not annotations</b>: each one is a line range in a pinned
+    tree, shown here verbatim and never claimed as covered.
+  </p>
+
+  <div class="progress">
+    <div class="figures">
+      <span><b>{{ entries }}</b> entries</span>
+      <span>{{ quoted_lines }} lines quoted</span>
+      <span>{{ sources }} pinned crates</span>
+    </div>
+  </div>
+</section>
+
+<section class="tracknote">
+  <h2>Why these are not annotated</h2>
+  <p>
+    <code>syn</code>, <code>quote</code> and <code>proc-macro2</code> come to
+    {{ borrowed_lines }} lines between them &mdash; several times the size of
+    everything this site explains. But <code>serde_derive</code> never calls
+    <code>syn</code>&rsquo;s parser: it is handed a parsed
+    <code>DeriveInput</code> and walks it, so the definitions it actually needs
+    come to {{ quoted_lines }} lines. Those are quoted below. The rest is a
+    parser that ran before the story starts.
+  </p>
+</section>
+
+{% for group in groups %}
+<section class="glossary-group">
+  <h2 id="{{ group.anchor }}">{{ group.crate_name }} <span class="dim">{{ group.version }}</span></h2>
+  {% for entry in group.entries %}
+  <article class="gloss" id="{{ entry.anchor }}">
+    <header>
+      <h3><code>{{ entry.id }}</code></h3>
+      <p class="gloss-title">{{ entry.title }}</p>
+      <p class="gloss-src"><a href="{{ entry.upstream }}" rel="noreferrer">{{ entry.file }}:{{ entry.lines }}</a></p>
+    </header>
+    <div class="gloss-body">{{ entry.body_html|safe }}</div>
+    <div class="code">
+      <div class="src">
+      {%- for line in entry.code %}
+        <div class="ln" data-n="{{ line.number }}"><span class="num">{{ line.number }}</span><code>{{ line.html|safe }}</code></div>
+      {%- endfor %}
+      </div>
+    </div>
+    {% if !entry.see_also.is_empty() %}
+    <p class="gloss-see">see also
+      {% for other in entry.see_also %}<a href="#{{ other.anchor }}"><code>{{ other.id }}</code></a>{% if !loop.last %}, {% endif %}{% endfor %}
+    </p>
+    {% endif %}
+  </article>
+  {% endfor %}
+</section>
+{% endfor %}
+{% endblock %}

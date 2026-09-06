@@ -40,6 +40,10 @@ struct Block {
     expands_href: String,
     /// One row per invocation in a macro-use group. Empty for every other kind.
     uses: Vec<Use>,
+    /// Borrowed vocabulary this annotation cites (D9). Rendered as links into
+    /// the glossary page, which is where the definition lives — the annotated
+    /// crate does not contain it.
+    glossary: Vec<GlossLink>,
 }
 
 /// One invocation inside a macro-use group.
@@ -158,6 +162,62 @@ struct IndexPage {
 }
 
 #[derive(Template)]
+#[template(path = "glossary.html")]
+struct GlossaryPage {
+    page_title: String,
+    description: String,
+    groups: Vec<GlossGroup>,
+    entries: usize,
+    quoted_lines: u32,
+    sources: usize,
+    borrowed_lines: u32,
+    source_id: String,
+    root: String,
+    track: String,
+}
+
+struct GlossGroup {
+    crate_name: String,
+    version: String,
+    anchor: String,
+    entries: Vec<GlossEntry>,
+}
+
+struct GlossEntry {
+    id: String,
+    /// The id without its crate prefix, for the sidebar where the crate is
+    /// already the heading above it.
+    short: String,
+    anchor: String,
+    title: String,
+    file: String,
+    lines: String,
+    upstream: String,
+    body_html: String,
+    code: Vec<Line>,
+    see_also: Vec<GlossLink>,
+}
+
+struct GlossLink {
+    id: String,
+    anchor: String,
+}
+
+/// `syn::DeriveInput` → `syn-DeriveInput`, usable as a URL fragment.
+fn gloss_anchor(id: &str) -> String {
+    id.replace("::", "-")
+}
+
+fn gloss_links(ids: &[String]) -> Vec<GlossLink> {
+    ids.iter()
+        .map(|id| GlossLink {
+            id: id.clone(),
+            anchor: gloss_anchor(id),
+        })
+        .collect()
+}
+
+#[derive(Template)]
 #[template(path = "file.html")]
 struct FilePage {
     page_title: String,
@@ -263,6 +323,7 @@ fn main() -> Result<()> {
     }
 
     write_course(&out, &store, &highlighted_files, &defs)?;
+    write_glossary(&out, &repo, &store, &hl)?;
 
     // Copied rather than embedded: the playground is a binary artefact, and it
     // may legitimately be absent — the site must build without a wasm
@@ -289,9 +350,9 @@ fn main() -> Result<()> {
 
     println!(
         "wrote {} pages to {}  ({:.1}% annotated, {} annotations)",
-        // one per file, one per unit, plus the front page, the course index
-        // and the 404.
-        store.files.len() + store.course.len() + 3,
+        // one per file, one per unit, plus the front page, the course index,
+        // the glossary and the 404.
+        store.files.len() + store.course.len() + 4,
         out.display(),
         store.percent(),
         index_count(&store),
@@ -455,6 +516,120 @@ fn rel(base: &Path, path: &Path) -> String {
 /// Nothing here is a second copy of the content — a unit page is the unit's own
 /// framing followed by its annotations, pulled out of up to a dozen files and
 /// re-ordered by the prereq graph.
+/// The borrowed-vocabulary page (D9).
+///
+/// One page rather than one per entry: a glossary is read by jumping into it,
+/// and 62 pages of six paragraphs each would be 62 navigations for a reader
+/// who wanted to compare two of them. The quoted code is read from the pinned
+/// tree here, not from the store, so what the site shows is what the pin
+/// protects.
+fn write_glossary(out: &Path, repo: &Path, store: &Store, hl: &Highlighter) -> Result<()> {
+    let items = slbl_core::read_glossary(repo)?;
+    if items.is_empty() {
+        return Ok(());
+    }
+    let pin = vendor::load_pin(repo)?;
+
+    let mut groups: Vec<GlossGroup> = Vec::new();
+    let mut quoted_lines = 0u32;
+    for source in pin.by_role(vendor::Role::Glossary) {
+        let mine: Vec<_> = items
+            .iter()
+            .filter(|i| i.source_id == source.source_id())
+            .collect();
+        if mine.is_empty() {
+            continue;
+        }
+        let mut entries = Vec::new();
+        for item in mine {
+            quoted_lines += item.range.line_count();
+            // Highlighting the quoted span alone, then renumbering to where it
+            // sits in the file: the reader can check the citation by opening
+            // the crate at that line.
+            let mut code = hl
+                .file(&item.quoted)
+                .with_context(|| format!("highlighting {}", item.entry.id))?;
+            for (offset, line) in code.iter_mut().enumerate() {
+                line.number = item.range.start + offset as u32;
+            }
+            let short = item
+                .entry
+                .id
+                .rsplit("::")
+                .next()
+                .unwrap_or(&item.entry.id)
+                .to_string();
+            entries.push(GlossEntry {
+                id: item.entry.id.clone(),
+                short,
+                anchor: gloss_anchor(&item.entry.id),
+                title: item.entry.title.clone(),
+                file: item.entry.file.clone(),
+                lines: item.entry.lines.clone(),
+                upstream: format!(
+                    "https://docs.rs/{}/{}/{}",
+                    source.name,
+                    source.version,
+                    source.name.replace('-', "_")
+                ),
+                body_html: markdown::render(&item.entry.body),
+                code,
+                see_also: item
+                    .entry
+                    .see_also
+                    .iter()
+                    .map(|id| GlossLink {
+                        id: id.clone(),
+                        anchor: gloss_anchor(id),
+                    })
+                    .collect(),
+            });
+        }
+        groups.push(GlossGroup {
+            crate_name: source.name.clone(),
+            version: source.version.clone(),
+            anchor: gloss_anchor(&source.name),
+            entries,
+        });
+    }
+
+    let borrowed_lines: u32 = pin
+        .by_role(vendor::Role::Glossary)
+        .map(|s| {
+            let root = s.dir(repo);
+            vendor::source_files_in(&root)
+                .map(|files| {
+                    files
+                        .iter()
+                        .filter_map(|f| vendor::line_count_in(&root, f).ok())
+                        .sum::<u32>()
+                })
+                .unwrap_or(0)
+        })
+        .sum();
+
+    let entries = groups.iter().map(|g| g.entries.len()).sum();
+    let page = GlossaryPage {
+        page_title: "Borrowed vocabulary — serde line by line".to_string(),
+        description: format!(
+            "The {entries} types serde_derive reads but does not define, quoted from \
+             pinned copies of syn, quote and proc-macro2."
+        ),
+        entries,
+        quoted_lines,
+        sources: groups.len(),
+        groups,
+        borrowed_lines,
+        source_id: store.source_id.clone(),
+        root: "../".to_string(),
+        track: "glossary".to_string(),
+    };
+    let dir = out.join("glossary");
+    std::fs::create_dir_all(&dir)?;
+    write(&dir.join("index.html"), &page.render()?)?;
+    Ok(())
+}
+
 fn write_course(
     out: &Path,
     store: &Store,
@@ -764,6 +939,7 @@ fn annotated(unit: &Unit, highlighted: &[Line]) -> Block {
         expands_name: String::new(),
         expands_href: String::new(),
         uses: Vec::new(),
+        glossary: gloss_links(&a.glossary),
     }
 }
 
@@ -823,6 +999,7 @@ fn macro_block(
         examples: union(units, |a| &a.examples),
         expands_name: name,
         expands_href: href,
+        glossary: Vec::new(),
         uses,
     }
 }
@@ -869,6 +1046,7 @@ fn gap(start: u32, end: u32, highlighted: &[Line]) -> Block {
         expands_name: String::new(),
         expands_href: String::new(),
         uses: Vec::new(),
+        glossary: Vec::new(),
     }
 }
 

@@ -457,6 +457,15 @@ have no definition to quote: `syn::Ident` is `pub use proc_macro2::Ident`
 ParseBuffer<'a>` (`parse.rs:225`). Both are one-liners, and both are worth
 quoting precisely because the one line is the surprising part.
 
+### Correction, from building it
+
+The 53 above counts *qualified* paths — `syn::Type`, `quote::quote`. It misses
+items used unqualified after a `use`, and one of those is `quote_spanned!`, at
+43 uses the seventh most-used borrowed item in the crate. Counting imports and
+qualified paths together, the surface is **62 items**, which is what
+`glossary/` holds. The argument is unchanged and the shape of the answer is
+unchanged; the number was 17% low.
+
 ### Mechanism
 
 A glossary source is pinned exactly like a coverage source and differs in one
