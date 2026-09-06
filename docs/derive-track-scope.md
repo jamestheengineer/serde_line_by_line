@@ -103,14 +103,11 @@ points — and call the real expansion functions. No `cargo expand` dependency,
 deterministic output, checked against golden files the way the wasm output
 already is.
 
-The payoff, worth a spike to confirm: `proc-macro2` and `syn` build for
-`wasm32-unknown-unknown` with the `proc-macro` feature off, so that same
-vendored-as-lib build should run *in the playground*. Type a struct, watch the
-derive expand, live. That is a better artifact than anything on the site today.
-Confirm it before designing around it.
+The payoff was a spike, and the spike ran — see §9. It works: the expander
+runs in the browser, live.
 
-**A glossary.** §3. One session, and the editorial decision costs more than the
-code.
+**A glossary.** §3. One session, and the editorial decision costs more than
+the code.
 
 **A cross-crate course DAG.** D8's forward-reference check orders units within
 one crate. Two crates means a reader reaching `#[derive(Serialize)]` codegen
@@ -134,7 +131,7 @@ expect them to be the slow ones.
 | item | sessions |
 |---|---:|
 | multi-source vendoring | 1 |
-| expansion harness (+ wasm spike) | 1 |
+| expansion harness (spike spent; §9) | 1 |
 | glossary mechanism | 1 |
 | cross-crate course DAG | 0.5 |
 | ~500 annotations | 5–7 |
@@ -162,7 +159,113 @@ second 100% it has to defend on every bump.
 ## 8. Recommendation
 
 Settle §3 before anything else; it is cheap to decide and it invalidates the
-rest if it goes the other way. Then run the wasm spike in §4, because a live
-expansion playground changes what the track is worth building. Only then choose
-between §6 and §7 — and let the site's first readers weigh in, since it has not
-had any yet.
+rest if it goes the other way. The wasm spike is done (§9) and it came back
+better than hoped, so the remaining choice is between §6 and §7 — and the
+site's first readers should weigh in, since it has not had any yet.
+
+## 9. The wasm spike, run
+
+Measured 2026-09-06, rustc 1.95.0, wasm-bindgen 0.2.127 (the pinned version),
+node 25.2.1, against `serde_derive-1.0.229`.
+
+**It works.** `serde_derive` runs in the browser and expands a struct live.
+
+### The patch
+
+One file, four hunks. `src/lib.rs` only:
+
+```
+-extern crate proc_macro;
+-use proc_macro::TokenStream;
++use proc_macro2::TokenStream;
+-use syn::parse_macro_input;
+
+-#[proc_macro_derive(Serialize, attributes(serde))]
+ pub fn derive_serialize(input: TokenStream) -> TokenStream {
+-    let mut input = parse_macro_input!(input as DeriveInput);
++    let mut input = match syn::parse2::<DeriveInput>(input) {
++        Ok(input) => input,
++        Err(err) => return err.into_compile_error(),
++    };
+     ser::expand_derive_serialize(&mut input)
+         .unwrap_or_else(syn::Error::into_compile_error)
+-        .into()
+ }
+```
+
+…and the same for `derive_deserialize`. In `Cargo.toml`, `proc-macro = true`
+comes off the `[lib]` and the `proc-macro` feature comes off `proc-macro2`,
+`quote` and `syn`, which drops those three into their fallback implementations.
+Nothing under `internals/`, `ser.rs`, `de.rs` or `de/` is touched — 8,848 of
+8,975 lines build unmodified. This is a patch a `bump` can reapply, not a fork.
+
+### What came out
+
+The expansion is real, not a token dump. For
+
+```rust
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Point {
+    x_coord: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    label: Option<String>,
+}
+```
+
+the browser produces 44 lines of `Serialize` and 234 of `Deserialize`, with
+`"xCoord"` in the right place and the `skip_serializing_if` branch present.
+Pasted into a crate with `serde 1.0.229`, it compiles clean, and running it:
+
+```
+serialized: {"xCoord":7}
+deserialized: x_coord=9 label=Some("hi")
+deny_unknown_fields: unknown field `nope`, expected `xCoord` or `label`
+```
+
+The code the browser prints is the code that runs.
+
+The error path renders too. `#[serde(rename_all = "nope")]` comes back as
+serde's own diagnostic, wrapped in `compile_error!` — which means the site can
+teach the attribute DSL by showing what upstream says when you get it wrong,
+without inventing a single error message.
+
+### Determinism
+
+Five cases — struct, internally tagged enum, untagged enum, a generic with
+`#[serde(borrow)]`, and an attribute error — each expanded both ways, 898 lines
+of output. **Host and wasm are byte-identical.** So the existing "wasm output is
+checked against the transcripts" gate extends to expansions unchanged.
+
+### Cost
+
+| build | raw | gzipped |
+|---|---:|---:|
+| expander, with `prettyplease` | 1,231,302 | **360,520** |
+| expander, raw `to_string()` | 1,043,425 | 313,192 |
+| the existing playground, for scale | 237,754 | 82,363 |
+
+Both at the playground's own profile: `opt-level = "z"`, LTO, stripped, one
+codegen unit. Roughly 4.4× the current payload, and 47 KB of that buys
+`prettyplease`, which is the difference between readable Rust and one long
+line — cheap at the price. `wasm-opt` is unmeasured; it is not installed here
+and the project does not use it.
+
+**Consequence for D1.** The playground is deliberately *one* shared module that
+dispatches by id. The expander must not join it, or every page carrying any
+example pays 360 KB for a struct nobody asked it to expand. It wants to be a
+second module, fetched only on derive pages. That is a change to D1's shape,
+not a violation of its finding.
+
+Speed is not a concern: both expansions of the struct above take ~35 ms in
+node, cold.
+
+### Two traps, both cheap to gate
+
+1. **`prettyplease` must be 0.3.** 0.2 is built on `syn` 2 and `serde_derive`
+   is on `syn` 3; mixing them fails with a type mismatch inside
+   `prettyplease::unparse`, which reads as a `syn` bug and is not one.
+2. **The vendored-as-lib `version` is load-bearing.** `serde_derive` names its
+   private module with `env!("CARGO_PKG_VERSION_PATCH")` — that is where
+   `_serde::__private229` comes from. If the harness crate's version drifts from
+   the pinned one, every expansion on the site is silently wrong in a way that
+   still compiles. `cargo xtask coverage` should assert the two are equal.
