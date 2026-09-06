@@ -3,7 +3,7 @@
 //! Usage:
 //!   cargo xtask coverage [--json]   verify annotations against the pinned source
 //!   cargo xtask bump <version>      migrate the store to a new serde_core release
-//!   cargo xtask pin                 recompute vendor/pin.toml from the vendored tree
+//!   cargo xtask pin                 rehash every vendored tree into pin.toml + NOTICE.md
 //!   cargo xtask stats               structural inventory of the pinned source
 //!   cargo xtask wasm                build the example playground for the browser
 
@@ -50,7 +50,7 @@ fn print_help() {
          \x20   --sha256 HEX               expected archive checksum, when offline\n\
          \x20   --allow-orphans            drop annotations whose lines no longer exist\n\
          \x20   --keep-old                 leave the previous vendor/ tree in place\n\
-         cargo xtask pin                 recompute vendor/pin.toml\n\
+         cargo xtask pin                 rehash vendor/pin.toml and NOTICE.md\n\
          cargo xtask stats               structural inventory of the pinned source\n\
          cargo xtask wasm                build the example playground for the browser"
     );
@@ -69,18 +69,30 @@ fn repo_root() -> Result<PathBuf> {
     Ok(root)
 }
 
-/// Recomputes the tree hash for the version the pin already names.
+/// Recomputes the tree hash of every source the pin already names.
 ///
-/// This deliberately cannot change the version: doing that without also
+/// This deliberately cannot change a version: doing that without also
 /// remapping every line range would leave a tree that hashes correctly and an
 /// annotation store pointing at the wrong lines. `cargo xtask bump` is the
 /// command that moves a version.
 fn pin(repo: &Path) -> Result<()> {
     let mut existing = vendor::load_pin(repo)?;
-    existing.src_tree_sha256 = vendor::tree_hash(repo)?;
+    for source in &mut existing.sources {
+        let root = source.dir(repo);
+        if !root.is_dir() {
+            anyhow::bail!("vendor/{} is missing", source.source_id());
+        }
+        source.src_tree_sha256 = vendor::tree_hash_of(&root)?;
+        println!("{:<28} {}", source.source_id(), source.src_tree_sha256);
+    }
     let path = vendor::pin_path(repo);
     std::fs::write(&path, vendor::render_pin(&existing))?;
-    println!("src_tree_sha256 = {}", existing.src_tree_sha256);
     println!("wrote {}", path.display());
+
+    // NOTICE.md is generated from the same pin, so a source can never be
+    // vendored and left unattributed.
+    let notice_path = repo.join("vendor").join("NOTICE.md");
+    std::fs::write(&notice_path, bump::notice(repo, &existing)?)?;
+    println!("wrote {}", notice_path.display());
     Ok(())
 }

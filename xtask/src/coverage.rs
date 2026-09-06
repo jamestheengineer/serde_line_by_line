@@ -76,7 +76,9 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
 
     // 1. Vendor integrity. Everything downstream is keyed to these line numbers.
     vendor::verify(repo)?;
-    let source_id = vendor::load_pin(repo)?.source_id();
+    check_vendor_dirs(repo, &mut diag)?;
+    print_sources(repo)?;
+    let source_id = vendor::load_pin(repo)?.primary()?.source_id();
 
     let source_files = vendor::source_files(repo)?;
     let known_files: HashSet<&str> = source_files.iter().map(String::as_str).collect();
@@ -97,7 +99,9 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
 
     let features = load_feature_vocabulary(repo)?;
     let examples = load_example_names(repo)?;
-    check_example_pins(repo, &vendor::load_pin(repo)?.version, &mut diag)?;
+    let pin = vendor::load_pin(repo)?;
+    let primary = pin.primary()?;
+    check_example_pins(repo, &primary.name, &primary.version, &mut diag)?;
     let annotations = slbl_core::read_annotations(repo, &source_id)?;
 
     // 2. Identity and cross-reference integrity.
@@ -526,8 +530,13 @@ fn load_feature_vocabulary(repo: &Path) -> Result<BTreeSet<String>> {
 /// release than the one being explained is the same drift the vendor checksum
 /// exists to prevent, arriving through the other door — and `cargo xtask bump`
 /// retargets these manifests, so a mismatch means a bump was left half-done.
-fn check_example_pins(repo: &Path, version: &str, diag: &mut Diagnostics) -> Result<()> {
-    let want = format!("{} = \"={version}\"", vendor::CRATE_NAME);
+fn check_example_pins(
+    repo: &Path,
+    name: &str,
+    version: &str,
+    diag: &mut Diagnostics,
+) -> Result<()> {
+    let want = format!("{name} = \"={version}\"");
     let dir = repo.join("examples");
     if !dir.is_dir() {
         return Ok(());
@@ -541,10 +550,10 @@ fn check_example_pins(repo: &Path, version: &str, diag: &mut Diagnostics) -> Res
     paths.sort();
     for path in paths {
         let text = std::fs::read_to_string(&path)?;
-        let Some(line) = text.lines().find(|l| {
-            l.trim_start()
-                .starts_with(&format!("{} ", vendor::CRATE_NAME))
-        }) else {
+        let Some(line) = text
+            .lines()
+            .find(|l| l.trim_start().starts_with(&format!("{name} ")))
+        else {
             continue;
         };
         if line.trim() != want {
@@ -621,6 +630,64 @@ fn find_cycle(by_id: &HashMap<&str, &Annotation>) -> Option<Vec<String>> {
         }
     }
     None
+}
+
+/// Every directory under `vendor/` is pinned, and every pinned source is on
+/// disk. `verify` proves the second half; this proves the first, so a tree
+/// nobody declared cannot sit in the repo being quoted by nothing and checked
+/// by nothing.
+fn check_vendor_dirs(repo: &Path, diag: &mut Diagnostics) -> Result<()> {
+    let pin = vendor::load_pin(repo)?;
+    let pinned: HashSet<String> = pin.sources.iter().map(|s| s.source_id()).collect();
+    let dir = repo.join("vendor");
+    for entry in std::fs::read_dir(&dir)? {
+        let path = entry?.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_string();
+        if !pinned.contains(&name) {
+            diag.error(format!(
+                "vendor/{name}/ is not listed in vendor/pin.toml — add it with a role, \
+                 or remove it"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// What is pinned and what each gate asks of it.
+fn print_sources(repo: &Path) -> Result<()> {
+    let pin = vendor::load_pin(repo)?;
+    println!(
+        "\n{:<28}{:<11}{:>7}{:>9}  gate",
+        "source", "role", "files", "lines"
+    );
+    for source in &pin.sources {
+        let root = source.dir(repo);
+        let files = vendor::source_files_in(&root)?;
+        let mut lines = 0u32;
+        for rel in &files {
+            lines += vendor::line_count_in(&root, rel)?;
+        }
+        let gate = match source.role {
+            vendor::Role::Coverage => "every line claimed",
+            vendor::Role::Narrative => "annotated where the story goes",
+            vendor::Role::Glossary => "quoted, never claimed",
+        };
+        println!(
+            "{:<28}{:<11}{:>7}{:>9}  {gate}",
+            source.source_id(),
+            format!("{:?}", source.role).to_lowercase(),
+            files.len(),
+            lines
+        );
+    }
+    Ok(())
 }
 
 fn print_report(report: &Report, diag: &Diagnostics, kinds: &BTreeMap<String, usize>) {

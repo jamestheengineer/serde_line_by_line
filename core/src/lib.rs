@@ -155,9 +155,10 @@ impl Store {
 /// generator must be able to render a partially annotated crate.
 pub fn load(repo: &Path) -> Result<Store> {
     let pin = vendor::load_pin(repo)?;
-    let source_id = pin.source_id();
+    let primary = pin.primary()?;
+    let source_id = primary.source_id();
     let mut store = Store {
-        version: pin.version.clone(),
+        version: primary.version.clone(),
         source_id: source_id.clone(),
         ..Store::default()
     };

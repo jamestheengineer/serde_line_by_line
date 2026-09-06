@@ -1,6 +1,46 @@
-# Regenerate with `cargo xtask pin`; change the version with `cargo xtask bump`.
-# src_tree_sha256 protects annotation line ranges: if it moves, the
-# coverage gate fails until the change is an explicit migration.
+# Regenerate with `cargo xtask pin`; change a version with `cargo xtask bump`.
+# src_tree_sha256 protects annotation and glossary line ranges: if it moves,
+# the coverage gate fails until the change is an explicit migration.
+#
+# role decides what the gates ask of a source:
+#   coverage  — every line must be claimed once manifest.toml calls a file
+#               complete. The reference track's promise.
+#   narrative — annotated where the story goes, never asked to be exhaustive
+#               (PLAN.md §11).
+#   glossary  — never annotated at all; quoted verbatim by glossary entries
+#               (D9). The pin is what keeps a quotation honest.
+
+[[source]]
+name = "serde_core"
 version = "1.0.229"
+role = "coverage"
 crate_sha256 = "67dca2c9c51e58a4791a4b1ed58308b39c64224d349a935ab5039aa360942a48"
 src_tree_sha256 = "b8633d743b82269f6b6909909f39fb6a645db2c090b9a0aefab010ecc38e89e9"
+
+[[source]]
+name = "serde_derive"
+version = "1.0.229"
+role = "narrative"
+crate_sha256 = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
+src_tree_sha256 = "510e108f5ac71439f41fb8dc6b0da87d155ae14421706e27d93e8ca916989458"
+
+[[source]]
+name = "syn"
+version = "3.0.3"
+role = "glossary"
+crate_sha256 = "53e9bae58849f64dfa4f5d5ae372c8341f7305f82a3868709269343628b659a3"
+src_tree_sha256 = "d1594f4c97daa8d78edb2c54fa26ecd1deb51317823d5828bc84639674841ad0"
+
+[[source]]
+name = "quote"
+version = "1.0.47"
+role = "glossary"
+crate_sha256 = "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001"
+src_tree_sha256 = "ad47645528dabf0c355a0e561cbafe591a6e083deeb93d9744a2c54c113babbd"
+
+[[source]]
+name = "proc-macro2"
+version = "1.0.107"
+role = "glossary"
+crate_sha256 = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
+src_tree_sha256 = "5c4c9df949aa0978ccdf9f7fd7bcd0fd0a66801d403aa785519358a6b22ed1b2"

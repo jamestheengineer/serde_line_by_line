@@ -74,18 +74,20 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
 
 pub fn run(repo: &Path, opts: &Options) -> Result<()> {
     let pin = vendor::load_pin(repo)?;
-    let old_root = vendor::crate_dir(repo, &pin.version);
+    // A bump migrates the coverage source. Narrative and glossary sources are
+    // pinned the same way and re-pinned by `cargo xtask pin`, but nothing in
+    // the store is keyed to them by line range yet.
+    let name = pin.primary()?.name.clone();
+    let old_version = pin.primary()?.version.clone();
+    let old_root = vendor::crate_dir(repo, &name, &old_version);
     if !old_root.join("src").is_dir() {
         bail!(
             "the pinned tree is missing from {}; restore it before migrating off it",
             old_root.display()
         );
     }
-    if opts.version == pin.version {
-        println!(
-            "vendor/pin.toml already names {}. Nothing to migrate.",
-            pin.version
-        );
+    if opts.version == old_version {
+        println!("vendor/pin.toml already names {name} {old_version}. Nothing to migrate.");
         return Ok(());
     }
 
@@ -98,12 +100,11 @@ pub fn run(repo: &Path, opts: &Options) -> Result<()> {
 
     let expected = match &opts.sha256 {
         Some(hex) => hex.trim().to_ascii_lowercase(),
-        None => fetch_index_checksum(&opts.version).with_context(|| {
+        None => fetch_index_checksum(&name, &opts.version).with_context(|| {
             format!(
                 "looking up the sha256 of {} {} on the crates.io index (pass --sha256 to \
                  supply it directly when offline)",
-                vendor::CRATE_NAME,
-                opts.version
+                name, opts.version
             )
         })?,
     };
@@ -111,8 +112,8 @@ pub fn run(repo: &Path, opts: &Options) -> Result<()> {
     let archive = match &opts.archive {
         Some(path) => path.clone(),
         None => {
-            let dest = staging.join(format!("{}-{}.crate", vendor::CRATE_NAME, opts.version));
-            download(&opts.version, &dest)?;
+            let dest = staging.join(format!("{name}-{}.crate", opts.version));
+            download(&name, &opts.version, &dest)?;
             dest
         }
     };
@@ -129,12 +130,12 @@ pub fn run(repo: &Path, opts: &Options) -> Result<()> {
     let unpacked = staging.join("unpacked");
     std::fs::create_dir_all(&unpacked)?;
     extract(&archive, &unpacked)?;
-    let new_root = unpacked.join(vendor::source_id(&opts.version));
+    let new_root = unpacked.join(vendor::source_id(&name, &opts.version));
     if !new_root.join("src").is_dir() {
         bail!(
             "{} does not contain the expected {}/src",
             archive.display(),
-            vendor::source_id(&opts.version)
+            vendor::source_id(&name, &opts.version)
         );
     }
 
@@ -192,6 +193,9 @@ struct FileOutcome {
 }
 
 struct Plan {
+    /// The coverage source being migrated. Threaded through rather than a
+    /// constant, so the tool cannot disagree with the pin it just read.
+    name: String,
     old_version: String,
     new_version: String,
     /// Per annotation file, the edit for every record it holds.
@@ -235,7 +239,8 @@ impl Plan {
         }
 
         let mut plan = Plan {
-            old_version: pin.version.clone(),
+            name: pin.primary()?.name.clone(),
+            old_version: pin.primary()?.version.clone(),
             new_version: new_version.to_string(),
             edits: BTreeMap::new(),
             files: Vec::new(),
@@ -381,8 +386,8 @@ impl Plan {
     fn print(&self) {
         println!(
             "\n{} -> {}\n",
-            vendor::source_id(&self.old_version),
-            vendor::source_id(&self.new_version)
+            vendor::source_id(&self.name, &self.old_version),
+            vendor::source_id(&self.name, &self.new_version)
         );
         println!(
             "{:<26}{:>11}{:>9}{:>8}{:>8}{:>11}",
@@ -462,7 +467,7 @@ impl Plan {
         archive_sha: &str,
         opts: &Options,
     ) -> Result<()> {
-        let new_source = vendor::source_id(&self.new_version);
+        let new_source = vendor::source_id(&self.name, &self.new_version);
         let mut dropped_text: Vec<(String, String)> = Vec::new();
 
         // 1. The annotation store.
@@ -495,24 +500,32 @@ impl Plan {
 
         // 3. The vendored tree. Moved into place only now, so an earlier
         //    failure leaves the old tree and the old store consistent.
-        let dest = vendor::crate_dir(repo, &self.new_version);
+        let dest = vendor::crate_dir(repo, &self.name, &self.new_version);
         let _ = std::fs::remove_dir_all(&dest);
         move_dir(new_root, &dest)?;
         if !opts.keep_old {
-            std::fs::remove_dir_all(vendor::crate_dir(repo, &self.old_version))?;
+            std::fs::remove_dir_all(vendor::crate_dir(repo, &self.name, &self.old_version))?;
         }
 
         // 4. The pin, which is what the coverage gate actually checks.
-        let new_pin = Pin {
-            version: self.new_version.clone(),
-            crate_sha256: archive_sha.to_string(),
-            src_tree_sha256: vendor::tree_hash_of(&dest)?,
-        };
+        let mut new_pin = pin.clone();
+        let migrated = new_pin
+            .sources
+            .iter_mut()
+            .find(|s| s.name == self.name)
+            .expect("the pin named this source a moment ago");
+        migrated.version = self.new_version.clone();
+        migrated.crate_sha256 = archive_sha.to_string();
+        migrated.src_tree_sha256 = vendor::tree_hash_of(&dest)?;
         std::fs::write(vendor::pin_path(repo), vendor::render_pin(&new_pin))?;
-        std::fs::write(repo.join("vendor").join("NOTICE.md"), notice(&new_pin))?;
+        std::fs::write(
+            repo.join("vendor").join("NOTICE.md"),
+            notice(repo, &new_pin)?,
+        )?;
 
         // 5. Everything else that names the version.
-        let bumped = bump_example_manifests(repo, &self.old_version, &self.new_version)?;
+        let bumped =
+            bump_example_manifests(repo, &self.name, &self.old_version, &self.new_version)?;
 
         let report = self.report(pin, archive, archive_sha, &dropped_text)?;
         let report_path = repo
@@ -539,7 +552,7 @@ impl Plan {
 
         println!(
             "\nnext:\n  cargo update -p {} --precise {}\n  cargo xtask coverage\n  cargo test --workspace\n  review {}",
-            vendor::CRATE_NAME,
+            self.name,
             self.new_version,
             rel_display(repo, &report_path)
         );
@@ -558,10 +571,7 @@ impl Plan {
             "# Migration: {} {} -> {}\n\n\
              Generated by `cargo xtask bump {}`. This file is the record of what the\n\
              migration did mechanically and what it left for a human.\n\n",
-            vendor::CRATE_NAME,
-            self.old_version,
-            self.new_version,
-            self.new_version
+            self.name, self.old_version, self.new_version, self.new_version
         ));
         s.push_str("## Provenance\n\n");
         s.push_str(&format!(
@@ -569,13 +579,14 @@ impl Plan {
             file_name(archive)
         ));
         s.push_str(&format!("| crate sha256 | `{archive_sha}` |\n"));
+        let previous = pin.get(&self.name)?;
         s.push_str(&format!(
             "| previous crate sha256 | `{}` |\n",
-            pin.crate_sha256
+            previous.crate_sha256
         ));
         s.push_str(&format!(
             "| previous src_tree_sha256 | `{}` |\n\n",
-            pin.src_tree_sha256
+            previous.src_tree_sha256
         ));
 
         s.push_str("## Files\n\n");
@@ -661,7 +672,7 @@ impl Plan {
              - [ ] `cargo xtask coverage` is green\n\
              - [ ] `cargo test --workspace` is green (examples still produce their transcripts)\n\
              - [ ] every annotation in *Annotations to review* has been read against the new source\n",
-            vendor::CRATE_NAME, self.new_version
+            self.name, self.new_version
         ));
         if !self.now_incomplete.is_empty() {
             for f in &self.now_incomplete {
@@ -699,8 +710,8 @@ fn index_path(name: &str) -> String {
 ///
 /// The index is the authority crates.io itself uses, and it is a flat file of
 /// one JSON object per version — cheap enough to fetch on every bump.
-fn fetch_index_checksum(version: &str) -> Result<String> {
-    let url = format!("https://index.crates.io/{}", index_path(vendor::CRATE_NAME));
+fn fetch_index_checksum(name: &str, version: &str) -> Result<String> {
+    let url = format!("https://index.crates.io/{}", index_path(name));
     let body = curl(&url)?;
     let mut known = Vec::new();
     for line in body.lines().filter(|l| !l.trim().is_empty()) {
@@ -709,7 +720,7 @@ fn fetch_index_checksum(version: &str) -> Result<String> {
         known.push(vers.to_string());
         if vers == version {
             if entry["yanked"].as_bool() == Some(true) {
-                bail!("{} {version} is yanked", vendor::CRATE_NAME);
+                bail!("{name} {version} is yanked");
             }
             return entry["cksum"]
                 .as_str()
@@ -718,17 +729,13 @@ fn fetch_index_checksum(version: &str) -> Result<String> {
         }
     }
     bail!(
-        "{} has no version {version}. Published: {}",
-        vendor::CRATE_NAME,
+        "{name} has no version {version}. Published: {}",
         known.join(", ")
     )
 }
 
-fn download(version: &str, dest: &Path) -> Result<()> {
-    let url = format!(
-        "https://static.crates.io/crates/{name}/{name}-{version}.crate",
-        name = vendor::CRATE_NAME
-    );
+fn download(name: &str, version: &str, dest: &Path) -> Result<()> {
+    let url = format!("https://static.crates.io/crates/{name}/{name}-{version}.crate");
     println!("fetching {url}");
     let status = Command::new("curl")
         .args(["-sSfL", "--max-time", "120", "-o"])
@@ -822,24 +829,62 @@ fn fmt_range(r: LineRange) -> String {
     }
 }
 
-fn notice(pin: &Pin) -> String {
-    let id = pin.source_id();
-    format!(
+/// Regenerates `vendor/NOTICE.md` from the pin and the vendored manifests.
+///
+/// Upstream URL and authorship are read from each crate's own `Cargo.toml`
+/// rather than written here, so a source added to the pin cannot be attributed
+/// by a table this file forgot to update.
+pub(crate) fn notice(repo: &Path, pin: &Pin) -> Result<String> {
+    #[derive(serde::Deserialize)]
+    struct Manifest {
+        package: Package,
+    }
+    #[derive(serde::Deserialize)]
+    struct Package {
+        repository: Option<String>,
+        #[serde(default)]
+        authors: Vec<String>,
+    }
+
+    let mut s = String::from(
         "# Vendored third-party source\n\n\
-         ## {name} {version}\n\n\
-         - Upstream: https://github.com/serde-rs/serde\n\
-         - crates.io: https://crates.io/crates/{name}/{version}\n\
-         - sha256: `{sha}`\n\
-         - License: MIT OR Apache-2.0 (see `{id}/LICENSE-MIT`\n  and `{id}/LICENSE-APACHE`)\n\
-         - Copyright: Erick Tryzelaar and David Tolnay\n\n\
-         This directory contains an **unmodified** copy of the published crate, vendored\n\
-         so that annotation line-ranges remain stable. It is checksum-verified in CI.\n\n\
-         Do not edit anything under `{id}/`. All project-authored content\n\
-         lives in `annotations/`, `examples/`, `app/`, and `xtask/`.\n",
-        name = vendor::CRATE_NAME,
-        version = pin.version,
-        sha = pin.crate_sha256,
-    )
+         Unmodified copies of published crates, vendored so that line ranges stay\n\
+         stable and checksum-verified in CI (`vendor/pin.toml`). Do not edit anything\n\
+         under these directories. All project-authored content lives in\n\
+         `annotations/`, `glossary/`, `examples/`, `app/`, and `xtask/`.\n\n\
+         What each role means is in `vendor/pin.toml`; why a glossary source is quoted\n\
+         rather than annotated is D9 in `docs/decisions.md`.\n",
+    );
+
+    for source in &pin.sources {
+        let id = source.source_id();
+        let manifest_path = source.dir(repo).join("Cargo.toml");
+        let text = std::fs::read_to_string(&manifest_path)
+            .with_context(|| format!("reading {}", manifest_path.display()))?;
+        let manifest: Manifest = toml::from_str(&text)
+            .with_context(|| format!("parsing {}", manifest_path.display()))?;
+        let role = format!("{:?}", source.role).to_lowercase();
+        s.push_str(&format!(
+            "\n## {} {} ({role})\n\n\
+             - crates.io: https://crates.io/crates/{}/{}\n",
+            source.name, source.version, source.name, source.version
+        ));
+        if let Some(repository) = &manifest.package.repository {
+            s.push_str(&format!("- Upstream: {repository}\n"));
+        }
+        s.push_str(&format!(
+            "- sha256: `{}`\n\
+             - License: MIT OR Apache-2.0 (see `{id}/LICENSE-MIT` and `{id}/LICENSE-APACHE`)\n",
+            source.crate_sha256
+        ));
+        if !manifest.package.authors.is_empty() {
+            s.push_str(&format!(
+                "- Copyright: {}\n",
+                manifest.package.authors.join(", ")
+            ));
+        }
+    }
+    Ok(s)
 }
 
 /// Retargets the `serde_core = "=x.y.z"` pin in every example crate.
@@ -847,9 +892,9 @@ fn notice(pin: &Pin) -> String {
 /// The examples build against the published crate, not the vendored copy, and
 /// an example demonstrating behaviour from a different release than the one the
 /// annotations describe is exactly the drift this repo exists to prevent.
-fn bump_example_manifests(repo: &Path, old: &str, new: &str) -> Result<usize> {
-    let from = format!("{} = \"={old}\"", vendor::CRATE_NAME);
-    let to = format!("{} = \"={new}\"", vendor::CRATE_NAME);
+fn bump_example_manifests(repo: &Path, name: &str, old: &str, new: &str) -> Result<usize> {
+    let from = format!("{name} = \"={old}\"");
+    let to = format!("{name} = \"={new}\"");
     let mut n = 0;
     for entry in std::fs::read_dir(repo.join("examples"))? {
         let path = entry?.path().join("Cargo.toml");

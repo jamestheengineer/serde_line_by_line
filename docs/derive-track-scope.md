@@ -80,11 +80,10 @@ This was the item that could have made the track unfinishable. It does not.
 The site, the schema, the coverage gate, the highlighter, the deploy and the
 bump tool all carry over. Four things do not.
 
-**Multi-source vendoring.** `core/src/vendor.rs` holds
-`pub const CRATE_NAME: &str = "serde_core"`, and `vendor/pin.toml` is one pin,
-not a table of them. 26 references across 9 files assume a single pinned
-source. Coverage tables, `cargo xtask bump`, `store_edit` and the site's routing
-all need a source dimension. Phase-0-sized: one session.
+**Multi-source vendoring.** *(Done — N1.)* `core/src/vendor.rs` held
+`pub const CRATE_NAME: &str = "serde_core"`, and `vendor/pin.toml` was one pin,
+not a table of them. The pin now carries a list of sources, each with a
+[`Role`](decisions.md) the gates read: `coverage`, `narrative`, or `glossary`.
 
 **An expansion harness.** The current playground compiles examples to WASM and
 runs them live. A derive example's payload is its *expansion*, and
