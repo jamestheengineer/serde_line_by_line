@@ -146,6 +146,22 @@ Annotations join a unit by setting `course_unit`, not by being listed in the
 unit. Ordering within a unit comes from `reading_order` in `course.toml` plus
 line order within each file.
 
+## Adding or editing a narrative unit
+
+The derive track lives in `narrative/*.toml`, one unit per file, and the file
+name is the unit id — filename order is reading order, so there is no registry.
+[`docs/narrative-style.md`](narrative-style.md) is the full guide; the three
+things that differ most from an annotation:
+
+- A step **cites** rather than claims. Ranges may overlap, no file is ever
+  declared complete, and no coverage number is computed over `serde_derive`
+  ([PLAN.md §11](../PLAN.md)).
+- A step that crosses into `serde_core` must name the reference-track annotation
+  it lands inside, and the gate checks the containment.
+- `emits` — generated code a step claims its citation produces — is verified
+  against a real expansion by `cargo site`, which renders the expansion's own
+  lines rather than the string in the store ([D10](decisions.md)).
+
 ## The gates
 
 `.github/workflows/ci.yml` and `.githooks/pre-push` run the same list, and the
@@ -157,7 +173,7 @@ two files reference each other so neither is edited alone:
 | `cargo clippy --workspace --all-targets -- -D warnings` | lints |
 | `cargo test --workspace` | every example against its transcript, trybuild cases |
 | `cargo xtask coverage --json` | vendor integrity, gaps, overlaps, dangling refs, cycles |
-| `cargo site` | the site builds, and every internal link in it resolves |
+| `cargo site` | the site builds, every internal link resolves, and every narrative `emits` claim still matches a real expansion |
 | wasm build + `cargo xtask wasm` | every example compiles for the browser **and** produces the same output there as it does natively |
 
 The hook stops at the first failure, because one broken gate cascades into the

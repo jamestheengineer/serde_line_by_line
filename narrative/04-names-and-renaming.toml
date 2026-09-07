@@ -1,0 +1,177 @@
+schema = 1
+
+[unit]
+id = "04-names-and-renaming"
+title = "Names, and the renaming that does not exist at run time"
+expand_case = "struct_rename"
+summary = """
+`rename_all = "camelCase"` produces no renaming machinery. It produces the
+string `"xCoord"`, computed once while the macro runs and baked into two
+different places in the output.
+"""
+body = """
+This is the shortest unit in the walk and the one that changes the most minds.
+
+There is a natural assumption that `#[serde(rename_all = "camelCase")]` is a
+setting: something the generated code carries, consults, and applies to field
+names as it goes. It is not. `apply_to_field` runs inside the compiler, on a
+`String`, and by the time your program starts there is nothing left of the rule
+but a pair of string literals.
+
+Two other things fall out of this unit. Serialization and deserialization carry
+*separate* names all the way through — `#[serde(rename(serialize = "a",
+deserialize = "b"))]` is not a special case, it is the general case with the two
+halves usually equal. And every name keeps a span, which is why a duplicate
+field error points at the field you wrote rather than at the derive.
+"""
+
+[[step]]
+id = "s04-rename-rule"
+source = "serde_derive-1.0.229"
+file = "src/internals/case.rs"
+lines = "7-31"
+title = "RenameRule — nine variants, one of which is the absence of a rule"
+body = """
+`None` sits in the enum alongside the eight real rules, and it is why nothing
+downstream is written as `Option<RenameRule>`. Applying `None` returns the name
+unchanged; there is no branch anywhere asking whether renaming is switched on.
+
+The file's own header comment states the direction the rules run: *Rust-styled
+field or variant* → *the case of the source*. That direction matters for the two
+methods below, because Rust's conventions differ between fields and variants and
+the same rule therefore has to do two different jobs.
+"""
+
+[[step]]
+id = "s04-apply-to-field"
+source = "serde_derive-1.0.229"
+file = "src/internals/case.rs"
+lines = "81-109"
+title = "apply_to_field — where x_coord becomes xCoord"
+leans_on = ["s04-rename-rule"]
+emits = "\"xCoord\","
+emits_from = "serialize"
+body = """
+A field is assumed to be `snake_case` on the way in, which is why `SnakeCase`
+sits alongside `None` and `LowerCase` in the first arm doing nothing at all.
+
+`CamelCase` is defined in terms of `PascalCase`: capitalise after every
+underscore, then lowercase the first character. `x_coord` → `XCoord` → `xCoord`.
+Twenty-nine lines of `String` manipulation, run once per field, at compile time.
+
+The emitted line beside this is the entire remaining trace of the attribute in
+the `Serialize` half. There is no rule, no table, no lookup — a string literal
+in a function call.
+"""
+
+[[step]]
+id = "s04-apply-to-variant"
+source = "serde_derive-1.0.229"
+file = "src/internals/case.rs"
+lines = "56-79"
+title = "apply_to_variant — the same eight rules, starting from PascalCase"
+leans_on = ["s04-rename-rule"]
+body = """
+The mirror. A variant is assumed to be `PascalCase`, so here it is `PascalCase`
+that shares the do-nothing arm with `None`, and `SnakeCase` that has to do the
+work — inserting an underscore before each interior capital.
+
+Note the layering: `ScreamingSnakeCase` calls `SnakeCase` and uppercases;
+`KebabCase` calls `SnakeCase` and substitutes; `ScreamingKebabCase` calls
+`ScreamingSnakeCase`. Eight rules, three implementations.
+
+Unit 09 watches `Circle` come through here as `"circle"`.
+"""
+
+[[step]]
+id = "s04-multiname"
+source = "serde_derive-1.0.229"
+file = "src/internals/name.rs"
+lines = "9-57"
+title = "MultiName — two names, two renamed flags, and a set of aliases"
+glossary = ["syn::LitStr"]
+body = """
+Not one name with an optional override: two names, always, plus a `BTreeSet` of
+extra names accepted when reading.
+
+The two `_renamed` booleans are the reason this type is not simply a pair of
+strings. They record whether an *explicit* `rename` was given, and the next step
+shows what depends on that: an explicit rename must survive a container-level
+`rename_all`, and one that was merely defaulted from the field name must not.
+
+`deserialize_aliases` is a `BTreeSet<Name>`, ordered, so the `FIELDS` constant
+and the match arms the derive emits come out in a stable order regardless of
+what order the attributes were written in.
+"""
+
+[[step]]
+id = "s04-name"
+source = "serde_derive-1.0.229"
+file = "src/internals/name.rs"
+lines = "59-69"
+title = "Name — a String and a Span, tokenizing as a string literal"
+leans_on = ["s04-multiname"]
+glossary = ["proc_macro2::Span", "syn::LitStr", "quote::ToTokens", "proc_macro2::TokenStream"]
+body = """
+Eleven lines that explain a lot of `serde_derive`'s ergonomics.
+
+A name is a string *and* the place it came from. The `ToTokens` impl builds a
+`LitStr` with that span, so when `quote!` interpolates `#deser_name` into the
+`duplicate_field("xCoord")` call, the literal in the generated code points back
+at the user's field.
+
+That is the difference between an error message that underlines your struct and
+one that underlines `#[derive(Deserialize)]`. It costs one `Span` field per
+name.
+
+Also worth noting: `Ord` and `PartialEq` are implemented on `value` alone,
+ignoring the span. Two names spelled the same are the same name no matter where
+they were written — which is what makes the alias `BTreeSet` deduplicate
+correctly.
+"""
+
+[[step]]
+id = "s04-rename-by-rules"
+source = "serde_derive-1.0.229"
+file = "src/internals/attr.rs"
+lines = "1272-1284"
+title = "rename_by_rules — where the rule meets the name"
+leans_on = ["s04-apply-to-field", "s04-name"]
+emits = "\"xCoord\" => _serde::__private229::Ok(__Field::__field0),"
+emits_from = "deserialize"
+body = """
+Called from the second pass in unit 02, once per field, after container
+attributes are known.
+
+The guard is the payoff for `serialize_renamed`. A field carrying its own
+`#[serde(rename = "…")]` is left alone; a field that took its name from the Rust
+identifier is rewritten. So `rename` and `rename_all` compose in the order a
+reader expects, without either arm knowing about the other.
+
+The two directions are renamed independently, which is how
+`rename_all(serialize = "camelCase")` alone leaves the deserialize name in snake
+case — a real and occasionally useful configuration.
+
+Line 1281 inserts the final deserialize name into the alias set. That set is
+what becomes the `FIELDS` constant and the `visit_str` match arms in unit 07,
+which is why the emitted arm beside this step reads `"xCoord"` and not
+`"x_coord"`.
+"""
+
+[[step]]
+id = "s04-serialize-name"
+source = "serde_derive-1.0.229"
+file = "src/internals/name.rs"
+lines = "44-56"
+title = "…and the two accessors every generation site goes through"
+leans_on = ["s04-rename-by-rules"]
+body = """
+`serialize_name` and `deserialize_name`. Every `quote!` in `ser.rs` calls the
+first; every one in `de.rs` and `de/` calls the second. There is no third
+accessor and no "the name", which is what keeps the two directions from silently
+sharing a string.
+
+It is a small type — 113 lines with the impls — and it is the reason serde can
+round-trip a field whose wire name differs by direction without a single
+conditional in the generated code.
+"""

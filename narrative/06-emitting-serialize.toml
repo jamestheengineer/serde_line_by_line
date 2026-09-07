@@ -1,0 +1,273 @@
+schema = 1
+
+[unit]
+id = "06-emitting-serialize"
+title = "Emitting Serialize, line by generated line"
+expand_case = "struct_rename"
+summary = """
+Forty-three lines come out of `#[derive(Serialize)]` for our struct. This unit
+accounts for all of them, including the arithmetic expression that computes a
+field count at run time.
+"""
+body = """
+Everything so far has been preparation: parse, model, resolve names, infer
+bounds. This is where code is produced, and the whole `Serialize` half of
+`serde_derive` is one file — `ser.rs`, 1,205 lines — of which our struct visits
+about eighty.
+
+Two things are worth watching. The first is that generated code is assembled
+from *fragments* rather than written as one template, because a `quote!` block
+cannot decide whether it is an expression or a list of statements and the
+difference matters at every splice point. The second is the field count passed
+to `serialize_struct`, which turns out to be the only piece of the expansion
+that has to do arithmetic while your program runs — and the reason it does is a
+constraint from the other side of the boundary.
+"""
+
+[[step]]
+id = "s06-serialize-body"
+source = "serde_derive-1.0.229"
+file = "src/ser.rs"
+lines = "171-189"
+title = "serialize_body — the fork that picks one of seven shapes"
+body = """
+Every question this dispatch asks was answered during unit 02. `transparent` and
+`into` are container attributes; the rest is a `match` on `Data` and `Style`,
+which is exactly why `Style` was made a four-variant enum rather than left as
+`syn::Fields`.
+
+Our struct takes the `Data::Struct(Style::Struct, fields)` arm. The other five
+lead to `serialize_newtype_struct`, `serialize_tuple_struct`,
+`serialize_unit_struct` and — for enums — a 400-line region this walk visits in
+unit 09.
+"""
+
+[[step]]
+id = "s06-fragment"
+source = "serde_derive-1.0.229"
+file = "src/fragment.rs"
+lines = "5-23"
+title = "Fragment — is this an expression, or the inside of a block?"
+body = """
+Seventy-four lines that solve a problem you only notice once you try to write a
+code generator.
+
+`quote!` produces a `TokenStream`, and a `TokenStream` does not know what
+syntactic position it belongs in. `serialize_body` might return
+`__serializer.serialize_unit_struct("S")` — an expression — or three statements
+ending in one. Splice the wrong one into the wrong place and you get either a
+missing pair of braces or a spurious pair.
+
+`Fragment` is that distinction made explicit: two variants, and two macros that
+build them so no call site has to name the enum. Every body-producing function in
+`ser.rs` and `de.rs` returns one.
+"""
+
+[[step]]
+id = "s06-fragment-adapters"
+source = "serde_derive-1.0.229"
+file = "src/fragment.rs"
+lines = "25-65"
+title = "…and three adapters, one per splice position"
+leans_on = ["s06-fragment"]
+glossary = ["quote::ToTokens", "proc_macro2::TokenStream", "syn::Token"]
+body = """
+`Expr` wraps a block in braces so it can stand where an expression is expected.
+`Stmts` unwraps a block so its statements land directly in an enclosing one.
+`Match` adds a comma after an expression, because a match arm needs one and a
+braced block does not.
+
+Each is a newtype whose only content is a `ToTokens` impl, which means the
+adapter is chosen by *how it is interpolated*: `#body` where `body: Stmts`
+splices statements, `#body` where `body: Expr` splices an expression. The choice
+is made once at the binding site instead of at every use.
+
+`Stmts(serialize_body(&cont, &params))` in unit 01 is this: the fragment is
+going inside `fn serialize`'s block, so it is spliced as statements.
+"""
+
+[[step]]
+id = "s06-serialize-struct"
+source = "serde_derive-1.0.229"
+file = "src/ser.rs"
+lines = "296-313"
+title = "serialize_struct — a struct, unless one of its fields is flattened"
+leans_on = ["s06-serialize-body"]
+body = """
+An assertion and a fork.
+
+The assertion is about `u32::MAX` fields, which nobody will hit, and it is here
+because `serialize_struct_variant` takes a `u32` index and the two paths share
+enough code that the invariant is stated for both.
+
+The fork is the one that matters. `#[serde(flatten)]` on any field means the
+output no longer has a known field count or a fixed set of keys, so the whole
+struct is serialized as a *map* instead — `serialize_map(None)` rather than
+`serialize_struct(name, len)`. That is why flatten costs more than it looks in
+formats that need a length up front, and it is decided here, in three lines.
+
+Our struct has no flattened field, so it takes `serialize_struct_as_struct`.
+"""
+
+[[step]]
+id = "s06-len"
+source = "serde_derive-1.0.229"
+file = "src/ser.rs"
+lines = "341-359"
+title = "The field count, folded into an expression"
+leans_on = ["s06-serialize-struct"]
+emits = "false as usize + 1 + if Option::is_none(&self.label) { 0 } else { 1 },"
+emits_from = "serialize"
+body = """
+Here is the one piece of the expansion that computes something at run time, and
+the fold that builds it is nine lines.
+
+A field with no `skip_serializing_if` contributes the literal `1`. A field with
+one contributes `if Option::is_none(&self.label) { 0 } else { 1 }`. The fold
+starts at `#tag_field_exists as usize` — a bool literal, `false` here, because
+only an internally tagged enum variant adds a tag field — and sums the lot.
+
+`false as usize + 1 + …` looks like something a person would not write, and that
+is the correct reading: it is a generated expression that constant-folds to
+`1 + …` before it reaches machine code.
+
+Why compute it at all? Because `serialize_struct` takes the count *before* any
+field is written, which the next crossing explains.
+"""
+
+[[step]]
+id = "s06-quote-block"
+source = "serde_derive-1.0.229"
+file = "src/ser.rs"
+lines = "361-366"
+title = "…and the six lines that are the body"
+leans_on = ["s06-len"]
+glossary = ["quote::quote"]
+emits = """
+let mut __serde_state = _serde::Serializer::serialize_struct(
+    __serializer,
+    "Point",
+"""
+emits_from = "serialize"
+body = """
+The whole `Serialize` body for a plain struct, as a template. `#let_mut` is
+either `mut` or nothing — a struct with no serialized fields needs no mutable
+binding and would otherwise warn. `#(#serialize_fields)*` splices the per-field
+statements from the step after next.
+
+Note that the trait methods are called as *free functions*:
+`_serde::Serializer::serialize_struct(__serializer, …)` rather than
+`__serializer.serialize_struct(…)`. Generated code never uses method call syntax
+for these, because method resolution could find an inherent method of the same
+name on the concrete serializer type and silently call the wrong thing. Fully
+qualified calls cannot be intercepted.
+"""
+
+[[step]]
+id = "s06-struct-visitor"
+source = "serde_derive-1.0.229"
+file = "src/ser.rs"
+lines = "1113-1147"
+title = "serialize_struct_visitor — one statement per field"
+leans_on = ["s06-quote-block"]
+glossary = ["syn::spanned::Spanned", "quote::quote_spanned", "syn::Member"]
+emits = """
+_serde::ser::SerializeStruct::serialize_field(
+    &mut __serde_state,
+    "xCoord",
+    &self.x_coord,
+)?;
+"""
+emits_from = "serialize"
+body = """
+The loop that produces the field statements, and the place where unit 04's
+`"xCoord"` finally reaches the output — `field.attrs.name().serialize_name()`,
+line 1125.
+
+`quote_spanned!` rather than `quote!` for the function path, with the span of the
+original field. This is the mechanism behind serde's best error message: a field
+whose type does not implement `Serialize` produces *"the trait bound `Foo:
+Serialize` is not satisfied"* underlining **that field**, because the call that
+fails to typecheck carries the field's span rather than the derive's.
+
+The `flatten` branch takes an entirely different route — `FlatMapSerializer`,
+which is serde's internal adapter — and is the other half of the fork two steps
+back.
+"""
+
+[[step]]
+id = "s06-skip"
+source = "serde_derive-1.0.229"
+file = "src/ser.rs"
+lines = "1149-1168"
+title = "…wrapped in an if, when the field can be skipped"
+leans_on = ["s06-struct-visitor"]
+emits = """
+if !Option::is_none(&self.label) {
+    _serde::ser::SerializeStruct::serialize_field(
+        &mut __serde_state,
+        "label",
+        &self.label,
+    )?;
+} else {
+    _serde::ser::SerializeStruct::skip_field(&mut __serde_state, "label")?;
+}
+"""
+emits_from = "serialize"
+body = """
+Nineteen lines, and the `else` branch is the part worth stopping on.
+
+A skipped field is not simply omitted: `skip_field` is called with its name. The
+default implementation of that method does nothing at all — so for `serde_json`
+this branch compiles to nothing — but a format that needs to know a field was
+deliberately dropped can implement it, and the derive gives it the chance.
+
+`struct_trait.skip_field(span)` returns `None` for `SerializeMap`, which is the
+flatten path: a map has no notion of a skipped key. That is why the `else` is
+conditional and the `if !#skip { … }` form exists at all.
+"""
+
+[[step]]
+id = "s06-serialize-struct-hint"
+source = "serde_core-1.0.229"
+file = "src/ser/mod.rs"
+lines = "1190-1224"
+title = "…and why the count had to be computed before any field was written"
+annotation = "ser-mod-0036"
+leans_on = ["s06-len"]
+body = """
+The third crossing, and the contract that explains the arithmetic.
+
+`serialize_struct(self, name, len)` takes the length up front, and the doc
+comment is explicit that `len` *"does not include fields which are skipped with
+`SerializeStruct::skip_field`"*. A format writing a length-prefixed encoding —
+CBOR, MessagePack, bincode — has to emit that number before it has seen a single
+field, so it cannot count them as it goes.
+
+That requirement is where the fold in `s06-len` comes from. `serde_json` ignores
+`len` entirely; the derive still computes it, because the generated impl has to
+satisfy every `Serializer`, not the one you happen to be using.
+"""
+
+[[step]]
+id = "s06-serialize-struct-trait"
+source = "serde_core-1.0.229"
+file = "src/ser/mod.rs"
+lines = "1907-1930"
+title = "…and the three methods every generated body calls"
+annotation = "ser-mod-0046"
+leans_on = ["s06-skip", "s06-serialize-struct-hint"]
+body = """
+Twenty-four lines that the expansion in this unit calls four times between them.
+
+`serialize_field` is required. `skip_field` has a default that discards its
+argument and returns `Ok(())` — the previous step's `else` branch, costing
+nothing unless a format opts in. `end` takes `self` by value, which is what makes
+the state machine linear: you cannot write a field after ending the struct,
+because the value is gone.
+
+That is the whole of `SerializeStruct`, and with it the `Serialize` half of the
+expansion is accounted for: an impl header (unit 01), a length (unit 05's empty
+where clause and this unit's fold), two `serialize_field` calls with names from
+unit 04, one `skip_field`, and an `end`.
+"""

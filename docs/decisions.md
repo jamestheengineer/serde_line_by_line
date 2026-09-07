@@ -527,3 +527,86 @@ last promise PLAN.md made that was not yet enforced.
 D9 settles the prerequisite for a `serde_derive` track. **Whether to build that
 track at all is undecided** — the estimate and the two shapes it could take are
 in [`derive-track-scope.md`](derive-track-scope.md).
+
+---
+
+## D10 — a claim about generated code is checked against a real expansion
+
+**Decision:** the narrative track's store may quote the code `serde_derive`
+emits, but the quotation is a *locator*, not content. `cargo site` runs the
+pinned crate, finds the quoted run of lines in the real output, and renders the
+output's lines. A quotation that no longer matches fails the build naming the
+step.
+
+### The problem this is for
+
+The reference track has one form of drift and one defence against it. An
+annotation cites `ser/mod.rs:1188-1263`; `src_tree_sha256` in `vendor/pin.toml`
+proves the file has not moved under it. Every sentence on the site is either
+about lines that pin protects, or about nothing checkable.
+
+The narrative track introduces a second kind of sentence: *"this emits
+`serialize_field(&mut __serde_state, "xCoord", &self.x_coord)`"*. The pin cannot
+protect that. `serde_derive` 1.0.230 could change what it emits without changing
+a single line this store cites, and every claim of that shape would go quietly
+wrong — on the pages whose entire selling point is that they show what really
+happens.
+
+The whole track is 85 steps and 30 of them make such a claim. Thirty
+unverifiable sentences would be thirty more than this project has anywhere else.
+
+### Why not just store the expected output
+
+That is the obvious version, and it is what `expand/expected.txt` already does
+for the six cases on the expansion page: a committed transcript, diffed by a
+test. It works there because the transcript is *the whole output* and the test
+owns it.
+
+It does not work here. A step quotes nine lines out of 233, and a store that
+holds a copy of those nine lines is a store with a second thing to keep true —
+the same argument that keeps glossary quotations out of `glossary/*.toml` (D9).
+Worse, the copy is what the reader would see, so a stale copy would render
+perfectly and be wrong.
+
+### The mechanism
+
+Three properties, in order of how much they matter:
+
+1. **What renders is the expansion, not the store.** The store's string is
+   matched and then discarded; the lines on the page are sliced out of the
+   `TokenStream` `serde_derive` produced during this build, with their line
+   numbers within it. There is no path by which the page shows something the
+   crate did not emit.
+2. **A mismatch is a build failure**, naming the step and the case. `cargo site`
+   is a CI gate and a pre-push gate, so this is enforced everywhere the coverage
+   gate is.
+3. **Matching is per-line, trimmed, contiguous.** `prettyplease` reindents
+   generated code whenever anything enclosing it changes shape — a block moving
+   one level deeper is not a change in what serde emits, and should not fail.
+   A changed token is, and does.
+
+The check lives in the site generator rather than in `cargo xtask coverage`
+because the generator is the thing that has the expansion in hand. Putting it in
+the gate would mean compiling `serde_derive` to run the gate, for a check the
+generator would then have to repeat.
+
+### The rest of the narrative's gates
+
+`emits` is the new one. The others are the existing rules, extended:
+
+| gate | what changed |
+|---|---|
+| every cited range resolves in a pinned tree | the tree may now be `serde_derive` as well as `serde_core` |
+| D8 — no forward references | the step graph now spans two sources |
+| a step may not cite a glossary source | new; `syn` is quoted (D9), never walked |
+| a crossing into `serde_core` must name the annotation containing it | new |
+
+The last one is the load-bearing one for honesty. The narrative reuses the
+reference track's 12,037 annotated lines rather than re-explaining them, and the
+containment check is what stops that reuse from becoming a link that silently
+points at the wrong paragraph after a bump.
+
+**What is deliberately not checked:** coverage. No file of `serde_derive` is
+declared complete, ranges may overlap, and no percentage is computed. A walk
+that promised exhaustiveness would be a lie told in a number, and the number is
+the thing this project has been careful about since phase 0.

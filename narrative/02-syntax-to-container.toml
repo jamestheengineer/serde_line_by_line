@@ -1,0 +1,217 @@
+schema = 1
+
+[unit]
+id = "02-syntax-to-container"
+title = "From syntax to a Container"
+expand_case = "struct_rename"
+summary = """
+`syn` hands over a faithful parse of what the user typed. `serde_derive` throws
+most of it away and builds a 225-line model of its own — and the reason it can
+report four attribute errors at once is a struct that panics if you drop it.
+"""
+body = """
+`syn::DeriveInput` is a parse tree. It knows about visibility, about generic
+parameter defaults, about the difference between a tuple struct and a newtype
+only insofar as one has a field count of one. It knows nothing about serde.
+
+`internals/ast.rs` is 225 lines that convert it into something that does. The
+file's own first line calls it *"a Serde ast, parsed from the Syn ast and ready
+to generate Rust code"*, and the phrase "ready to generate" is the design: every
+question the code generator will ask has been answered before generation starts.
+By the time `ser.rs` runs, "is this a newtype?" is a variant of an enum, not a
+predicate over `syn::Fields`.
+
+The other half of this unit is error handling, which sounds like plumbing and is
+not. `serde_derive` reports every bad attribute on a type at once rather than
+the first, and doing that means running the whole conversion in the presence of
+errors. The machinery that makes that safe is 67 lines, and one of them is a
+`panic!`.
+"""
+
+[[step]]
+id = "s02-container"
+source = "serde_derive-1.0.229"
+file = "src/internals/ast.rs"
+lines = "8-21"
+title = "Container — five fields, and a pointer back to the original"
+glossary = ["syn::DeriveInput", "syn::Ident", "syn::Generics"]
+body = """
+The type every later stage is written against. Note `original: &'a syn::DeriveInput`
+alongside the extracted fields: the parse tree is kept, not discarded, because
+spans live in it and every error message this crate emits needs one.
+
+The `'a` is doing real work. `Container` borrows from the `DeriveInput` the
+entry point owns, so nothing here is cloned except the two `Ident`s. For a
+1,800-line attribute parser running inside a compiler invocation, that is the
+difference between a derive you notice and one you do not.
+"""
+
+[[step]]
+id = "s02-data"
+source = "serde_derive-1.0.229"
+file = "src/internals/ast.rs"
+lines = "23-58"
+title = "Data, Variant, Field, Style — where the shape question gets answered once"
+leans_on = ["s02-container"]
+glossary = ["syn::Variant", "syn::Field", "syn::Member", "syn::Ident"]
+body = """
+Four declarations, and the last one is the interesting one.
+
+`syn::Fields` has three variants: `Named`, `Unnamed`, `Unit`. `Style` has four,
+because serde treats a one-field tuple struct — a newtype — as a different thing
+from a two-field one. `Meters(f64)` serializes as its inner value; `Pair(f64,
+f64)` serializes as a sequence. That distinction is made once, here, and every
+`match` downstream gets it for free.
+
+`Field::member` is a `syn::Member`, which is either an identifier or an index.
+That is how the rest of the crate writes `self.x_coord` and `self.0` with the
+same interpolation.
+"""
+
+[[step]]
+id = "s02-from-ast"
+source = "serde_derive-1.0.229"
+file = "src/internals/ast.rs"
+lines = "60-84"
+title = "from_ast — attributes first, then the shape"
+leans_on = ["s02-data"]
+glossary = ["syn::Data", "syn::DataStruct", "syn::DataUnion"]
+body = """
+Container attributes are parsed before the fields are walked, and the order is
+load-bearing: `attrs.default()` is passed down into every field, because
+`#[serde(default)]` on the struct changes what a missing field means for each
+one.
+
+Unions are refused here, in four lines, with the crate's shortest error message.
+It is the only shape serde has no answer for at all: reading a union field is
+`unsafe` because the compiler cannot know which variant is live, and there is no
+representation to choose.
+
+Note the return type. `Option<Container>` — `None` means *could not continue*,
+not *found a problem*. Problems go into `cx`.
+"""
+
+[[step]]
+id = "s02-rename-pass"
+source = "serde_derive-1.0.229"
+file = "src/internals/ast.rs"
+lines = "85-104"
+title = "A second pass, because a rename rule is inherited"
+leans_on = ["s02-from-ast"]
+body = """
+`rename_all` is declared on the container but applies to the fields, and a
+variant can override it for its own fields. That is a three-level cascade —
+container, variant, field — and it cannot be resolved while the fields are being
+built, because the container's own attributes are only finished once the loop
+above has run.
+
+So the fields are built first, with their written names, and this pass walks
+back over them applying the rules. `.or(…)` is the cascade: a variant's
+`rename_all` wins, and the container's `rename_all_fields` is the fallback.
+
+`"x_coord"` becomes `"xCoord"` on line 101 of this file. Unit 04 follows the
+string.
+"""
+
+[[step]]
+id = "s02-fields-from-ast"
+source = "serde_derive-1.0.229"
+file = "src/internals/ast.rs"
+lines = "198-225"
+title = "fields_from_ast — where a field gets its index"
+leans_on = ["s02-data"]
+glossary = ["syn::punctuated::Punctuated", "syn::Field", "syn::Member", "syn::Index"]
+body = """
+Twenty-seven lines, and the subtle part is `dst_fields.len()` appearing twice.
+
+For an unnamed field it becomes the `Member::Unnamed` index — `self.0`,
+`self.1`. And it is passed to `attr::Field::from_ast` as the field's position,
+which is what makes `#[serde(rename = "…")]` on a tuple field work and what the
+deserializer's `visit_u64` arm counts against.
+
+`Punctuated<syn::Field, Token![,]>` is `syn`'s list-with-separators type. It is
+iterated here and never reconstructed, which is the whole reason it appears in
+this crate rather than a `Vec`.
+"""
+
+[[step]]
+id = "s02-ctxt"
+source = "serde_derive-1.0.229"
+file = "src/internals/ctxt.rs"
+lines = "6-26"
+title = "Ctxt — an error collector with a RefCell and a warning in its doc comment"
+glossary = ["syn::Error"]
+body = """
+*"Dropping this object will cause a panic. It must be consumed using `check`."*
+That sentence is the type's entire design, stated up front.
+
+`RefCell<Option<Vec<Error>>>` has two layers and both earn their place. The
+`RefCell` gives interior mutability, so `&Ctxt` can be threaded through forty
+functions that all want to record errors without any of them taking `&mut`. The
+`Option` is the consumed flag: `check` takes the `Vec` out, leaving `None`, and
+that is how `Drop` can tell whether anyone looked.
+"""
+
+[[step]]
+id = "s02-ctxt-error"
+source = "serde_derive-1.0.229"
+file = "src/internals/ctxt.rs"
+lines = "28-43"
+title = "error_spanned_by — and a comment about monomorphization"
+leans_on = ["s02-ctxt"]
+glossary = ["quote::ToTokens", "syn::Error"]
+body = """
+An error is a message plus a span, and the span comes from a value that can be
+turned into tokens — the attribute, the field, the variant, whatever the message
+is *about*. That is what puts the squiggle under the right piece of source.
+
+The comment on line 36 is a real observation about proc-macro compile times.
+`error_spanned_by` is generic over `A: ToTokens`, so a naive implementation
+would monomorphize `Error::new_spanned` once per call-site type. Converting to a
+`TokenStream` first collapses all of those onto one instantiation. In a crate
+with 1,818 lines of attribute parsing, all of them calling this, the saving is
+not theoretical.
+"""
+
+[[step]]
+id = "s02-ctxt-check"
+source = "serde_derive-1.0.229"
+file = "src/internals/ctxt.rs"
+lines = "45-58"
+title = "check — many errors, combined into one"
+leans_on = ["s02-ctxt-error"]
+glossary = ["syn::Error", "syn::Result"]
+body = """
+`syn::Error` is not one error. It carries a list of message-and-span pairs, and
+`combine` appends. So the four separate mistakes recorded during parsing become
+one `Err`, which `into_compile_error` turns into four `compile_error!`
+invocations at four different spans.
+
+That is why `serde_derive` can underline every bad attribute in a struct at
+once, and it is the payoff for `from_ast` returning `Option` rather than
+`Result` two steps ago.
+
+`take()` is what empties the `Option` — the consumed flag from the previous
+step.
+"""
+
+[[step]]
+id = "s02-ctxt-drop"
+source = "serde_derive-1.0.229"
+file = "src/internals/ctxt.rs"
+lines = "61-67"
+title = "Drop — a panic, guarded against panicking"
+leans_on = ["s02-ctxt-check"]
+body = """
+An error that is recorded and never checked is silently discarded, and the
+symptom is a derive that accepts a typo and generates nothing. So dropping an
+unchecked `Ctxt` is a bug in `serde_derive`, and this makes it a loud one during
+development.
+
+`!thread::panicking()` is the necessary guard. Panicking during a panic aborts
+the process, so if a real panic is already unwinding and it drops a `Ctxt` that
+was never checked, this must stay quiet and let the original error surface.
+
+It is a linear-type discipline enforced at run time — the closest Rust gets to
+"this value must be consumed" without a compiler feature.
+"""

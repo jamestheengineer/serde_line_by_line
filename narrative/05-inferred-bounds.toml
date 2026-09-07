@@ -1,0 +1,264 @@
+schema = 1
+
+[unit]
+id = "05-inferred-bounds"
+title = "Bounds nobody wrote, and a lifetime relationship nobody stated"
+expand_case = "struct_rename"
+summary = """
+The struct we have been following has no type parameters, so its impl has no
+where clause. This unit is about the code that decides there should not be one —
+and about the two lines it emits for a struct that does.
+"""
+body = """
+A word about method first. Eight of the nine units in this walk follow the same
+struct end to end. This one cannot: `Point` has no generics, and the whole
+subject here is what happens when a type does. Rather than quietly switch the
+running example, the citations below stay in the same files as everywhere else
+and the *generated* code is quoted from a second input — a struct with a type
+parameter and a borrowed field:
+
+```rust
+struct Wrapper<'a, T> {
+    #[serde(borrow)]
+    name: &'a str,
+    inner: T,
+}
+```
+
+Every emitted block in this unit is labelled with the case it came from, so
+there is no ambiguity about which struct produced which line.
+
+The subject is inference. `#[derive(Serialize)]` on a generic type adds `T:
+Serialize`, and the naive version of that rule — put the bound on every
+parameter — is wrong often enough to matter: a parameter used only inside
+`PhantomData`, or only in a skipped field, does not need it and would make the
+derive reject working code. `bound.rs` is 431 lines of getting that right.
+"""
+
+[[step]]
+id = "s05-build-generics"
+source = "serde_derive-1.0.229"
+file = "src/ser.rs"
+lines = "133-153"
+title = "build_generics — four transformations, and one escape hatch"
+glossary = ["syn::Generics", "syn::parse_quote"]
+body = """
+Read it as a pipeline. Defaults are stripped first — `struct S<T = u8>` is legal
+in a declaration and illegal in an impl header. Then explicit `#[serde(bound =
+"…")]` predicates from fields and from variants are added. Then, and only if the
+container did not specify its own bound, inference runs.
+
+`cont.attrs.ser_bound()` is the escape hatch, and it *replaces* inference rather
+than adding to it. That is deliberate: the situations where you reach for
+`#[serde(bound)]` are exactly the ones where the inferred bound is wrong, so
+adding to it would not help.
+
+`parse_quote!(_serde::Serialize)` builds the `syn::Path` for the bound itself
+from tokens. The `de.rs` twin passes `_serde::Deserialize<'de>` here, which is
+the only difference between the two pipelines.
+"""
+
+[[step]]
+id = "s05-needs-bound"
+source = "serde_derive-1.0.229"
+file = "src/ser.rs"
+lines = "155-169"
+title = "needs_serialize_bound — four ways for a field to opt out"
+leans_on = ["s05-build-generics"]
+body = """
+The filter passed into inference. A field contributes a bound unless it is
+skipped, serialized by a custom function, carries its own `bound`, or belongs to
+a variant that does any of those.
+
+Each exclusion is a case where a `T: Serialize` bound would be actively wrong
+rather than merely redundant. `#[serde(skip_serializing)] c: C` means `C` is
+never serialized, so requiring `C: Serialize` would reject a struct that works.
+The five-line comment above the function says exactly this, and it is worth
+reading in place.
+"""
+
+[[step]]
+id = "s05-find-ty-params"
+source = "serde_derive-1.0.229"
+file = "src/bound.rs"
+lines = "97-147"
+title = "FindTyParams — a hand-written visitor, and one hardcoded exception"
+leans_on = ["s05-needs-bound"]
+glossary = ["syn::Field", "syn::Type", "syn::TypePath", "syn::Path", "syn::punctuated::Pair"]
+body = """
+Three sets. `all_type_params` is everything the user declared;
+`relevant_type_params` fills up as the visitor finds parameters actually used in
+fields that passed the filter; `associated_type_usage` collects the harder case
+below.
+
+`visit_path` carries the exception that everyone eventually meets: a path ending
+in `PhantomData` returns immediately without recording anything.
+`PhantomData<T>` implements `Serialize` for every `T`, so a parameter used only
+as a marker must not pick up a bound. It is hardcoded by name, with a comment
+saying so — there is no way to ask the type system this question from inside a
+proc macro, because a proc macro has no type system.
+
+`visit_field` handles the other case. A field of type `T::Assoc` needs `T::Assoc:
+Serialize`, not `T: Serialize`, so a path whose *first* segment is a known
+parameter and which has more segments is recorded whole.
+
+This is `serde_derive`'s own visitor rather than `syn`'s `visit` module, which is
+why `syn`'s `visit` feature is not enabled: it would add several thousand lines
+of generated traversal to serve a walk that is fifty.
+"""
+
+[[step]]
+id = "s05-visit-type"
+source = "serde_derive-1.0.229"
+file = "src/bound.rs"
+lines = "149-193"
+title = "…and the traversal itself, which is deliberately incomplete"
+leans_on = ["s05-find-ty-params"]
+glossary = ["syn::Type", "syn::ReturnType", "syn::TypeParamBound", "syn::Macro"]
+body = """
+Forty-five lines that recurse into every type position where a parameter could
+be hiding: array elements, function pointer arguments and returns, references,
+slices, tuples, trait object bounds, `impl Trait` bounds.
+
+Two arms do nothing on purpose. `Type::Infer`, `Type::Never` and
+`Type::Verbatim` contain no parameters to find. And `visit_macro`, thirty lines
+below, is an empty function with a comment explaining why: a field of type `T!()`
+is a macro invocation that has not been expanded yet, and treating the macro's
+name as a use of `T` would add a bound the user never asked for.
+
+The trailing `_ => {}` is there because `syn::Type` is `#[non_exhaustive]`. The
+inner attribute above it turns that arm into a compile error under a test
+configuration, so a new `syn` type variant is noticed by serde's own test suite
+rather than silently ignored.
+"""
+
+[[step]]
+id = "s05-make-where"
+source = "serde_derive-1.0.229"
+file = "src/bound.rs"
+lines = "284-326"
+title = "…and the where clause, built as syntax rather than as text"
+leans_on = ["s05-visit-type"]
+glossary = ["syn::WherePredicate", "syn::PredicateType", "syn::TraitBound", "syn::TraitBoundModifiers", "syn::Token", "syn::punctuated::Punctuated"]
+emits_case = "generic_borrowed"
+emits = """
+impl<'a, T> _serde::Serialize for Wrapper<'a, T>
+where
+    T: _serde::Serialize,
+{
+"""
+emits_from = "serialize"
+body = """
+`make_where_bounded_type` constructs a `syn::WherePredicate` field by field
+rather than parsing one from a string. It is more verbose and it cannot produce
+a predicate that fails to parse.
+
+Then two loops. Every declared parameter that the visitor marked relevant gets
+the bound, *in declaration order* — the visitor's `HashSet` is only used as a
+membership test, so the output order comes from `generics.type_params()` and is
+deterministic. Then every associated-type usage gets it too.
+
+The result is the `where T: _serde::Serialize` beside this step. For `Point`, the
+relevant set is empty, both loops run zero times, and `make_where_clause` leaves
+an empty clause that prints as nothing — which is why the impl in unit 01 has no
+`where` line at all.
+"""
+
+[[step]]
+id = "s05-borrowed-lifetimes"
+source = "serde_derive-1.0.229"
+file = "src/de.rs"
+lines = "283-304"
+title = "borrowed_lifetimes — the deserialize side's extra problem"
+leans_on = ["s05-make-where"]
+glossary = ["syn::Lifetime"]
+body = """
+`Serialize` takes `&self`, so a struct's own lifetimes are already satisfied by
+the caller and nothing has to be said about them. `Deserialize<'de>` produces a
+value out of a deserializer, so if any field borrows from the input, the impl has
+to state that `'de` outlives that borrow.
+
+The comment above the function writes out the resulting header for a
+three-lifetime struct, and it is the clearest three lines in the file: `'a` and
+`'b` are borrowed, `'c` is not, and the impl becomes `impl<'de: 'a + 'b, 'a, 'b,
+'c>`.
+
+The `'static` special case at the bottom is a small piece of taste. If a field
+borrows for `'static`, then `'de: 'static` would be a strictly stronger
+requirement than necessary — so the impl drops `'de` entirely and uses
+`'static`, which is what the next step's `de_lifetime` returns.
+"""
+
+[[step]]
+id = "s05-de-lifetime-param"
+source = "serde_derive-1.0.229"
+file = "src/de.rs"
+lines = "257-281"
+title = "…and the lifetime parameter it becomes"
+leans_on = ["s05-borrowed-lifetimes"]
+glossary = ["syn::Lifetime", "syn::LifetimeParam", "proc_macro2::Span"]
+emits_case = "generic_borrowed"
+emits = "impl<'de: 'a, 'a, T> _serde::Deserialize<'de> for Wrapper<'a, T>"
+emits_from = "deserialize"
+body = """
+A two-variant enum with two methods, and between them they decide the first line
+of every generated `Deserialize` impl.
+
+`de_lifetime` is the lifetime to *use* — `'de` or `'static`. `de_lifetime_param`
+is the parameter to *declare*, with the borrowed lifetimes as its bounds, or
+nothing at all in the `'static` case.
+
+The emitted line beside this is the entire zero-copy story compressed into one
+header. `#[serde(borrow)]` on `name: &'a str` put `'a` into the borrowed set;
+that set became the bound `'de: 'a`; and that bound is what permits the field to
+be filled with a slice of the input buffer rather than a copy of it. Take the
+attribute off and the line becomes `impl<'de, 'a, T>`, the relationship is gone,
+and `&'a str` no longer compiles.
+"""
+
+[[step]]
+id = "s05-no-bound"
+source = "serde_derive-1.0.229"
+file = "src/de.rs"
+lines = "62-75"
+title = "…and what all of that produces for a struct with none of it"
+leans_on = ["s05-de-lifetime-param"]
+emits = """
+#[automatically_derived]
+impl<'de> _serde::Deserialize<'de> for Point {
+"""
+emits_from = "deserialize"
+body = """
+Back to the struct we are following. `Point` has no generics and no borrowed
+fields, so the borrowed set is empty, `de_lifetime_param` returns a bare `'de`
+with no bounds, the relevant type parameter set is empty, and the where clause
+prints as nothing.
+
+Two lines. Everything in this unit ran to produce them, and the fact that it
+produced nothing visible is the correct outcome — a derive that added `T:
+Serialize` for a `T` that is not there would not compile.
+"""
+
+[[step]]
+id = "s05-visit-borrowed-str"
+source = "serde_core-1.0.229"
+file = "src/de/mod.rs"
+lines = "1533-1549"
+title = "What 'de: 'a is for, on the other side of the boundary"
+annotation = "de-mod-0051"
+leans_on = ["s05-de-lifetime-param"]
+body = """
+The second crossing into the annotated crate, and the payoff for the previous
+step.
+
+`visit_borrowed_str` is the `Visitor` method that receives a `&'de str` — a
+string that lives as long as the input the deserializer is reading, not as long
+as the call. A format that has the whole input in memory, like `serde_json` over
+a `&str`, calls this one; a format reading from a socket cannot and calls
+`visit_str` instead.
+
+`serde_derive` never mentions this method. What it does is arrange the lifetime
+relationship that makes the result *storable*: `'de: 'a` is what lets a `&'de
+str` be assigned to a field of type `&'a str`. Sixteen lines here, one bound
+there, and no copy in between.
+"""

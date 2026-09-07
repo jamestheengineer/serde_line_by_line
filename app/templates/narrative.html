@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block sidebar %}
+    <div class="nav-head">the walk</div>
+    <ul class="unitnav">
+    {% for u in units %}
+      <li>
+        <a href="{{ root }}derive/{{ u.href }}">
+          <span class="unum">{{ u.number }}</span>
+          <span class="fname">{{ u.title }}</span>
+        </a>
+      </li>
+    {% endfor %}
+    </ul>
+{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>The derive track</h1>
+  <p class="lede">
+    One struct and one enum, followed through <code>serde_derive</code>
+    {{ derive_version }} from the tokens the compiler hands over to the
+    <code>impl</code> it gets back. {{ units.len() }} units, {{ steps }} stops,
+    citing the pinned source as the path goes through it.
+  </p>
+  <div class="progress">
+    <div class="figures">
+      <span><b>{{ units.len() }}</b> units</span>
+      <span>{{ steps }} steps, {{ cited_lines }} lines cited</span>
+      <span>{{ crossings }} crossings into serde_core</span>
+    </div>
+  </div>
+</section>
+
+<section class="tracknote">
+  <h2>What this track claims</h2>
+  <p>
+    <b>Nothing exhaustive.</b> The reference track claims every line of
+    <code>serde_core</code> and a gate fails the build if one goes unclaimed.
+    <code>serde_derive</code> is {{ derive_lines }} lines and is
+    <b>walked, not claimed</b>: this track goes where the story goes, and no
+    file of it is ever declared complete. A coverage percentage over a walk
+    would be a lie told in a number.
+  </p>
+  <p>
+    What is checked is everything a reader could catch. Every line range
+    resolves in a tree pinned by checksum. No step leans on one that comes
+    later. Where the walk crosses into <code>serde_core</code> it must land
+    inside an annotation the reference track already wrote, and it links there
+    rather than explaining the same lines twice. And every claim about
+    generated code is sliced out of a <a href="{{ root }}expand/index.html">real
+    expansion</a> at build time — if <code>serde_derive</code> stopped emitting
+    it, this page would not build.
+  </p>
+</section>
+
+<section class="unitlist">
+  {% for u in units %}
+  <article class="unitcard">
+    <div class="unithead">
+      <span class="unum">{{ u.number }}</span>
+      <h2><a href="{{ root }}derive/{{ u.href }}">{{ u.title }}</a></h2>
+    </div>
+    <div class="prose">{{ u.summary_html|safe }}</div>
+    <div class="unitmeta">{{ u.steps }} steps{% if u.crossings > 0 %} · {{ u.crossings }} into serde_core{% endif %}</div>
+  </article>
+  {% endfor %}
+</section>
+{% endblock %}

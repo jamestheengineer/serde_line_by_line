@@ -1,0 +1,253 @@
+schema = 1
+
+[unit]
+id = "01-the-entry-point"
+title = "The entry point, and the const nobody names"
+expand_case = "struct_rename"
+summary = """
+`#[derive(Serialize)]` is two public functions and 127 lines of crate root. What
+those functions receive is a token stream; what they return is a token stream;
+and everything between is the other 8,848 lines.
+"""
+body = """
+A proc-macro crate has a strange shape. It compiles to a plugin the compiler
+loads, so its public surface is not a library API — it is a list of macro
+entry points, and `serde_derive`'s is two functions long. Everything else in
+the crate is private, which is why you cannot read `serde_derive` from its
+docs.rs page: there is nothing on it.
+
+So start where the compiler starts. `src/lib.rs` is 127 lines, and 96 of them
+are lint configuration. The interesting part is the shape of the two entry
+points and one small piece of machinery that decides what every generated line
+of code will call itself.
+
+We will follow this input all the way through:
+
+The struct is deliberately unremarkable — two fields, one of them optional —
+because the point is not to find an exotic corner. It is to see what
+`serde_derive` does with a struct anyone might write. By the end of unit 06 the
+`Serialize` half of its expansion will have been accounted for line by line,
+and by unit 08 the `Deserialize` half.
+"""
+
+[[step]]
+id = "s01-imports"
+source = "serde_derive-1.0.229"
+file = "src/lib.rs"
+lines = "69-81"
+title = "Two token stream types, and only one of them is the compiler's"
+glossary = ["proc_macro2::TokenStream", "proc_macro2::Ident", "proc_macro2::Span", "syn::DeriveInput", "syn::parse_macro_input"]
+body = """
+`proc_macro::TokenStream` — line 77 — is the compiler's own type. It exists only
+inside a running proc-macro invocation; construct one outside that context and
+the process aborts. That single restriction is why `proc_macro2` exists, and why
+every other line in this crate uses `proc_macro2::TokenStream` instead.
+
+`serde_derive` therefore touches the compiler's type in exactly two places: the
+signature of each entry point. One `.into()` at the boundary converts, and the
+other 8,848 lines are format-agnostic code that could run anywhere.
+
+That is not a curiosity — it is the reason the [expansion
+page](../expand/index.html) can exist at all. Swapping `proc_macro::TokenStream`
+for `proc_macro2::TokenStream` in these two signatures makes the whole crate
+linkable as an ordinary library, and it is the first of the five edits this site
+applies to a copy of the pinned tree.
+"""
+
+[[step]]
+id = "s01-derive-serialize"
+source = "serde_derive-1.0.229"
+file = "src/lib.rs"
+lines = "113-119"
+title = "derive_serialize — six lines, and no error handling that looks like error handling"
+leans_on = ["s01-imports"]
+glossary = ["syn::parse_macro_input", "syn::DeriveInput", "syn::Error"]
+body = """
+Read the shape rather than the names.
+
+`parse_macro_input!` turns tokens into a `syn::DeriveInput` — a struct or enum
+declaration, parsed. If the tokens are not a valid item, the macro *returns from
+the enclosing function* with a `compile_error!` invocation. That early return is
+hidden inside the macro, which is why nothing here looks like it handles a parse
+failure.
+
+`expand_derive_serialize` returns `syn::Result`, and the failure arm is
+`syn::Error::into_compile_error` — not a panic, not an `Err` propagated to a
+caller. A proc macro has no caller to propagate to: the only channel back to the
+compiler is tokens, so an error is *generated code* that fails to compile with a
+message attached to a span. Every diagnostic `serde_derive` produces takes this
+route.
+
+`.into()` is the boundary crossing back to `proc_macro::TokenStream`.
+"""
+
+[[step]]
+id = "s01-derive-deserialize"
+source = "serde_derive-1.0.229"
+file = "src/lib.rs"
+lines = "121-127"
+title = "…and the second one, identical in shape"
+leans_on = ["s01-derive-serialize"]
+body = """
+The same six lines with two names changed. It is worth noticing how symmetric
+the top of this crate is, because almost nothing below it is: `ser.rs` is 1,205
+lines and `de.rs` plus the seven modules under `de/` come to 3,000. The
+asymmetry is real and it starts one function call further in.
+
+`attributes(serde)` on both is what makes `#[serde(...)]` legal at all. Without
+it the compiler rejects the attribute as unknown before either of these
+functions runs — inert helper attributes are registered by the derive that
+consumes them.
+"""
+
+[[step]]
+id = "s01-private-ident"
+source = "serde_derive-1.0.229"
+file = "src/lib.rs"
+lines = "95-111"
+title = "private — a unit struct whose whole job is to spell a version number"
+glossary = ["proc_macro2::Ident", "proc_macro2::Span", "quote::ToTokens", "quote::TokenStreamExt"]
+emits = ") -> _serde::__private229::Result<__S::Ok, __S::Error>"
+emits_from = "serialize"
+body = """
+Generated code has to name serde's internals, and those internals are not
+public API. serde's answer is to rename the private module on every release:
+`__private` plus the patch level, so `serde_derive` 1.0.229 emits code that
+names `__private229`, which only exists in `serde` 1.0.229.
+
+Mixing versions therefore fails at compile time with an unresolved path instead
+of at runtime with something subtler. It is a deliberately blunt instrument.
+
+The mechanism is three lines. `env!("CARGO_PKG_VERSION_PATCH")` is resolved when
+`serde_derive` itself is compiled, `concat!` glues it to the prefix, and
+`ToTokens` lets the resulting `private` value be interpolated straight into a
+`quote!` template — which is why you will see bare `#private` throughout `ser.rs`
+and `de.rs` where a module path belongs.
+
+This is also the one place where building `serde_derive` as an ordinary library
+would quietly produce wrong output: `CARGO_PKG_VERSION_PATCH` would read *this*
+crate's version, not serde's. The expansion harness substitutes the patch level
+from `vendor/pin.toml` and a test asserts the result says `__private229`.
+"""
+
+[[step]]
+id = "s01-expand-derive-serialize"
+source = "serde_derive-1.0.229"
+file = "src/ser.rs"
+lines = "13-26"
+title = "expand_derive_serialize — the whole pipeline in fourteen lines"
+leans_on = ["s01-derive-serialize", "s01-private-ident"]
+glossary = ["syn::DeriveInput", "syn::Result"]
+body = """
+Every stage of the rest of this walk is named here.
+
+`replace_receiver` rewrites `Self` in field types to the concrete type name,
+because generated code appears inside a `const _: ()` block where `Self` means
+nothing.
+
+`Ctxt::new()` opens an error collector. `Container::from_ast` turns the parsed
+syntax into serde's own model of the input — unit 02 — and returns `None` only
+if it could not proceed at all. `precondition` checks what is left, and
+`ctxt.check()?` is where every accumulated error becomes one `syn::Error`.
+
+Note the ordering: `from_ast` never returns `Err`. It records problems and keeps
+going, so that a struct with four bad attributes reports four errors rather than
+the first. Unit 02 shows the machinery that makes that safe.
+
+`Parameters::new` computes the generics for the impl, including inferred bounds
+(unit 05), and `serialize_body` produces the body (unit 06).
+"""
+
+[[step]]
+id = "s01-impl-block"
+source = "serde_derive-1.0.229"
+file = "src/ser.rs"
+lines = "45-58"
+title = "The impl, written out as a template"
+leans_on = ["s01-expand-derive-serialize"]
+glossary = ["quote::quote", "proc_macro2::TokenStream"]
+emits = """
+#[automatically_derived]
+impl _serde::Serialize for Point {
+    fn serialize<__S>(
+        &self,
+        __serializer: __S,
+    ) -> _serde::__private229::Result<__S::Ok, __S::Error>
+    where
+        __S: _serde::Serializer,
+    {
+"""
+emits_from = "serialize"
+body = """
+This is the first `quote!` in the walk, and it reads exactly like the code it
+produces. Interpolation is `#name`; everything else is literal.
+
+Three details in the emitted result are worth pausing on. `__automatically_
+derived` is a real compiler attribute that suppresses some lints inside
+generated code. The type parameter is `__S` rather than `S` because the
+generated impl lives in the same scope as the user's own generics and must not
+collide with a parameter named `S`. And every path is written `_serde::…`,
+never `serde::…`, which the next step explains.
+
+The `remote` branch above this one emits an inherent method instead of a trait
+impl — that is `#[serde(remote = "…")]`, and it is the reason this function has
+two arms.
+"""
+
+[[step]]
+id = "s01-wrap-in-const"
+source = "serde_derive-1.0.229"
+file = "src/dummy.rs"
+lines = "4-31"
+title = "wrap_in_const — why the expansion opens with const _: () = {"
+leans_on = ["s01-impl-block"]
+glossary = ["quote::quote", "syn::Path", "proc_macro2::TokenStream"]
+emits = """
+const _: () = {
+    #[allow(unused_extern_crates, clippy::useless_attribute)]
+    extern crate serde as _serde;
+    _serde::__require_serde_not_serde_core!();
+"""
+emits_from = "serialize"
+body = """
+Everything the derive emits goes inside an anonymous `const` block. It costs one
+line and buys three things.
+
+**A private scope.** The block introduces `__Visitor`, `__Field`, `FIELDS` and
+more; inside a `const _: ()` none of them are visible to the surrounding module,
+so two derived structs in one file cannot collide.
+
+**A name for serde.** `extern crate serde as _serde` binds the crate under a
+name the user cannot have shadowed. If generated code said `serde::Serialize`
+and the user had a local module called `serde`, the expansion would break in a
+way no error message would explain. `#[serde(crate = "…")]` replaces this line
+with a `use` — that is the `Some(path)` arm.
+
+**A version check.** The macro invocation on the last line is the subject of the
+next step.
+"""
+
+[[step]]
+id = "s01-require-serde"
+source = "serde_core-1.0.229"
+file = "src/lib.rs"
+lines = "113-121"
+annotation = "lib-0006"
+title = "…and what that macro call lands on, in serde_core"
+leans_on = ["s01-wrap-in-const"]
+body = """
+Here is the first crossing into the annotated crate, and it is a good one to
+start with because the two halves were written to fit together and are almost
+never read together.
+
+`serde_core` defines `__require_serde_not_serde_core!` as a macro that does
+nothing but produce a compile error. `serde` re-exports a version that expands
+to nothing. So the invocation emitted by `wrap_in_const` is inert when generated
+code really is looking at `serde`, and fails with a written explanation when
+someone has pointed `#[serde(crate = "…")]` at `serde_core` instead.
+
+The error has to be a macro because it has to fire at the *use* site, in the
+user's crate, with the user's span — exactly like `into_compile_error` in the
+entry point. There are only two channels out of a proc macro, and this is the
+other one being used from the far end.
+"""

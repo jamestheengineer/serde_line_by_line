@@ -1,0 +1,348 @@
+schema = 1
+
+[unit]
+id = "08-the-visitor"
+title = "The visitor, and the accumulator pattern every derived struct uses"
+expand_case = "struct_rename"
+summary = """
+A struct is deserialized by declaring one `Option` per field, filling them from
+a stream of keys, and then unwrapping them all with a specific error for each
+one that is missing. That shape is generated, and it is the same every time.
+"""
+body = """
+Unit 07 built the machinery for reading a key. This unit reads the struct.
+
+The generated body is not what a person writing this by hand would usually
+produce. It cannot construct the value incrementally, because a struct literal
+needs every field at once and the input may deliver them in any order. So it
+declares `let mut __field0: Option<i32> = None` for each field, drains the map
+into those slots, and only then builds the struct — which is why a missing field
+is detected after the input is exhausted rather than while it is being read.
+
+The other half of the unit is the visitor itself. `Deserializer` and `Visitor`
+are a callback pair: the derived code does not pull values out of the format, it
+hands the format an object and gets called back on whichever method matches what
+the format found. Both `visit_seq` and `visit_map` are generated for our struct,
+and which one runs is the format's decision, not ours.
+"""
+
+[[step]]
+id = "s08-deserialize-body"
+source = "serde_derive-1.0.229"
+file = "src/de.rs"
+lines = "306-330"
+title = "deserialize_body — the same fork, with two extra branches"
+body = """
+Compare it with `serialize_body` in unit 06. Same shape, two additions.
+
+`type_from` and `type_try_from` are the deserialize-only mirror of
+`#[serde(into)]`. And the `Identifier` check on line 313 is the branch that
+handles `#[serde(field_identifier)]` — a type whose whole purpose is to be one
+of these generated `__Field` enums, written by hand. That is how a hand-written
+`Deserialize` gets access to unit 07's machinery.
+
+Our struct takes `struct_::deserialize` with `StructForm::Struct`, which is 180
+lines away in `de/struct_.rs`. That `StructForm` parameter is the reason the same
+function serves plain structs and all three tagged-enum struct variants; unit 09
+comes back through here with a different one.
+"""
+
+[[step]]
+id = "s08-visitor-struct"
+source = "serde_derive-1.0.229"
+file = "src/de/struct_.rs"
+lines = "163-196"
+title = "The whole generated body, as one template"
+leans_on = ["s08-deserialize-body"]
+glossary = ["quote::quote"]
+emits = """
+struct __Visitor<'de> {
+    marker: _serde::__private229::PhantomData<Point>,
+    lifetime: _serde::__private229::PhantomData<&'de ()>,
+}
+"""
+emits_from = "deserialize"
+body = """
+Thirty-four lines that produce the remaining 137 of the expansion. Read it top
+to bottom: the field-identifier machinery from unit 07, then `__Visitor`, then
+its `Visitor` impl, then `FIELDS`, then the call that starts everything.
+
+The two `PhantomData` fields are the interesting part. `__Visitor` carries no
+data — the value under construction lives in local variables inside `visit_map`
+— but it must be generic over the same parameters as the type it produces, and a
+type parameter that appears in no field is a compile error. `marker` pins the
+value type, `lifetime` pins `'de`.
+
+`expecting` is emitted as `"struct Point"`, or whatever `#[serde(expecting =
+"…")]` said, and it is the string that appears after *"expected"* in a type
+mismatch error.
+"""
+
+[[step]]
+id = "s08-visit-seq-gate"
+source = "serde_derive-1.0.229"
+file = "src/de/struct_.rs"
+lines = "70-96"
+title = "…including a visit_seq that a struct does not obviously need"
+leans_on = ["s08-visitor-struct"]
+body = """
+Our struct gets a `visit_seq` as well as a `visit_map`, and that is why
+`serde_json` will happily deserialize `Point` from `[7, "hi"]` as well as from
+`{"xCoord": 7, "label": "hi"}`.
+
+It exists because self-describing formats are not the only consumers. A compact
+binary format writes a struct as a sequence of values in declaration order, with
+no keys at all — that is the whole saving — and `visit_seq` is how the derived
+impl reads it back.
+
+Two cases suppress it. An untagged enum variant must not accept a sequence,
+because that would make variant matching ambiguous. And a struct with a
+flattened field has no fixed field order to read positionally. Both are decided
+here, in a `match` with two guards.
+"""
+
+[[step]]
+id = "s08-dispatch"
+source = "serde_derive-1.0.229"
+file = "src/de/struct_.rs"
+lines = "139-161"
+title = "…and the one line that hands the visitor over"
+leans_on = ["s08-visit-seq-gate"]
+emits = """
+_serde::Deserializer::deserialize_struct(
+    __deserializer,
+    "Point",
+    FIELDS,
+    __Visitor {
+"""
+emits_from = "deserialize"
+body = """
+Five forms, five different entry points into the format.
+
+A plain struct calls `deserialize_struct(name, FIELDS, visitor)` — the hint that
+carries both the type name and the expected keys. With a flattened field it
+degrades to `deserialize_map`, because the key set is no longer closed. An
+externally tagged enum variant goes through `VariantAccess` instead. And both
+internally tagged and untagged variants call `deserialize_any`, which is unit
+09's subject and the reason those representations do not work on every format.
+
+`FIELDS` appears here for the second time, after unit 07's error message. A
+format is free to use it to intern keys or to skip unknown ones cheaply, and free
+to ignore it.
+"""
+
+[[step]]
+id = "s08-let-values"
+source = "serde_derive-1.0.229"
+file = "src/de/struct_.rs"
+lines = "213-222"
+title = "One Option per field — the accumulator, declared"
+leans_on = ["s08-dispatch"]
+emits = """
+let mut __field0: _serde::__private229::Option<i32> = _serde::__private229::None;
+let mut __field1: _serde::__private229::Option<Option<String>> = _serde::__private229::None;
+"""
+emits_from = "deserialize"
+body = """
+Ten lines, and the second emitted line shows why the wrapper is unavoidable:
+`__field1` is `Option<Option<String>>`. The inner `Option` is the field's own
+type; the outer one means *not yet seen*. Collapsing them would make an explicit
+`null` indistinguishable from an absent key, and `#[serde(default)]` on an
+`Option` field would stop meaning anything.
+
+Skipped and flattened fields get no slot at all, which is what the filter on
+line 216 does. Their values come from elsewhere — a default, or the leftover
+buffer — and reserving a variable for them would produce an unused-variable
+warning inside generated code.
+"""
+
+[[step]]
+id = "s08-match-keys"
+source = "serde_derive-1.0.229"
+file = "src/de/struct_.rs"
+lines = "293-311"
+title = "The loop, and the version of it for a struct that reads nothing"
+leans_on = ["s08-let-values"]
+emits = """
+while let _serde::__private229::Some(__key) = _serde::de::MapAccess::next_key::<
+    __Field,
+>(&mut __map)? {
+"""
+emits_from = "deserialize"
+body = """
+`while let Some(__key) = next_key::<__Field>(&mut __map)?` — the whole of the
+reading loop, with unit 07's enum as the type parameter. `None` ends the map.
+
+The other arm is a curiosity worth ten seconds. When every field is skipped
+*and* unknown fields are denied, `__Field` has no variants at all — an
+uninhabited enum — so the loop's body would be unreachable code. Rather than
+emit a `while` the compiler will warn about, `serde_derive` emits
+`Option::map(next_key()?, |__impossible| match __impossible {})`, where the empty
+`match` is the idiom for "this value cannot exist". The `FIXME` above it notes
+the language feature that would let it be written plainly.
+"""
+
+[[step]]
+id = "s08-value-arms"
+source = "serde_derive-1.0.229"
+file = "src/de/struct_.rs"
+lines = "236-274"
+title = "…and one arm per field, each rejecting its own duplicate"
+leans_on = ["s08-match-keys"]
+glossary = ["quote::quote_spanned", "syn::spanned::Spanned"]
+emits = """
+__Field::__field0 => {
+    if _serde::__private229::Option::is_some(&__field0) {
+        return _serde::__private229::Err(
+            <__A::Error as _serde::de::Error>::duplicate_field("xCoord"),
+        );
+    }
+    __field0 = _serde::__private229::Some(
+        _serde::de::MapAccess::next_value::<i32>(&mut __map)?,
+    );
+}
+"""
+emits_from = "deserialize"
+body = """
+The accumulator's slot is also the duplicate check: if it is already `Some`, the
+key has been seen, and the error names the field by its *deserialize* name.
+
+`next_value::<i32>` is turbofished with the field's own type, and the call is
+emitted with `quote_spanned!` at the field's span — the same trick as unit 06's
+`serialize_field`. A field whose type does not implement `Deserialize` produces
+an error underlining the field.
+
+The `deserialize_with` branch below is bulkier for a reason: it cannot use `?`.
+The wrapper type it introduces is generic over the error, and propagating with
+`?` would require a conversion that is not available there, so the `match` is
+written out.
+"""
+
+[[step]]
+id = "s08-ignored-arm"
+source = "serde_derive-1.0.229"
+file = "src/de/struct_.rs"
+lines = "276-291"
+title = "…and the arm our struct does not get"
+leans_on = ["s08-value-arms"]
+body = """
+The third place `deny_unknown_fields` shows up, after unit 07's missing enum
+variant and missing fallthrough.
+
+Without the attribute, this emits `_ => { let _ = next_value::<IgnoredAny>(&mut
+__map)?; }` — read the value and throw it away. `IgnoredAny` is `serde_core`'s
+zero-sized visitor that accepts everything and produces nothing, and consuming
+the value matters: leaving it unread would desynchronise the format.
+
+With the attribute, there is no arm, the `match` is exhaustive over the two real
+variants, and an unknown key never reaches here — it failed in `visit_str` back
+in unit 07.
+"""
+
+[[step]]
+id = "s08-extract-values"
+source = "serde_derive-1.0.229"
+file = "src/de/struct_.rs"
+lines = "313-325"
+title = "Unwrapping the accumulators, one at a time"
+leans_on = ["s08-value-arms"]
+emits = """
+let __field0 = match __field0 {
+    _serde::__private229::Some(__field0) => __field0,
+    _serde::__private229::None => {
+        _serde::__private229::de::missing_field("xCoord")?
+    }
+};
+"""
+emits_from = "deserialize"
+body = """
+Each slot is unwrapped separately, so the error can name the field that was
+missing. A single `.ok_or()?` over a tuple could not.
+
+The shadowing is deliberate: `let __field0 = match __field0` rebinds the name
+from `Option<i32>` to `i32`, so the struct literal at the bottom of the body can
+say `x_coord: __field0` without caring which stage it is at.
+"""
+
+[[step]]
+id = "s08-expr-is-missing"
+source = "serde_derive-1.0.229"
+file = "src/de.rs"
+lines = "766-806"
+title = "expr_is_missing — four answers to \"the field was not there\""
+leans_on = ["s08-extract-values"]
+glossary = ["quote::quote_spanned", "syn::spanned::Spanned"]
+emits = """
+let __field1 = match __field1 {
+    _serde::__private229::Some(__field1) => __field1,
+    _serde::__private229::None => {
+        _serde::__private229::Default::default()
+    }
+};
+"""
+emits_from = "deserialize"
+body = """
+A cascade with four outcomes, checked in order: the field's own
+`#[serde(default)]`, the field's `#[serde(default = "path")]`, the container's
+`default`, and finally the error.
+
+Our two fields take two different branches, which is why the emitted blocks
+either side of this step do not match. `x_coord` has nothing, so it gets
+`missing_field("xCoord")?`. `label` carries `#[serde(default)]`, so it gets
+`Default::default()` and no error is possible.
+
+The container-level case is the one worth noting: it emits `__default.#member`,
+reading the field out of a whole default value constructed once at the top of the
+body. That is why `#[serde(default)]` on a struct requires `Default` on the
+struct rather than on each field.
+
+Both `quote_spanned!` calls carry the span of the `default = "…"` path
+specifically, with a comment and an ASCII arrow pointing at the reason: if the
+function returns the wrong type, the error should land on the attribute that
+named it.
+"""
+
+[[step]]
+id = "s08-next-key-seed"
+source = "serde_core-1.0.229"
+file = "src/de/mod.rs"
+lines = "1837-1862"
+title = "MapAccess, on the other side"
+annotation = "de-mod-0064"
+leans_on = ["s08-match-keys"]
+body = """
+The crossing. `next_key` and `next_value` — the two the generated code calls —
+are conveniences over these two seeded methods, and the seed version is what
+makes `DeserializeSeed` usable for map keys.
+
+The doc comment on `next_value_seed` states the protocol the accumulator loop
+obeys without ever saying so: calling it before `next_key_seed` *"is incorrect
+and is allowed to panic or return bogus results"*. The generated `while let`
+alternates strictly, one key then one value, so the rule is satisfied by
+construction — but a hand-written impl can violate it, which is why the warning
+is in the trait rather than in the derive.
+"""
+
+[[step]]
+id = "s08-missing-field"
+source = "serde_core-1.0.229"
+file = "src/de/mod.rs"
+lines = "285-298"
+title = "…and the two error constructors this unit called by name"
+annotation = "de-mod-0012"
+leans_on = ["s08-extract-values", "s08-value-arms"]
+body = """
+Fourteen lines, both `#[cold]`, both defined in terms of `custom` with a
+`format_args!`.
+
+`#[cold]` is a real optimisation here rather than decoration. Every field in
+every derived `Deserialize` has a duplicate check and a missing check on its
+path; marking the constructors cold moves their code out of the hot path in the
+generated function, which for a struct with thirty fields is sixty branches that
+now predict correctly.
+
+This is the last of the `Deserialize` half. Two hundred and thirty-three lines of
+generated code, and every one of them has now been traced back to a line of
+`serde_derive` — or, four times, to a line of `serde_core` that `serde_derive`
+called by name.
+"""

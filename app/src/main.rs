@@ -12,7 +12,7 @@ mod markdown;
 use anyhow::{Context, Result};
 use askama::Template;
 use highlight::{Highlighter, Line};
-use slbl_core::schema::{CourseUnit, Kind, Supplement, UnitStatus};
+use slbl_core::schema::{CourseUnit, DeriveKind, Kind, Supplement, UnitStatus};
 use slbl_core::{vendor, Store, Unit};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -253,6 +253,90 @@ fn gloss_links(ids: &[String]) -> Vec<GlossLink> {
         .collect()
 }
 
+/// A narrative unit in the sidebar and on the track index.
+struct NarrativeNav {
+    id: String,
+    number: String,
+    title: String,
+    href: String,
+    summary_html: String,
+    steps: usize,
+    crossings: usize,
+}
+
+#[derive(Template)]
+#[template(path = "narrative.html")]
+struct NarrativePage {
+    page_title: String,
+    description: String,
+    units: Vec<NarrativeNav>,
+    steps: usize,
+    cited_lines: u32,
+    crossings: usize,
+    derive_version: String,
+    derive_lines: u32,
+    source_id: String,
+    root: String,
+    track: String,
+}
+
+#[derive(Template)]
+#[template(path = "narrative_unit.html")]
+struct NarrativeUnitPage {
+    page_title: String,
+    description: String,
+    units: Vec<NarrativeNav>,
+    unit: NarrativeNav,
+    body_html: String,
+    /// The worked input this unit follows, highlighted. Empty when the unit
+    /// names no case.
+    case_name: String,
+    case_code: Vec<Line>,
+    steps: Vec<NarrativeStepBlock>,
+    prev: Vec<NarrativeNav>,
+    next: Vec<NarrativeNav>,
+    source_id: String,
+    root: String,
+    track: String,
+}
+
+/// One stop on the walk, as rendered: the cited code, the prose, and — where
+/// the step claims one — the generated code that citation produces.
+struct NarrativeStepBlock {
+    id: String,
+    title: String,
+    body_html: String,
+    /// `serde_derive 1.0.229`, shown on every step because the walk crosses
+    /// between two pinned trees and the reader has to know which one they are
+    /// looking at.
+    origin: String,
+    file: String,
+    range_label: String,
+    code: Vec<Line>,
+    glossary: Vec<GlossLink>,
+    /// Set on a crossing into the annotated crate: a link to the annotation
+    /// that claims these lines.
+    annotation_href: String,
+    annotation_title: String,
+    /// Steps this one leans on, as links within the walk.
+    leans_on: Vec<StepLink>,
+    /// The emitted code, sliced out of a real expansion.
+    emits: Vec<EmitBlock>,
+}
+
+struct StepLink {
+    title: String,
+    href: String,
+}
+
+/// Generated code quoted from an expansion produced at build time.
+struct EmitBlock {
+    derive: String,
+    case: String,
+    range_label: String,
+    code: Vec<Line>,
+}
+
 #[derive(Template)]
 #[template(path = "file.html")]
 struct FilePage {
@@ -359,6 +443,7 @@ fn main() -> Result<()> {
     }
 
     write_course(&out, &store, &highlighted_files, &defs)?;
+    let narrative_units = write_narrative(&out, &repo, &store, &hl)?;
     write_glossary(&out, &repo, &store, &hl)?;
     write_expand(&out, &repo, &store, &hl)?;
 
@@ -387,9 +472,10 @@ fn main() -> Result<()> {
 
     println!(
         "wrote {} pages to {}  ({:.1}% annotated, {} annotations)",
-        // one per file, one per unit, plus the front page, the course index,
-        // the glossary, the expansion page and the 404.
-        store.files.len() + store.course.len() + 5,
+        // one per source file, one per course unit, one per narrative unit,
+        // plus the front page, the course index, the derive index, the
+        // glossary, the expansion page and the 404.
+        store.files.len() + store.course.len() + narrative_units + 6,
         out.display(),
         store.percent(),
         index_count(&store),
@@ -624,6 +710,277 @@ fn write_expand(out: &Path, repo: &Path, store: &Store, hl: &Highlighter) -> Res
     std::fs::create_dir_all(&dir)?;
     write(&dir.join("index.html"), &page.render()?)?;
     Ok(())
+}
+
+/// The narrative track (PLAN.md §11): `#[derive(Serialize)]` followed from a
+/// `DeriveInput` to an emitted `impl`, one unit per stage.
+///
+/// The walk crosses two pinned trees, so a step carries its origin rather than
+/// inheriting one from the page, and a step that lands in `serde_core` links to
+/// the reference-track annotation that claims those lines instead of explaining
+/// them a second time.
+///
+/// Where a step quotes generated code, the quotation in the store is used only
+/// to *locate* it: the lines rendered are sliced out of a real expansion
+/// computed here by the same `expand` crate the tests assert. A claim that no
+/// longer matches what `serde_derive` emits fails this build naming the step,
+/// which is the only way a sentence about generated code can stay true across a
+/// version bump.
+fn write_narrative(out: &Path, repo: &Path, store: &Store, hl: &Highlighter) -> Result<usize> {
+    let units = slbl_core::read_narrative(repo)?;
+    if units.is_empty() {
+        return Ok(0);
+    }
+    let by_id: BTreeMap<&str, &Unit> = store
+        .by_file
+        .values()
+        .flatten()
+        .map(|u| (u.annotation.id.as_str(), u))
+        .collect();
+    let titles: BTreeMap<&str, &str> = units
+        .iter()
+        .flat_map(|u| u.steps.iter())
+        .map(|s| (s.step.id.as_str(), s.step.title.as_str()))
+        .collect();
+    let unit_of: BTreeMap<&str, &str> = units
+        .iter()
+        .flat_map(|u| {
+            u.steps
+                .iter()
+                .map(|s| (s.step.id.as_str(), u.unit.id.as_str()))
+        })
+        .collect();
+
+    // Each case expanded once for the whole build, both ways. Ten steps quoting
+    // the same expansion must not run `serde_derive` ten times.
+    let mut expansions: BTreeMap<(String, DeriveKind), String> = BTreeMap::new();
+    let wanted = units.iter().flat_map(|u| {
+        u.unit.expand_case.iter().chain(
+            u.steps
+                .iter()
+                .filter(|s| s.step.emits.is_some())
+                .filter_map(|s| s.step.emits_case.as_ref()),
+        )
+    });
+    for case in wanted {
+        let source =
+            expand::case(case).with_context(|| format!("no such expansion case {case:?}"))?;
+        for (kind, derive) in [
+            (DeriveKind::Serialize, expand::Derive::Serialize),
+            (DeriveKind::Deserialize, expand::Derive::Deserialize),
+        ] {
+            expansions
+                .entry((case.clone(), kind))
+                .or_insert_with(|| expand::expand(source, derive));
+        }
+    }
+
+    let nav: Vec<NarrativeNav> = units
+        .iter()
+        .map(|u| NarrativeNav {
+            id: u.unit.id.clone(),
+            number: u
+                .unit
+                .id
+                .split_once('-')
+                .map_or(String::new(), |(n, _)| n.to_string()),
+            title: u.unit.title.clone(),
+            href: format!("{}.html", u.unit.id),
+            summary_html: markdown::render(&u.unit.summary),
+            steps: u.steps.len(),
+            crossings: u.steps.iter().filter(|s| s.is_coverage).count(),
+        })
+        .collect();
+
+    let derive_source = vendor::load_pin(repo)?.get("serde_derive")?.clone();
+    let derive_root = derive_source.dir(repo);
+    let derive_lines: u32 = vendor::source_files_in(&derive_root)?
+        .iter()
+        .filter_map(|f| vendor::line_count_in(&derive_root, f).ok())
+        .sum();
+
+    let dir = out.join("derive");
+    std::fs::create_dir_all(&dir)?;
+
+    let index = NarrativePage {
+        page_title: "The derive track — serde line by line".to_string(),
+        description: one_line(&format!(
+            "One struct and one enum followed through serde_derive {}, from the tokens the \
+             compiler hands over to the impl it gets back — {} units citing the pinned source \
+             as the path goes through it.",
+            derive_source.version,
+            units.len()
+        )),
+        units: nav.iter().map(clone_nnav).collect(),
+        steps: nav.iter().map(|u| u.steps).sum(),
+        cited_lines: units
+            .iter()
+            .flat_map(|u| u.steps.iter())
+            .map(|s| s.range.line_count())
+            .sum(),
+        crossings: nav.iter().map(|u| u.crossings).sum(),
+        derive_version: derive_source.version.clone(),
+        derive_lines,
+        source_id: store.source_id.clone(),
+        root: "../".to_string(),
+        track: "derive".to_string(),
+    };
+    write(&dir.join("index.html"), &index.render()?)?;
+
+    for (i, unit) in units.iter().enumerate() {
+        let mut steps = Vec::new();
+        for item in &unit.steps {
+            let s = &item.step;
+            let mut code = hl
+                .file(&item.quoted)
+                .with_context(|| format!("highlighting {}", s.id))?;
+            for (offset, line) in code.iter_mut().enumerate() {
+                line.number = item.range.start + offset as u32;
+            }
+
+            let (annotation_href, annotation_title) = match s.annotation.as_deref() {
+                Some(id) => match by_id.get(id) {
+                    Some(u) => (
+                        format!("{}#{id}", page_name(&u.annotation.file)),
+                        u.annotation.title.clone(),
+                    ),
+                    None => (String::new(), String::new()),
+                },
+                None => (String::new(), String::new()),
+            };
+
+            let mut emits = Vec::new();
+            let case = s.emits_case.as_ref().or(unit.unit.expand_case.as_ref());
+            if let (Some(snippet), Some(kind), Some(case)) = (&s.emits, s.emits_from, case) {
+                let expansion = &expansions[&(case.clone(), kind)];
+                let (start, len) = locate(expansion, snippet).with_context(|| {
+                    format!(
+                        "{}: the code it says serde_derive emits is not in the {} expansion \
+                         of {case} — the store's claim and the crate's output have parted \
+                         company",
+                        s.id,
+                        kind.label()
+                    )
+                })?;
+                let text: Vec<&str> = expansion.lines().collect();
+                let block = text[start..start + len].join("\n");
+                let mut lines = hl
+                    .file(&block)
+                    .with_context(|| format!("highlighting the expansion at {}", s.id))?;
+                for (offset, line) in lines.iter_mut().enumerate() {
+                    line.number = (start + offset + 1) as u32;
+                }
+                emits.push(EmitBlock {
+                    derive: kind.label().to_string(),
+                    case: case.clone(),
+                    range_label: label(start as u32 + 1, (start + len) as u32),
+                    code: lines,
+                });
+            }
+
+            steps.push(NarrativeStepBlock {
+                id: s.id.clone(),
+                title: s.title.clone(),
+                body_html: markdown::render(&s.body),
+                origin: format!("{} {}", item.crate_name, item.version),
+                file: s.file.clone(),
+                range_label: label(item.range.start, item.range.end),
+                code,
+                glossary: gloss_links(&s.glossary),
+                annotation_href,
+                annotation_title,
+                leans_on: s
+                    .leans_on
+                    .iter()
+                    .filter_map(|p| {
+                        let title = titles.get(p.as_str())?;
+                        let unit_id = unit_of.get(p.as_str())?;
+                        Some(StepLink {
+                            title: (*title).to_string(),
+                            href: format!("{unit_id}.html#{p}"),
+                        })
+                    })
+                    .collect(),
+                emits,
+            });
+        }
+
+        let (case_name, case_code) = match &unit.unit.expand_case {
+            Some(case) => {
+                let source = expand::case(case).unwrap_or_default();
+                (
+                    case.clone(),
+                    hl.file(source.trim_end())
+                        .with_context(|| format!("highlighting case {case}"))?,
+                )
+            }
+            None => (String::new(), Vec::new()),
+        };
+
+        let page = NarrativeUnitPage {
+            page_title: format!("{} — serde line by line", unit.unit.title),
+            description: one_line(&unit.unit.summary),
+            units: nav.iter().map(clone_nnav).collect(),
+            unit: clone_nnav(&nav[i]),
+            body_html: markdown::render(&unit.unit.body),
+            case_name,
+            case_code,
+            steps,
+            prev: nav
+                .get(i.wrapping_sub(1))
+                .map(clone_nnav)
+                .into_iter()
+                .collect(),
+            next: nav.get(i + 1).map(clone_nnav).into_iter().collect(),
+            source_id: store.source_id.clone(),
+            root: "../".to_string(),
+            track: "derive".to_string(),
+        };
+        write(&dir.join(format!("{}.html", unit.unit.id)), &page.render()?)?;
+    }
+    Ok(units.len())
+}
+
+fn clone_nnav(u: &NarrativeNav) -> NarrativeNav {
+    NarrativeNav {
+        id: u.id.clone(),
+        number: u.number.clone(),
+        title: u.title.clone(),
+        href: u.href.clone(),
+        summary_html: u.summary_html.clone(),
+        steps: u.steps,
+        crossings: u.crossings,
+    }
+}
+
+/// Finds `snippet` in `text` as a contiguous run of lines, returning
+/// `(first line index, line count)`.
+///
+/// Lines are compared with surrounding whitespace stripped, and blank lines at
+/// the ends of the snippet are ignored. Generated code is reindented whenever
+/// anything above it changes shape, and a claim about what `serde_derive` emits
+/// should not break because a block moved one level deeper. A change in the
+/// tokens themselves still breaks it, which is the point.
+fn locate(text: &str, snippet: &str) -> Option<(usize, usize)> {
+    let want: Vec<&str> = snippet
+        .lines()
+        .map(str::trim)
+        .skip_while(|l| l.is_empty())
+        .collect();
+    let want: Vec<&str> = {
+        let mut w = want;
+        while w.last().is_some_and(|l| l.is_empty()) {
+            w.pop();
+        }
+        w
+    };
+    if want.is_empty() {
+        return None;
+    }
+    let have: Vec<&str> = text.lines().map(str::trim).collect();
+    have.windows(want.len())
+        .position(|w| w == want.as_slice())
+        .map(|at| (at, want.len()))
 }
 
 /// The borrowed-vocabulary page (D9).
@@ -1294,4 +1651,43 @@ fn repo_root() -> Result<PathBuf> {
         .parent()
         .context("app has no parent directory")?
         .to_path_buf())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::locate;
+
+    /// The point of matching on trimmed lines: `prettyplease` reindents
+    /// generated code whenever anything enclosing it changes shape, and a
+    /// claim about what `serde_derive` emits should survive that.
+    #[test]
+    fn indentation_does_not_affect_a_match() {
+        let expansion = "fn main() {\n    if x {\n        go();\n    }\n}\n";
+        let snippet = "if x {\n    go();\n}";
+        assert_eq!(locate(expansion, snippet), Some((1, 3)));
+    }
+
+    /// …and the other half: a change to the tokens themselves must fail, or
+    /// the check would be decorative.
+    #[test]
+    fn a_changed_token_does_not_match() {
+        let expansion = "fn main() {\n    go_away();\n}\n";
+        assert_eq!(locate(expansion, "go();"), None);
+    }
+
+    /// Blank lines around a `"""…"""` block in the store are an artifact of
+    /// writing toml, not part of the claim.
+    #[test]
+    fn surrounding_blank_lines_are_ignored() {
+        let expansion = "a;\nb;\nc;\n";
+        assert_eq!(locate(expansion, "\n\nb;\nc;\n\n"), Some((1, 2)));
+    }
+
+    /// A run has to be contiguous. Two lines that both appear but with
+    /// something between them are not the block the store described.
+    #[test]
+    fn a_run_must_be_contiguous() {
+        let expansion = "a;\nb;\nc;\n";
+        assert_eq!(locate(expansion, "a;\nc;"), None);
+    }
 }

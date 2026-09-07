@@ -1,0 +1,318 @@
+schema = 1
+
+[unit]
+id = "09-the-enum"
+title = "The enum, and why the tag has to be read before the fields"
+expand_case = "enum_internally_tagged"
+summary = """
+Everything so far has been one struct. This unit swaps it for a two-variant
+enum with `#[serde(tag = "type")]` — 61 generated lines going out, 453 coming
+back — and the asymmetry has one cause.
+"""
+body = """
+Our new subject:
+
+```rust
+#[serde(tag = "type", rename_all = "snake_case")]
+enum Shape {
+    Circle { r: f64 },
+    Square { side: f64 },
+}
+```
+
+Serializing it is barely harder than serializing a struct: match on the variant,
+write the tag, write the fields. Sixty-one lines, and nothing in them is new
+after unit 06.
+
+Deserializing it is 453 lines, and the reason is one sentence: **the tag can
+arrive after the fields**. `{"r": 1.0, "type": "circle"}` is valid JSON and valid
+input, so the derived impl cannot know which variant it is reading until it has
+read something it cannot yet interpret. The only way through is to buffer the
+whole value, find the tag, and then replay the buffer into the right variant —
+and every line of the difference between 61 and 453 comes from that.
+
+This unit ends where the walk started: at a boundary crossing into
+`serde_core`, at the type that does the buffering.
+"""
+
+[[step]]
+id = "s09-tag-type"
+source = "serde_derive-1.0.229"
+file = "src/internals/attr.rs"
+lines = "177-206"
+title = "TagType — four representations, documented in JSON"
+body = """
+Thirty lines, most of them doc comments, and the doc comments are the clearest
+statement of serde's enum representations anywhere in the ecosystem: each variant
+shows the JSON it produces.
+
+It is one enum rather than three independent settings, which is the shape unit 03
+promised. `#[serde(tag)]` alone is `Internal`; `tag` with `content` is
+`Adjacent`; `untagged` is `None`; nothing is `External`, the default that wraps
+the value in a single-key object.
+
+Making it an enum means the illegal combinations cannot be represented past the
+parsing stage — which is what the next step is for.
+"""
+
+[[step]]
+id = "s09-decide-tag"
+source = "serde_derive-1.0.229"
+file = "src/internals/attr.rs"
+lines = "622-654"
+title = "decide_tag — a match on three Options, and the tuple-variant rule"
+leans_on = ["s09-tag-type"]
+glossary = ["syn::Data", "syn::Fields"]
+body = """
+Three accumulators go in and one `TagType` comes out, via a `match` on a
+three-tuple that enumerates every combination — including the four that are
+errors, each with its own message and each reported on the tokens that caused it.
+
+The rule inside the `Internal` arm is the one people meet in practice. An
+internally tagged enum cannot have a tuple variant with anything other than
+exactly one field, and the check is here rather than in `check.rs` because this
+is where the tag is decided.
+
+The reason is structural. Internal tagging puts the tag *inside* the value's own
+map, so the value has to be a map. `Circle { r: f64 }` is a map; `Circle(f64,
+f64)` is a sequence with nowhere to put a key. `Circle(Inner)` is allowed because
+its single field might itself serialize as a map — and if it does not, the
+failure is at run time, which is the one case serde cannot catch at expansion
+time.
+"""
+
+[[step]]
+id = "s09-variant-rename"
+source = "serde_derive-1.0.229"
+file = "src/internals/attr.rs"
+lines = "925-938"
+title = "…and the variant names, renamed by unit 04's other method"
+leans_on = ["s09-decide-tag"]
+emits = """
+_serde::ser::SerializeStruct::serialize_field(
+    &mut __serde_state,
+    "type",
+    "circle",
+)?;
+"""
+emits_from = "serialize"
+body = """
+The variant twin of the field method in unit 04, calling `apply_to_variant`
+instead of `apply_to_field`. `Circle` → `"circle"` under `snake_case`.
+
+The emitted block beside it is where both attributes land at once: `"type"` is
+the tag name, straight from `#[serde(tag = "type")]`, and `"circle"` is the
+renamed variant. Two string literals, computed while the macro ran, in a
+`serialize_field` call the reader already knows from unit 06.
+"""
+
+[[step]]
+id = "s09-serialize-enum"
+source = "serde_derive-1.0.229"
+file = "src/ser.rs"
+lines = "395-419"
+title = "serialize_enum — one match arm per variant"
+leans_on = ["s09-variant-rename"]
+glossary = ["quote::quote"]
+body = """
+The whole serialize side of an enum, in twenty-five lines: build one arm per
+variant and wrap them in `match *self`.
+
+The `non_exhaustive` branch only fires for remote derives, where the enum is
+defined in another crate and may have gained variants since. For a local enum
+the match is exhaustive by construction.
+
+`Match(...)` in `serialize_variant` below is unit 06's third fragment adapter —
+each arm's body is a `Fragment` that has to be punctuated correctly whether it
+turned out to be an expression or a block.
+"""
+
+[[step]]
+id = "s09-serialize-internally-tagged"
+source = "serde_derive-1.0.229"
+file = "src/ser.rs"
+lines = "601-638"
+title = "…and the internally tagged arm, which has four shapes to handle"
+leans_on = ["s09-serialize-enum"]
+body = """
+A unit variant becomes a one-field struct containing only the tag. A newtype
+variant goes through `serialize_tagged_newtype`, a helper in serde's private
+module, because the inner value's own serialization has to be intercepted and
+have a key inserted into it. A tuple variant is `unreachable!` — the previous
+step's check guarantees it.
+
+Our variants are `Style::Struct`, so they take the last arm:
+`serialize_struct_variant` with `StructVariant::InternallyTagged`.
+"""
+
+[[step]]
+id = "s09-struct-variant"
+source = "serde_derive-1.0.229"
+file = "src/ser.rs"
+lines = "938-953"
+title = "…which emits serialize_struct, with the field count off by one"
+leans_on = ["s09-serialize-internally-tagged"]
+emits = """
+let mut __serde_state = _serde::Serializer::serialize_struct(
+    __serializer,
+    "Shape",
+    0 + 1 + 1,
+)?;
+"""
+emits_from = "serialize"
+body = """
+The internally tagged arm of `serialize_struct_variant`, and it is
+`serialize_struct` — not `serialize_struct_variant` — that gets called. On the
+wire an internally tagged variant *is* a struct; the variant name is data, not
+structure.
+
+`#len + 1` is the tag taking a slot in the field count, which is the same
+arithmetic as unit 06 with a different starting value: `0 + 1 + 1` here, because
+neither field can be skipped and the fold began at `0` rather than at
+`tag_field_exists`.
+
+The name passed is `"Shape"` — the enum's name, not the variant's. That is what
+a format that cares about type names will see.
+"""
+
+[[step]]
+id = "s09-de-homogeneous"
+source = "serde_derive-1.0.229"
+file = "src/de/enum_.rs"
+lines = "39-54"
+title = "The deserialize side, dispatched to one of four modules"
+leans_on = ["s09-tag-type"]
+body = """
+Sixteen lines, and each arm is a separate file: `de/enum_externally.rs` at 213
+lines, `de/enum_internally.rs` at 106, `de/enum_adjacently.rs` at 324,
+`de/enum_untagged.rs` at 135. The serialize side needed no such split — its four
+representations came to 400 lines in one file.
+
+That ratio is the unit's thesis in one measurement. Writing a tagged enum is
+choosing between four output shapes. Reading one is four different algorithms.
+
+The function above this handles the mixed case, where some variants are
+`#[serde(untagged)]` and the rest are not: try the tagged ones, and fall through
+to the untagged path if none matched.
+"""
+
+[[step]]
+id = "s09-variant-enum"
+source = "serde_derive-1.0.229"
+file = "src/de/enum_.rs"
+lines = "56-96"
+title = "prepare_enum_variant_enum — unit 07's machinery, pointed at variants"
+leans_on = ["s09-de-homogeneous"]
+emits = "const VARIANTS: &'static [&'static str] = &[\"circle\", \"square\"];"
+emits_from = "deserialize"
+body = """
+The same `deserialize_generated` call as a struct's field identifier, with
+`is_variant = true`. That one boolean changes the expecting string from `"field
+identifier"` to `"variant identifier"`, the fallthrough error from
+`unknown_field` to `unknown_variant`, and the index message from `"field index"`
+to `"variant index"` — and nothing else. Ninety-six lines of generated identifier
+code, shared exactly.
+
+`VARIANTS` is `FIELDS` under another name, built the same way from the alias
+sets.
+
+The `fallthrough` here is the `#[serde(other)]` variant, if there is one: a
+catch-all that turns an unknown tag into a named variant instead of an error.
+"""
+
+[[step]]
+id = "s09-de-internally"
+source = "serde_derive-1.0.229"
+file = "src/de/enum_internally.rs"
+lines = "49-62"
+title = "…and the buffer, which is where the 453 lines come from"
+leans_on = ["s09-variant-enum"]
+emits = """
+let (__tag, __content) = _serde::Deserializer::deserialize_any(
+    __deserializer,
+    _serde::__private229::de::TaggedContentVisitor::<
+        __Field,
+    >::new("type", "internally tagged enum Shape"),
+)?;
+let __deserializer = _serde::__private229::de::ContentDeserializer::<
+    __D::Error,
+>::new(__content);
+"""
+emits_from = "deserialize"
+body = """
+Fourteen lines of `quote_block!`, and they are the whole answer to the problem
+this unit opened with.
+
+`TaggedContentVisitor` reads the *entire* value into memory, pulling out the
+field named `"type"` as it goes and buffering everything else. It returns the tag
+and the leftover content as a pair. `ContentDeserializer` then wraps that buffer
+in a `Deserializer` impl, so the variant's own generated code can read from it as
+if it were the original input.
+
+Two costs follow, and both are famous. The value is materialised before any
+variant sees it, so internally tagged enums allocate where a struct would not.
+And the entry point is `deserialize_any` — the derived impl is asking the format
+*"what did you find?"* rather than telling it what to expect — which is exactly
+what a non-self-describing format cannot answer. That is why internally tagged
+enums do not work with bincode, and the reason is these two lines.
+"""
+
+[[step]]
+id = "s09-variant-struct"
+source = "serde_derive-1.0.229"
+file = "src/de/enum_internally.rs"
+lines = "98-105"
+title = "…and each variant, generated by unit 08's function"
+leans_on = ["s09-de-internally"]
+emits = """
+_serde::Deserializer::deserialize_any(
+    __deserializer,
+    __Visitor {
+        marker: _serde::__private229::PhantomData::<Shape>,
+        lifetime: _serde::__private229::PhantomData,
+    },
+)
+"""
+emits_from = "deserialize"
+body = """
+`struct_::deserialize` with `StructForm::InternallyTagged` — the same function
+that produced our struct's entire `Deserialize` body in unit 08, called twice
+more here, once per variant.
+
+That is why 453 lines: a `__Field` enum, a `__FieldVisitor`, a `__Visitor` and a
+`visit_map` for *each* variant, all nested inside the match arms, each in its own
+block so the repeated type names do not collide.
+
+The emitted call beside this is unit 08's dispatch step with the fifth arm taken.
+`deserialize_any` again, this time against the `ContentDeserializer` — which can
+always answer it, because the content is already in memory. The format was asked
+`any` once, at the top; the variants ask the buffer.
+"""
+
+[[step]]
+id = "s09-content"
+source = "serde_core-1.0.229"
+file = "src/private/content.rs"
+lines = "10-39"
+title = "Content — the buffer, and the last crossing"
+annotation = "private-content-0002"
+leans_on = ["s09-de-internally"]
+body = """
+Thirty lines in `serde_core`, and the walk ends here.
+
+`Content` is the data model expressed as a Rust enum: the same 29 types the
+`Serialize` and `Deserialize` traits enumerate in prose, as variants you can hold
+a value of. `Str(&'de str)` beside `String(String)` is the borrowed-versus-owned
+split the whole deserializing half turns on, preserved through the buffer so that
+a zero-copy field is still zero-copy after being replayed.
+
+No user ever names this type. It appears in generated code — `#private::de::Content`
+— and in no public signature, which is why it lives behind a module named after
+the release. The file's own comment calls it obsoleted by format-specific buffer
+types, and it is still what your internally tagged enums are built on today.
+
+That is the whole path: tokens in unit 01, a model in unit 02, attributes in 03,
+names in 04, bounds in 05, an emitted impl in 06 through 08, and — for the one
+representation that cannot be done in a single pass — a buffer in the crate this
+site spends the rest of its pages annotating.
+"""

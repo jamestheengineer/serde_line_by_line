@@ -450,8 +450,13 @@ they would need.
 | **N1 — Multi-source foundation** ✅ | `pin.toml` grows from one pin to a list of sources with roles; vendor `serde_derive` 1.0.229, `syn` 3.0.3, `quote` 1.0.47, `proc-macro2` 1.0.107; generalize `vendor.rs`, `coverage.rs`, `bump.rs` | `cargo xtask coverage` still reports `serde_core` at 12,037/12,037 and now verifies five pinned trees; a role a gate does not know is a build failure |
 | **N2 — Glossary** ✅ | [D9](docs/decisions.md): `glossary/*.toml`, the `glossary` field on annotations, renderer support | 62 entries, every citation resolves, a quoted definition that drifts from its pinned tree fails the gate |
 | **N3 — Expansion harness** ✅ | The [§9](docs/derive-track-scope.md) patch applied by `expand/build.rs`, native golden transcripts, a second wasm module fetched only on derive pages | An expansion on the site is byte-identical to the host's, and the generated code is asserted to carry the pinned version |
-| **N4 — The narrative** | 8–10 units, one struct and one enum, end to end | Walkable start to finish; every cited range resolves; no forward references (the D8 check, across two sources) |
+| **N4 — The narrative** ✅ | 8–10 units, one struct and one enum, end to end | Walkable start to finish; every cited range resolves; no forward references (the D8 check, across two sources) |
 | **N5 — Ship** | Track navigation, the restated promise, `README` | The three tracks are each reachable and each honest about what they claim |
+
+N4 shipped as nine units and 85 steps, citing 1,875 lines across the two pinned
+sources, nine of them crossings into annotated `serde_core`. Thirty steps quote
+the code their citation emits, and those quotations are verified against a real
+expansion at build time rather than stored — [D10](docs/decisions.md).
 
 N1 is deliberately first and deliberately boring: every later phase needs a
 source that is not `serde_core`, and the pin is the thing that has protected

@@ -1,0 +1,253 @@
+schema = 1
+
+[unit]
+id = "07-the-field-identifier"
+title = "The field identifier, and what deny_unknown_fields removes"
+expand_case = "struct_rename"
+summary = """
+Before a derived `Deserialize` can read a struct it has to be able to read a
+*key*. That costs 96 of the expansion's 233 lines: a private enum, a visitor,
+and a `Deserialize` impl, all for two field names.
+"""
+body = """
+The `Deserialize` half of our struct is five times the size of the `Serialize`
+half, and this unit is the first 96 lines of it — everything before `__Visitor`
+appears.
+
+The reason so much code exists for something so small is that a key is not a
+string. A self-describing format hands over a string, a compact binary format
+hands over an index, and a format reading from a borrowed buffer hands over a
+`&'de str` that must not be copied. All three have to arrive at the same two-
+variant enum. So `serde_derive` generates a type whose only job is to be
+deserialized from any of those and to name one field.
+
+This is also where `deny_unknown_fields` becomes visible. Watch what is missing
+from the generated code below: our struct has the attribute, so there is no
+`__ignore` variant, no fallthrough arm producing one, and no way for an
+unrecognised key to be anything but an error.
+"""
+
+[[step]]
+id = "s07-field-visitor"
+source = "serde_derive-1.0.229"
+file = "src/de/struct_.rs"
+lines = "673-697"
+title = "deserialize_field_identifier — three configurations, one call"
+body = """
+Twenty-five lines that decide the shape of everything below, from two booleans.
+
+With a flattened field, unknown keys have to be *kept* — they may belong to the
+flattened struct — so the enum gains `__other(Content<'de>)`, carrying the key
+itself. With `deny_unknown_fields`, unknown keys are an error, so there is no
+extra variant and no fallthrough at all. Otherwise, the familiar `__ignore`.
+
+Our struct is the middle case, and this is the whole of what the attribute from
+unit 03 does here: `(None, None)`.
+"""
+
+[[step]]
+id = "s07-generated-enum"
+source = "serde_derive-1.0.229"
+file = "src/de/identifier.rs"
+lines = "154-182"
+title = "The enum, the visitor, and the Deserialize impl — as one template"
+leans_on = ["s07-field-visitor"]
+glossary = ["quote::quote"]
+emits = """
+enum __Field {
+    __field0,
+    __field1,
+}
+#[doc(hidden)]
+struct __FieldVisitor;
+"""
+emits_from = "deserialize"
+body = """
+Three items, emitted together because they are useless apart.
+
+The variants are named `__field0` and `__field1`, not `x_coord` and `label`.
+Positional names cannot collide with each other, cannot collide with Rust
+keywords, and do not have to be valid identifiers in the first place — a field
+renamed to `"type"` or `"1"` still gets a legal variant. The mapping from wire
+name to variant lives entirely in the match arms below.
+
+`#lifetime` is `Some(<'de>)` only in the flatten case, where the enum holds
+borrowed content. Ours is a plain enum with no parameters.
+
+The `Deserialize` impl at the bottom calls `deserialize_identifier` — a hint
+this walk crosses into `serde_core` for at the end of this unit.
+"""
+
+[[step]]
+id = "s07-str-mapping"
+source = "serde_derive-1.0.229"
+file = "src/de/identifier.rs"
+lines = "194-218"
+title = "The name-to-variant arms, generated twice"
+leans_on = ["s07-generated-enum"]
+glossary = ["proc_macro2::Literal"]
+emits = """
+"xCoord" => _serde::__private229::Ok(__Field::__field0),
+"label" => _serde::__private229::Ok(__Field::__field1),
+"""
+emits_from = "deserialize"
+body = """
+Once as string literals, once as byte-string literals. `Literal::byte_string`
+builds the `b"xCoord"` form, and the two mappings feed `visit_str` and
+`visit_bytes` respectively.
+
+Both iterate `field.aliases`, and the comment on line 198 is the thing to carry
+away: the alias set *contains the main name*. Unit 04 put it there, in the last
+line of `rename_by_rules`. So there is no separate arm for the primary name and
+no ordering question between it and the aliases — there is one set, and
+`BTreeSet` makes its order deterministic.
+
+`let private2 = private;` two lines up is a small mechanical detail:
+`quote!`'s repetition syntax needs a binding it can move into the closure, and
+`private` is a unit struct in scope.
+"""
+
+[[step]]
+id = "s07-u64-mapping"
+source = "serde_derive-1.0.229"
+file = "src/de/identifier.rs"
+lines = "367-401"
+title = "…and the same thing again, by index"
+leans_on = ["s07-str-mapping"]
+emits = """
+0u64 => _serde::__private229::Ok(__Field::__field0),
+1u64 => _serde::__private229::Ok(__Field::__field1),
+"""
+emits_from = "deserialize"
+body = """
+A compact binary format does not send field names. It sends `0`, `1`, `2` — the
+declaration order — and `visit_u64` is where that arrives.
+
+The fallthrough is a written-out error rather than a generic one: *"field index
+0 <= i < 2"*, built with `format!` at expansion time so the bound is a literal.
+`Unexpected::Unsigned(__value)` carries what actually arrived.
+
+Note that the positional variant names finally pay off here. `__field0` really is
+index 0, so this arm is generated by `enumerate()` with no lookup table.
+"""
+
+[[step]]
+id = "s07-fallthrough"
+source = "serde_derive-1.0.229"
+file = "src/de/identifier.rs"
+lines = "258-271"
+title = "The fallthrough — and the branch our struct does not take"
+leans_on = ["s07-str-mapping"]
+emits = """
+_ => {
+    _serde::__private229::Err(
+        _serde::de::Error::unknown_field(__value, FIELDS),
+    )
+}
+"""
+emits_from = "deserialize"
+body = """
+Fourteen lines with three outcomes. If the caller supplied a fallthrough — the
+`__ignore` or `__other` from `s07-field-visitor` — it is used. Otherwise the arm
+is an error, and *which* error depends on whether this identifier names a field
+or a variant.
+
+Our struct has `deny_unknown_fields`, so no fallthrough was supplied and the
+error arm is what gets emitted. Take the attribute off and this becomes
+`_serde::__private229::Ok(__Field::__ignore)`, the enum grows a third variant,
+and `visit_map` grows an arm that consumes and discards the value.
+
+That is four separate changes to the generated code, from three lines of parsing
+in unit 03.
+"""
+
+[[step]]
+id = "s07-visit-str"
+source = "serde_derive-1.0.229"
+file = "src/de/identifier.rs"
+lines = "441-476"
+title = "…assembled into a Visitor impl"
+leans_on = ["s07-fallthrough", "s07-u64-mapping"]
+glossary = ["quote::quote"]
+body = """
+The `quote_block!` that produces the visitor's methods, and the shape of it is
+the same negotiation `serde_core`'s `Visitor` trait describes: `expecting` for
+the error message, then one method per way a key can arrive.
+
+`#visit_other` is the flatten path's dozen extra methods. `#visit_borrowed` is
+emitted only when borrowed content matters. What is left is the three our struct
+gets: `visit_u64`, `visit_str`, `visit_bytes`.
+
+`bytes_to_str` — spliced into the `visit_bytes` fallthrough — is
+`from_utf8_lossy`, and it exists so that an unknown key arriving as bytes still
+produces a readable error rather than a slice of numbers.
+"""
+
+[[step]]
+id = "s07-fields-const"
+source = "serde_derive-1.0.229"
+file = "src/de/struct_.rs"
+lines = "122-131"
+title = "FIELDS — the list that error message needs"
+leans_on = ["s07-fallthrough"]
+emits = "const FIELDS: &'static [&'static str] = &[\"xCoord\", \"label\"];"
+emits_from = "deserialize"
+body = """
+`unknown_field(__value, FIELDS)` needs something to suggest, and this is it: a
+static slice built by flat-mapping every deserializable field's aliases, in the
+order unit 04 established.
+
+It is `None` when a field is flattened, because there is no closed list of
+expected keys in that case — which is also why the flatten path cannot produce
+the *"expected `xCoord` or `label`"* message.
+
+The same constant is passed to `deserialize_struct` at the very end of the
+expansion, so a format can use it to look up keys efficiently. One list, two
+consumers.
+"""
+
+[[step]]
+id = "s07-unknown-field"
+source = "serde_core-1.0.229"
+file = "src/de/mod.rs"
+lines = "260-283"
+title = "unknown_field, on the other side"
+annotation = "de-mod-0011"
+leans_on = ["s07-fields-const"]
+body = """
+The crossing. `unknown_field` is a provided method on `serde_core`'s `Error`
+trait, and its default implementation is what turns the pair `(key, FIELDS)`
+into *"unknown field `nope`, expected `xCoord` or `label`"* — including the
+`OneOf` helper that gets the commas and the "or" right.
+
+The division of labour is exact. `serde_derive` knows the field names and
+nothing about formatting; `serde_core` knows the phrasing and nothing about the
+struct. Neither could produce that sentence alone, and no format has to write
+it.
+
+The empty-list case is handled here too: with no fields to suggest, the message
+becomes *"there are no fields"*, which is what a `#[serde(deny_unknown_fields)]`
+unit struct produces.
+"""
+
+[[step]]
+id = "s07-deserialize-identifier"
+source = "serde_core-1.0.229"
+file = "src/de/mod.rs"
+lines = "1174-1185"
+title = "…and deserialize_identifier, the hint this all exists to answer"
+annotation = "de-mod-0040"
+leans_on = ["s07-generated-enum"]
+body = """
+Twelve lines, and one of the two `Deserializer` methods that is not about a
+type at all.
+
+`deserialize_identifier` says: *I am about to read something that names a field
+or a variant.* A human-readable format answers with a string. A compact one
+answers with an index. The visitor generated in this unit accepts either, which
+is why the same derived impl works for both without knowing which format it is
+talking to.
+
+That is the last piece of the identifier machinery. The next unit uses it: every
+key `visit_map` reads comes back through `__Field`.
+"""

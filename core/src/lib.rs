@@ -340,6 +340,119 @@ pub fn read_glossary(repo: &Path) -> Result<Vec<GlossaryItem>> {
     Ok(out)
 }
 
+/// One narrative unit, resolved against the trees its steps cite.
+#[derive(Debug, Clone)]
+pub struct NarrativeItem {
+    pub unit: schema::NarrativeUnit,
+    pub steps: Vec<NarrativeStepItem>,
+}
+
+/// One step, with its citation resolved.
+#[derive(Debug, Clone)]
+pub struct NarrativeStepItem {
+    pub step: schema::NarrativeStep,
+    pub range: LineRange,
+    /// The crate and version cited, split out because the reader is told which
+    /// tree they are looking at on every step — the walk crosses between two.
+    pub crate_name: String,
+    pub version: String,
+    /// True when this step cites the one coverage source, which is what makes
+    /// it a crossing into the reference track rather than a stop in the walk.
+    pub is_coverage: bool,
+    /// The cited lines, read from the pinned tree at load time. Never stored in
+    /// the toml, for the same reason a glossary quotation is not (see
+    /// [`GlossaryItem::quoted`]).
+    pub quoted: String,
+}
+
+/// Reads every `narrative/*.toml`, in filename order, resolving each citation
+/// against the pinned tree it names.
+///
+/// Filename order is reading order (see [`schema::NarrativeFile`]). What is
+/// enforced here rather than in the gate is what the site cannot render
+/// without: the named source must be pinned, it must not be a glossary source,
+/// and every line range must exist.
+pub fn read_narrative(repo: &Path) -> Result<Vec<NarrativeItem>> {
+    let dir = repo.join("narrative");
+    if !dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    let pin = vendor::load_pin(repo)?;
+    let coverage_id = pin.primary()?.source_id();
+
+    let mut paths: Vec<_> = std::fs::read_dir(&dir)
+        .with_context(|| format!("reading {}", dir.display()))?
+        .collect::<std::io::Result<Vec<_>>>()?
+        .into_iter()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "toml"))
+        .collect();
+    paths.sort();
+
+    let mut out = Vec::new();
+    for path in paths {
+        let parsed = schema::NarrativeFile::load(&path)?;
+        let mut steps = Vec::new();
+        for step in parsed.steps {
+            let source = pin
+                .sources
+                .iter()
+                .find(|s| s.source_id() == step.source)
+                .with_context(|| {
+                    format!(
+                        "{}: step {} cites {:?}, which is not pinned in vendor/pin.toml",
+                        path.display(),
+                        step.id,
+                        step.source
+                    )
+                })?;
+            anyhow::ensure!(
+                source.role != vendor::Role::Glossary,
+                "{}: step {} cites {}, which is pinned as a glossary source — borrowed \
+                 vocabulary is quoted in glossary/, not walked (D9)",
+                path.display(),
+                step.id,
+                step.source
+            );
+            let range = LineRange::parse(&step.lines)
+                .with_context(|| format!("{}: step {}", path.display(), step.id))?;
+            let file = source.dir(repo).join(&step.file);
+            let text = std::fs::read_to_string(&file).with_context(|| {
+                format!(
+                    "{}: step {} cites {}, which is not in the pinned {} tree",
+                    path.display(),
+                    step.id,
+                    step.file,
+                    step.source
+                )
+            })?;
+            let lines: Vec<&str> = text.lines().collect();
+            anyhow::ensure!(
+                range.end as usize <= lines.len(),
+                "{}: step {} cites {}:{} but the file has {} lines",
+                path.display(),
+                step.id,
+                step.file,
+                step.lines,
+                lines.len()
+            );
+            steps.push(NarrativeStepItem {
+                range,
+                crate_name: source.name.clone(),
+                version: source.version.clone(),
+                is_coverage: step.source == coverage_id,
+                quoted: lines[range.start as usize - 1..range.end as usize].join("\n"),
+                step,
+            });
+        }
+        out.push(NarrativeItem {
+            unit: parsed.unit,
+            steps,
+        });
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

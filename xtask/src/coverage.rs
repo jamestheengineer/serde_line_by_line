@@ -36,6 +36,19 @@ pub struct UnitCoverage {
     pub lines: u32,
 }
 
+/// One narrative unit's shape. There is no percentage here on purpose: the
+/// narrative source is walked, not claimed (PLAN.md §11), and a coverage figure
+/// over it would be a lie told in a number. What is reported instead is the
+/// size of the walk and how often it crosses into the annotated crate.
+#[derive(Debug, Serialize)]
+pub struct NarrativeUnitReport {
+    pub id: String,
+    pub title: String,
+    pub steps: usize,
+    pub cited_lines: u32,
+    pub crossings: usize,
+}
+
 #[derive(Debug, Serialize)]
 pub struct Report {
     pub source: String,
@@ -44,6 +57,7 @@ pub struct Report {
     pub annotations: usize,
     pub files: Vec<FileCoverage>,
     pub course: Vec<UnitCoverage>,
+    pub narrative: Vec<NarrativeUnitReport>,
 }
 
 impl Report {
@@ -285,6 +299,10 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
         &mut diag,
     )?;
 
+    // 6. The narrative track, which cites both pinned sources and claims
+    //    neither exhaustively.
+    let narrative = check_narrative(repo, &source_id, &by_id, &glossary, &mut diag)?;
+
     let report = Report {
         source: source_id.clone(),
         total_lines,
@@ -292,6 +310,7 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
         annotations: annotations.len(),
         files,
         course,
+        narrative,
     };
 
     print_report(&report, &diag, &kinds);
@@ -494,6 +513,206 @@ fn check_unit(
             }
         ));
     }
+}
+
+/// The narrative track (PLAN.md §11): `narrative/*.toml`.
+///
+/// The narrative makes no coverage promise, so there is no percentage here to
+/// keep it honest and these checks stand in its place. Three of them matter:
+///
+/// * **D8, across two sources.** A step may not lean on one that comes later in
+///   the walk. The graph now spans `serde_derive` and `serde_core`, which is
+///   the only thing that changed — the rule and the reason are the course
+///   track's.
+/// * **A crossing lands on claimed ground.** A step citing the coverage source
+///   must name the reference-track annotation containing it, and the range must
+///   really be inside that annotation. The narrative gets to reuse 12,037
+///   annotated lines instead of re-explaining them, and the link cannot rot.
+/// * **A step cites something.** `read_narrative` has already proved the range
+///   resolves in a pinned tree; what is left is the bookkeeping a reader would
+///   notice.
+///
+/// `emits` — a step's claim about what the cited machinery generates — is
+/// checked where the expansion actually happens, in the site generator, which
+/// renders the real bytes rather than the string in the store. `cargo site` is
+/// a CI gate and a pre-push gate, so the claim is enforced either way.
+fn check_narrative(
+    repo: &Path,
+    coverage_id: &str,
+    by_id: &HashMap<&str, &Annotation>,
+    glossary: &HashSet<String>,
+    diag: &mut Diagnostics,
+) -> Result<Vec<NarrativeUnitReport>> {
+    let units = slbl_core::read_narrative(repo)?;
+    if units.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let cases = expand_case_names(repo)?;
+
+    // Position in the walk, for the forward-reference check. Steps are numbered
+    // across units rather than within them, because the walk is one sequence.
+    let mut position: HashMap<&str, usize> = HashMap::new();
+    let mut unit_of: HashMap<&str, &str> = HashMap::new();
+    let mut n = 0;
+    for unit in &units {
+        for step in &unit.steps {
+            if position.insert(step.step.id.as_str(), n).is_some() {
+                diag.error(format!("duplicate narrative step id {:?}", step.step.id));
+            }
+            unit_of.insert(step.step.id.as_str(), unit.unit.id.as_str());
+            n += 1;
+        }
+    }
+    for pair in units.windows(2) {
+        if pair[0].unit.id >= pair[1].unit.id {
+            diag.error(format!(
+                "narrative units out of order: {:?} before {:?}",
+                pair[0].unit.id, pair[1].unit.id
+            ));
+        }
+    }
+
+    let mut out = Vec::new();
+    for unit in &units {
+        let u = &unit.unit;
+        if u.title.trim().is_empty() || u.summary.trim().is_empty() || u.body.trim().is_empty() {
+            diag.error(format!("{}: empty title, summary or body", u.id));
+        }
+        if unit.steps.is_empty() {
+            diag.error(format!(
+                "{}: no steps — a narrative unit is its citations plus its framing",
+                u.id
+            ));
+        }
+        if let Some(case) = &u.expand_case {
+            if !cases.contains(case) {
+                diag.error(format!(
+                    "{}: expand_case {case:?} is not a file in expand/cases/",
+                    u.id
+                ));
+            }
+        }
+
+        let mut crossings = 0;
+        let mut cited_lines = 0;
+        for item in &unit.steps {
+            let s = &item.step;
+            cited_lines += item.range.line_count();
+            if s.title.trim().is_empty() || s.body.trim().is_empty() {
+                diag.error(format!("{}: empty title or body", s.id));
+            }
+            for cited in &s.glossary {
+                if !glossary.contains(cited) {
+                    diag.error(format!(
+                        "{}: cites glossary {cited:?}, which has no entry",
+                        s.id
+                    ));
+                }
+            }
+            for p in &s.leans_on {
+                match position.get(p.as_str()) {
+                    None => diag.error(format!("{}: unknown leans_on {p:?}", s.id)),
+                    Some(&there) if there >= position[s.id.as_str()] => diag.error(format!(
+                        "{}: leans on {p}, which the narrative does not reach until {}",
+                        s.id,
+                        unit_of[p.as_str()]
+                    )),
+                    Some(_) => {}
+                }
+            }
+
+            // The crossing rule. A step in `serde_core` is the narrative
+            // walking into territory the reference track already owns, so it
+            // says which annotation it landed in and the gate proves it landed
+            // there.
+            match (item.is_coverage, s.annotation.as_deref()) {
+                (true, None) => diag.error(format!(
+                    "{}: cites {coverage_id} but names no annotation — a crossing into the \
+                     reference track must say where it lands",
+                    s.id
+                )),
+                (true, Some(id)) => match by_id.get(id) {
+                    None => diag.error(format!("{}: unknown annotation {id:?}", s.id)),
+                    Some(a) if a.file != s.file => diag.error(format!(
+                        "{}: annotation {id} is in {}, not {}",
+                        s.id, a.file, s.file
+                    )),
+                    Some(a) => {
+                        let r = LineRange::parse(&a.lines)?;
+                        if item.range.start < r.start || item.range.end > r.end {
+                            diag.error(format!(
+                                "{}: cites {}:{} but annotation {id} claims {} — a crossing \
+                                 must sit inside the annotation it names",
+                                s.id, s.file, s.lines, a.lines
+                            ));
+                        }
+                    }
+                },
+                (false, Some(id)) => diag.error(format!(
+                    "{}: names annotation {id:?}, but {} is not the annotated source",
+                    s.id, s.source
+                )),
+                (false, None) => {}
+            }
+            if item.is_coverage {
+                crossings += 1;
+            }
+
+            match (s.emits.is_some(), s.emits_from.is_some()) {
+                (true, false) => diag.error(format!(
+                    "{}: has emits but no emits_from — which half of the expansion?",
+                    s.id
+                )),
+                (false, true) => diag.error(format!("{}: has emits_from but no emits", s.id)),
+                _ => {}
+            }
+            match (&s.emits, s.emits_case.as_ref().or(u.expand_case.as_ref())) {
+                (Some(_), None) => diag.error(format!(
+                    "{}: quotes emitted code, but neither it nor {} names a case to quote \
+                     it from",
+                    s.id, u.id
+                )),
+                (_, Some(case)) if !cases.contains(case) => diag.error(format!(
+                    "{}: emits_case {case:?} is not a file in expand/cases/",
+                    s.id
+                )),
+                _ => {}
+            }
+            if s.emits.is_none() && s.emits_case.is_some() {
+                diag.error(format!("{}: has emits_case but no emits", s.id));
+            }
+        }
+
+        out.push(NarrativeUnitReport {
+            id: u.id.clone(),
+            title: u.title.clone(),
+            steps: unit.steps.len(),
+            cited_lines,
+            crossings,
+        });
+    }
+    Ok(out)
+}
+
+/// The names of the committed expansion inputs, read off disk rather than from
+/// the `expand` crate: the gate has no business compiling `serde_derive` to
+/// find out that a directory has six files in it.
+fn expand_case_names(repo: &Path) -> Result<HashSet<String>> {
+    let dir = repo.join("expand").join("cases");
+    let mut out = HashSet::new();
+    if !dir.is_dir() {
+        return Ok(out);
+    }
+    for entry in std::fs::read_dir(&dir)? {
+        let path = entry?.path();
+        if path.extension().is_some_and(|e| e == "rs") {
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                out.insert(stem.to_string());
+            }
+        }
+    }
+    Ok(out)
 }
 
 fn fmt_gap(a: u32, b: u32) -> String {
@@ -858,6 +1077,26 @@ fn print_report(report: &Report, diag: &Diagnostics, kinds: &BTreeMap<String, us
                 u.lines,
                 format!("{:?}", u.supplement).to_lowercase(),
                 format!("{:?}", u.status).to_lowercase(),
+            );
+        }
+    }
+
+    if !report.narrative.is_empty() {
+        let steps: usize = report.narrative.iter().map(|u| u.steps).sum();
+        let cited: u32 = report.narrative.iter().map(|u| u.cited_lines).sum();
+        println!(
+            "\nnarrative track: {} units, {steps} steps, {cited} lines cited \
+             (walked, not claimed)\n",
+            report.narrative.len()
+        );
+        println!(
+            "{:<32}{:>8}{:>8}{:>12}",
+            "unit", "steps", "lines", "crossings"
+        );
+        for u in &report.narrative {
+            println!(
+                "{:<32}{:>8}{:>8}{:>12}",
+                u.id, u.steps, u.cited_lines, u.crossings
             );
         }
     }

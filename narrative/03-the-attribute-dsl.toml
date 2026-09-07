@@ -1,0 +1,243 @@
+schema = 1
+
+[unit]
+id = "03-the-attribute-dsl"
+title = "The attribute DSL, and where a typo becomes a diagnostic"
+expand_case = "struct_rename"
+summary = """
+`internals/attr.rs` is 1,818 lines — a fifth of the crate — and it is a hand
+written parser for a language with no grammar file. Following two of our
+struct's four attributes through it is enough to see the whole shape.
+"""
+body = """
+`#[serde(rename_all = "camelCase", deny_unknown_fields)]` is not Rust that the
+compiler understands. It is an inert helper attribute, handed to the derive as
+tokens, and everything it means is decided by this file.
+
+Nothing here is generated. There is no table of attribute names driving a loop:
+there is a chain of `else if`, one arm per attribute, 43 of them for containers
+and more for fields and variants. That is worth seeing rather than being told
+about, because it explains both why the error messages are as good as they are —
+each arm can say something specific — and why the file is a fifth of the crate.
+
+The four attributes on our struct take three different routes through it:
+`rename_all` parses a value into an enum, `deny_unknown_fields` sets a flag,
+`default` and `skip_serializing_if` are field-level. We will follow the first
+two, and then follow a mistake.
+"""
+
+[[step]]
+id = "s03-attr"
+source = "serde_derive-1.0.229"
+file = "src/internals/attr.rs"
+lines = "24-51"
+title = "Attr<T> — an Option that remembers where it was set"
+glossary = ["quote::ToTokens", "proc_macro2::TokenStream"]
+body = """
+Every attribute is accumulated in one of these. It is an `Option<T>` plus the
+tokens that set it, and the tokens are kept for exactly one purpose: reporting
+the duplicate.
+
+`set` is the whole policy. Setting twice is an error attributed to the *second*
+occurrence, and — this is the part worth noticing — the first value is kept. The
+parse continues with a coherent value, so one duplicate does not cascade into a
+second error about a missing setting.
+
+`cx` is the `Ctxt` from unit 02, held by reference in every one of the 23
+locals a container parse creates.
+"""
+
+[[step]]
+id = "s03-container-struct"
+source = "serde_derive-1.0.229"
+file = "src/internals/attr.rs"
+lines = "154-175"
+title = "attr::Container — what a struct's attributes reduce to"
+leans_on = ["s03-attr"]
+glossary = ["syn::WherePredicate", "syn::Type", "syn::Path"]
+body = """
+Eighteen fields. This is the answer the code generator will consult; nothing
+downstream re-reads the user's attributes.
+
+Read the types rather than the names. `deny_unknown_fields: bool` — a flag, no
+span, because by generation time there is nothing left to report. `tag: TagType`
+— not three optional fields but one enum, because the combinations are checked
+once (unit 09). `ser_bound` and `de_bound` are `Option<Vec<WherePredicate>>`,
+already parsed as Rust syntax rather than kept as strings.
+
+`name: MultiName` is two names, one per direction, and unit 04 is about it.
+"""
+
+[[step]]
+id = "s03-parse-loop"
+source = "serde_derive-1.0.229"
+file = "src/internals/attr.rs"
+lines = "262-282"
+title = "The loop: every attribute on the item, filtered to one path"
+leans_on = ["s03-container-struct"]
+glossary = ["syn::Attribute", "syn::Meta", "syn::meta::ParseNestedMeta", "syn::Path"]
+body = """
+`item.attrs` is every attribute on the struct — doc comments, `#[repr]`,
+`#[derive]` itself, and ours. Line 263 keeps only `#[serde(...)]`.
+
+`parse_nested_meta` is `syn`'s driver for comma-separated `path`, `path = value`
+and `path(inner)` forms. It calls the closure once per item, handing it a
+`ParseNestedMeta` that carries the path and a cursor positioned just after it.
+The closure returns `syn::Result`, and an `Err` stops that attribute's parse —
+which is why every arm below returns rather than recovering: a malformed
+attribute has no reliable resumption point, unlike a merely wrong one.
+
+Line 270 is a small piece of care: `#[serde()]` with nothing inside is accepted
+and ignored rather than reported as an error, because `parse_nested_meta` on an
+empty list is not a no-op.
+"""
+
+[[step]]
+id = "s03-symbol"
+source = "serde_derive-1.0.229"
+file = "src/internals/symbol.rs"
+lines = "55-65"
+title = "Why `meta.path == RENAME_ALL` compiles at all"
+leans_on = ["s03-parse-loop"]
+glossary = ["syn::Path", "syn::Ident"]
+body = """
+`meta.path` is a `syn::Path` and `RENAME_ALL` is a `Symbol` — a newtype around
+`&'static str`. The comparison works because of these ten lines: `PartialEq<Symbol>
+for Path`, delegating to `Path::is_ident`.
+
+`is_ident` is stricter than it looks. It is true only for a path with exactly one
+segment, no leading `::` and no generic arguments, so `#[serde(foo::rename = …)]`
+does not match `RENAME` — it falls through to the unknown-attribute arm and gets
+a proper error.
+
+The impl for `&Path` beside it exists because the `else if` chain compares both
+`meta.path` and `&meta.path` depending on the arm.
+"""
+
+[[step]]
+id = "s03-rename-all"
+source = "serde_derive-1.0.229"
+file = "src/internals/attr.rs"
+lines = "282-305"
+title = "rename_all — the arm our struct actually takes"
+leans_on = ["s03-symbol"]
+glossary = ["syn::Token", "syn::LitStr"]
+body = """
+Two shapes are accepted: `rename_all = "camelCase"` and `rename_all(serialize =
+"…", deserialize = "…")`. `get_renames` handles both and returns a pair of
+optional literals, so the rest of the arm is the same either way.
+
+The string becomes a `RenameRule` here, at parse time, and an unrecognised one is
+reported here too — not stored and diagnosed later. That is why the error for a
+typo names the attribute rather than the field.
+
+Lines 296-299 are the subtle bit. When only one name was given, the same literal
+is parsed twice, once per direction; reporting the failure twice would print the
+same message under the same squiggle. `one_name` suppresses the second.
+"""
+
+[[step]]
+id = "s03-rename-rule-parse"
+source = "serde_derive-1.0.229"
+file = "src/internals/case.rs"
+lines = "33-54"
+title = "…and the eight-row table it is looked up in"
+leans_on = ["s03-rename-all"]
+body = """
+A static array and a linear scan. Eight entries, one string comparison each, and
+the failure carries the string that did not match.
+
+There is no normalisation: `"camelCase"` matches and `"camelcase"` does not.
+That is a deliberate choice in favour of the error message being able to list
+what was expected, which the next step shows.
+"""
+
+[[step]]
+id = "s03-parse-error"
+source = "serde_derive-1.0.229"
+file = "src/internals/case.rs"
+lines = "120-137"
+title = "The diagnostic, written out by a Display impl"
+leans_on = ["s03-rename-rule-parse"]
+emits_case = "attribute_error"
+emits = """
+::core::compile_error! {
+    "unknown rename rule `rename_all = \\"nope\\"`, expected one of \\"lowercase\\", \\"UPPERCASE\\", \\"PascalCase\\", \\"camelCase\\", \\"snake_case\\", \\"SCREAMING_SNAKE_CASE\\", \\"kebab-case\\", \\"SCREAMING-KEBAB-CASE\\""
+}
+"""
+emits_from = "serialize"
+body = """
+This is the crossing where the walk steps aside from our struct for six lines,
+because the interesting thing about a diagnostic is a wrong input.
+
+`ParseError` holds the string that failed and formats itself by walking the same
+`RENAME_RULES` table the lookup used. The list of accepted values in the message
+cannot drift from the list of accepted values, because there is only one list.
+
+The block beside it is the entire expansion of a struct carrying
+`#[serde(rename_all = "nope")]`. Not an excerpt: a derive that fails emits
+nothing but the error, and the error is *generated code*. Everything from unit
+01 — the `const _`, the impl, the visitor — is not reached, because the message
+was produced during `Container::from_ast` and `ctxt.check()?` returned before
+`Parameters::new` ran.
+"""
+
+[[step]]
+id = "s03-deny-unknown-fields"
+source = "serde_derive-1.0.229"
+file = "src/internals/attr.rs"
+lines = "344-346"
+title = "deny_unknown_fields — three lines, and a large consequence"
+leans_on = ["s03-parse-loop"]
+body = """
+The simplest arm in the file: a path with no value, recorded as a bool.
+
+`set_true` goes through the same `Attr` machinery as everything else, so
+`#[serde(deny_unknown_fields, deny_unknown_fields)]` is still a duplicate error.
+
+What this flag does is out of all proportion to the three lines that read it. It
+removes a variant from a generated enum, removes a match arm from a generated
+`visit_str`, removes another from `visit_map`, and changes what happens to an
+unrecognised key from "skip it" to "fail". Unit 07 watches all four disappear.
+"""
+
+[[step]]
+id = "s03-skip-serializing-if"
+source = "serde_derive-1.0.229"
+file = "src/internals/attr.rs"
+lines = "1109-1113"
+title = "skip_serializing_if — a string that is parsed as an expression"
+leans_on = ["s03-parse-loop"]
+glossary = ["syn::ExprPath", "syn::LitStr"]
+body = """
+The field-level arm our `label` field takes. `"Option::is_none"` arrives as a
+string literal, and `parse_lit_into_expr_path` re-parses its contents as a
+`syn::ExprPath` — a path in expression position.
+
+Two consequences follow, and both are visible in the expansion. The path is
+validated now, so a syntactically impossible one is an error at the attribute
+rather than a confusing failure inside generated code. And it is stored as
+syntax, so `quote!` can interpolate it directly into the call it emits, spans
+and all.
+
+The reason it is a string in the first place is that `#[serde(skip_serializing_if
+= Option::is_none)]` is not valid attribute syntax for a value position. The
+string is a quoting mechanism, not a design preference.
+"""
+
+[[step]]
+id = "s03-container-build"
+source = "serde_derive-1.0.229"
+file = "src/internals/attr.rs"
+lines = "519-534"
+title = "Where the 23 locals become one Container"
+leans_on = ["s03-attr", "s03-rename-all", "s03-deny-unknown-fields"]
+body = """
+The end of a 280-line function. Every accumulator is consumed by `get()` and
+every unset one takes its default, which is where `rename_all` becomes
+`RenameRule::None` for a struct that did not ask for it.
+
+`RenameRule::None` is a rule, not an absence — `apply_to_field` on it returns
+the name unchanged. That is why nothing downstream ever has to ask whether a
+rename rule exists.
+"""

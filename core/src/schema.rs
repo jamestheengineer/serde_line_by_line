@@ -262,3 +262,132 @@ impl CourseFile {
         Ok(parsed)
     }
 }
+
+/// One unit of the narrative track (`narrative/<id>.toml`).
+///
+/// The narrative walks `serde_derive` rather than claiming it (PLAN.md §11).
+/// That is the whole difference between this type and [`Annotation`]: there is
+/// no `kind`, no `tracks`, no coverage, and — because a walk may look at the
+/// same code twice from two directions — no non-overlap rule. What it keeps is
+/// the part that has protected every line range in this repo since phase 0: a
+/// citation into a pinned tree.
+///
+/// One unit per file, and the file stem is the id. Declaration order within a
+/// unit is reading order; the numeric prefix on the id orders the units. There
+/// is no registry file, because a registry is a second place for the order to
+/// live and the filenames already say it.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NarrativeFile {
+    pub schema: u32,
+    pub unit: NarrativeUnit,
+    #[serde(default, rename = "step")]
+    pub steps: Vec<NarrativeStep>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NarrativeUnit {
+    /// Slug with a numeric prefix, e.g. `"03-the-attribute-dsl"`. Must equal
+    /// the file's stem.
+    pub id: String,
+    pub title: String,
+    pub summary: String,
+    /// Name of an `expand/cases/*.rs` input this unit is following. Every step
+    /// that quotes emitted code quotes it out of *this* case's expansion, so
+    /// the unit is anchored to one worked example rather than to a mood.
+    #[serde(default)]
+    pub expand_case: Option<String>,
+    pub body: String,
+}
+
+/// One stop on the walk: a range in a pinned tree, and why the reader is here.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NarrativeStep {
+    pub id: String,
+    /// Which pinned tree, e.g. `"serde_derive-1.0.229"`. A step may cite the
+    /// narrative source or the coverage source; quoting a glossary source is
+    /// the glossary's job (D9).
+    pub source: String,
+    /// Path relative to that source's crate root, e.g. `"src/ser.rs"`.
+    pub file: String,
+    pub lines: String,
+    pub title: String,
+    /// Earlier steps this one depends on having been read. The D8 rule applies
+    /// unchanged: a step may not lean on one that comes later in the walk.
+    #[serde(default)]
+    pub leans_on: Vec<String>,
+    /// Borrowed vocabulary this step reads (D9).
+    #[serde(default)]
+    pub glossary: Vec<String>,
+    /// The reference-track annotation this step lands in. Required when the
+    /// step cites the coverage source and rejected otherwise: the narrative may
+    /// only walk into `serde_core` where the reference track has already
+    /// claimed the ground, and the reader gets a link there.
+    #[serde(default)]
+    pub annotation: Option<String>,
+    /// Generated code this step claims the cited machinery produces, verified
+    /// against a real expansion of the unit's `expand_case` at render time —
+    /// and rendered from that expansion, never from this string. Lines are
+    /// matched contiguously, compared with leading and trailing whitespace
+    /// stripped, so a change in generated indentation is not a failure but a
+    /// change in generated code is.
+    #[serde(default)]
+    pub emits: Option<String>,
+    /// Which half of the expansion `emits` is quoting.
+    #[serde(default)]
+    pub emits_from: Option<DeriveKind>,
+    /// A case other than the unit's own to quote from. Rare and deliberate:
+    /// the bounds unit follows the same struct as its neighbours, but that
+    /// struct has no type parameters, so the one place a bound is visible is a
+    /// second input. Saying which is better than quietly switching examples.
+    #[serde(default)]
+    pub emits_case: Option<String>,
+    pub body: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DeriveKind {
+    Serialize,
+    Deserialize,
+}
+
+impl DeriveKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            DeriveKind::Serialize => "Serialize",
+            DeriveKind::Deserialize => "Deserialize",
+        }
+    }
+}
+
+impl NarrativeFile {
+    pub fn load(path: &Path) -> Result<Self> {
+        let text = std::fs::read_to_string(path)
+            .with_context(|| format!("reading narrative unit {}", path.display()))?;
+        let parsed: NarrativeFile =
+            toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+        if parsed.schema != SCHEMA_VERSION {
+            bail!(
+                "{}: schema {} but this build understands {SCHEMA_VERSION}",
+                path.display(),
+                parsed.schema
+            );
+        }
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
+        if parsed.unit.id != stem {
+            bail!(
+                "{}: unit id {:?} does not match the file name — the filename is what \
+                 orders the narrative, so the two may not disagree",
+                path.display(),
+                parsed.unit.id
+            );
+        }
+        Ok(parsed)
+    }
+}

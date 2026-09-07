@@ -703,3 +703,49 @@ main { padding: 0 0 80px; min-width: 0; }
   max-height: 30rem; overflow: auto;
   font-size: .82rem; line-height: 1.55; white-space: pre;
 }
+
+/* ---- the derive track ----------------------------------------------------
+   A walk, not a claim. Each step keeps the reference track's two-column shape,
+   because a citation is still code beside prose, and adds the two things a
+   walk needs that a file page does not: which pinned tree these lines came
+   from, and what they emit. */
+.step .codehead {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 1rem; flex-wrap: wrap;
+}
+.origin {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+.b-walked { color: var(--doc); border-color: var(--doc); border-style: dashed; }
+
+/* The generated code a step claims its citation produces. Sliced out of a real
+   expansion at build time, so the border is the boundary between code someone
+   wrote and code this crate wrote. */
+.emits {
+  margin: 10px 0 0;
+  padding: 8px 0 4px;
+  border-top: 1px dashed var(--line-strong);
+}
+.emits .src { opacity: 0.92; }
+
+/* The input the unit follows, above its steps. */
+.walkcase {
+  margin: 4px 32px 12px;
+  max-width: 860px;
+  padding: 10px 0 8px;
+  background: var(--bg-code);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+.walkcase .codehead {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 1rem; flex-wrap: wrap;
+}
+.walkcase a.range { text-decoration: none; }
+.walkcase a.range:hover { color: var(--accent); }
+
+/* The mirror of `.ahead`: a step naming one already read, rather than one the
+   reader has not reached. Same rule, opposite direction, so it is quieter. */
+.ahead.back { border-left-color: var(--line-strong); color: var(--fg-faint); }

@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block sidebar %}
+    <div class="nav-head">the walk</div>
+    <ul class="unitnav">
+    {% for u in units %}
+      <li{% if u.id == unit.id %} class="here"{% endif %}>
+        <a href="{{ root }}derive/{{ u.href }}">
+          <span class="unum">{{ u.number }}</span>
+          <span class="fname">{{ u.title }}</span>
+        </a>
+      </li>
+    {% endfor %}
+    </ul>
+{% endblock %}
+{% block content %}
+<div class="unithead lead">
+  <span class="unum big">{{ unit.number }}</span>
+  <h1>{{ unit.title }}</h1>
+  <div class="badges">
+    <span class="badge b-walked">walked, not claimed</span>
+  </div>
+</div>
+
+<section class="unitbody prose">{{ body_html|safe }}</section>
+
+{% if !case_name.is_empty() %}
+<section class="walkcase">
+  <div class="codehead">
+    <span class="range">following <code>{{ case_name }}</code></span>
+    <a class="range" href="{{ root }}expand/index.html#case-{{ case_name }}">expand it yourself →</a>
+  </div>
+  <div class="src">
+  {%- for line in case_code %}
+    <div class="ln" data-n="{{ line.number }}"><span class="num">{{ line.number }}</span><code>{{ line.html|safe }}</code></div>
+  {%- endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% for s in steps %}
+<section class="block step" id="{{ s.id }}">
+  <div class="code">
+    <div class="codehead">
+      <span class="range">{{ s.file }} · {{ s.range_label }}</span>
+      <span class="origin">{{ s.origin }}</span>
+    </div>
+    <div class="src">
+    {%- for line in s.code %}
+      <div class="ln" id="{{ s.id }}-L{{ line.number }}" data-n="{{ line.number }}"><span class="num">{{ line.number }}</span><code>{{ line.html|safe }}</code></div>
+    {%- endfor %}
+    </div>
+    {% for e in s.emits %}
+    <div class="emits">
+      <div class="codehead">
+        <span class="range">emits · {{ e.derive }} of <code>{{ e.case }}</code></span>
+        <span class="origin">{{ e.range_label }} of the expansion</span>
+      </div>
+      <div class="src">
+      {%- for line in e.code %}
+        <div class="ln" data-n="{{ line.number }}"><span class="num">{{ line.number }}</span><code>{{ line.html|safe }}</code></div>
+      {%- endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="note">
+    <div class="kind">step</div>
+    <h2>{{ s.title }}</h2>
+    {% if !s.annotation_href.is_empty() %}
+    <a class="expands" href="{{ root }}file/{{ s.annotation_href }}">annotated in the reference track: {{ s.annotation_title }}</a>
+    {% endif %}
+    {% for l in s.leans_on %}
+    <p class="ahead back">Read after <a href="{{ root }}derive/{{ l.href }}">{{ l.title }}</a>.</p>
+    {% endfor %}
+    <div class="prose">{{ s.body_html|safe }}</div>
+    {% if !s.glossary.is_empty() %}
+    <p class="cites">reads
+      {% for g in s.glossary %}<a href="{{ root }}glossary/index.html#{{ g.anchor }}"><code>{{ g.id }}</code></a>{% if !loop.last %}, {% endif %}{% endfor %}
+    </p>
+    {% endif %}
+  </div>
+</section>
+{% endfor %}
+
+<nav class="unitsteps">
+  {% for p in prev %}<a class="prev" href="{{ root }}derive/{{ p.href }}">← {{ p.number }} · {{ p.title }}</a>{% endfor %}
+  {% for n in next %}<a class="next" href="{{ root }}derive/{{ n.href }}">{{ n.number }} · {{ n.title }} →</a>{% endfor %}
+</nav>
+{% endblock %}
