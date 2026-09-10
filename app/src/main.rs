@@ -155,10 +155,34 @@ struct IndexPage {
     percent_label: String,
     annotations: usize,
     course_units: usize,
+    derive: Narrated,
+    glossary: Borrowed,
     source_id: String,
     root: String,
     current: String,
     track: String,
+}
+
+/// What the derive track came to, counted once and reported in two places: on
+/// its own index, and on the front page where the promise is restated.
+#[derive(Default)]
+struct Narrated {
+    units: usize,
+    steps: usize,
+    cited_lines: u32,
+    crossings: usize,
+    version: String,
+    /// Lines of `serde_derive` in the pinned tree — the denominator the track
+    /// deliberately does not have a numerator for.
+    source_lines: u32,
+}
+
+/// What the glossary came to. Same reason.
+#[derive(Default)]
+struct Borrowed {
+    entries: usize,
+    sources: usize,
+    quoted_lines: u32,
 }
 
 #[derive(Template)]
@@ -373,32 +397,6 @@ fn main() -> Result<()> {
     std::fs::create_dir_all(out.join("course"))?;
 
     let nav = build_nav(&store);
-
-    let index = IndexPage {
-        page_title: "serde line by line".to_string(),
-        description: one_line(&format!(
-            "Every line of serde_core {} annotated: {} lines claimed by {} explanations, \
-             beside the source, with runnable examples — and a {}-unit Rust course read out \
-             of the same annotations.",
-            store.version,
-            store.total_lines(),
-            index_count(&store),
-            store.course.len(),
-        )),
-        nav: build_nav(&store),
-        total_lines: store.total_lines(),
-        claimed_lines: store.claimed_lines(),
-        percent: store.percent(),
-        percent_label: format!("{:.1}", store.percent()),
-        annotations: store.by_file.values().map(Vec::len).sum(),
-        course_units: store.course.len(),
-        source_id: store.source_id.clone(),
-        root: "./".to_string(),
-        current: String::new(),
-        track: "reference".to_string(),
-    };
-    write(&out.join("index.html"), &index.render()?)?;
-
     let defs = macro_defs(&store);
     let root = vendor::vendor_root(&repo)?;
 
@@ -443,9 +441,42 @@ fn main() -> Result<()> {
     }
 
     write_course(&out, &store, &highlighted_files, &defs)?;
-    let narrative_units = write_narrative(&out, &repo, &store, &hl)?;
-    write_glossary(&out, &repo, &store, &hl)?;
+    let derive = write_narrative(&out, &repo, &store, &hl)?;
+    let glossary = write_glossary(&out, &repo, &store, &hl)?;
     write_expand(&out, &repo, &store, &hl)?;
+
+    // The front page is written last because it restates what every other
+    // track claims, and those numbers are counted while the tracks are built
+    // rather than kept in a second place that could disagree with them.
+    let narrative_units = derive.units;
+    let index = IndexPage {
+        page_title: "serde line by line".to_string(),
+        description: one_line(&format!(
+            "Every line of serde_core {} annotated: {} lines claimed by {} explanations, \
+             beside the source, with runnable examples — a {}-unit Rust course read out of \
+             the same annotations, and a {}-unit walk through what #[derive(Serialize)] \
+             expands to.",
+            store.version,
+            store.total_lines(),
+            index_count(&store),
+            store.course.len(),
+            derive.units,
+        )),
+        nav: build_nav(&store),
+        total_lines: store.total_lines(),
+        claimed_lines: store.claimed_lines(),
+        percent: store.percent(),
+        percent_label: format!("{:.1}", store.percent()),
+        annotations: store.by_file.values().map(Vec::len).sum(),
+        course_units: store.course.len(),
+        derive,
+        glossary,
+        source_id: store.source_id.clone(),
+        root: "./".to_string(),
+        current: String::new(),
+        track: "reference".to_string(),
+    };
+    write(&out.join("index.html"), &index.render()?)?;
 
     // Copied rather than embedded: the playground is a binary artefact, and it
     // may legitimately be absent — the site must build without a wasm
@@ -726,10 +757,10 @@ fn write_expand(out: &Path, repo: &Path, store: &Store, hl: &Highlighter) -> Res
 /// longer matches what `serde_derive` emits fails this build naming the step,
 /// which is the only way a sentence about generated code can stay true across a
 /// version bump.
-fn write_narrative(out: &Path, repo: &Path, store: &Store, hl: &Highlighter) -> Result<usize> {
+fn write_narrative(out: &Path, repo: &Path, store: &Store, hl: &Highlighter) -> Result<Narrated> {
     let units = slbl_core::read_narrative(repo)?;
     if units.is_empty() {
-        return Ok(0);
+        return Ok(Narrated::default());
     }
     let by_id: BTreeMap<&str, &Unit> = store
         .by_file
@@ -802,6 +833,19 @@ fn write_narrative(out: &Path, repo: &Path, store: &Store, hl: &Highlighter) -> 
     let dir = out.join("derive");
     std::fs::create_dir_all(&dir)?;
 
+    let stats = Narrated {
+        units: units.len(),
+        steps: nav.iter().map(|u| u.steps).sum(),
+        cited_lines: units
+            .iter()
+            .flat_map(|u| u.steps.iter())
+            .map(|s| s.range.line_count())
+            .sum(),
+        crossings: nav.iter().map(|u| u.crossings).sum(),
+        version: derive_source.version.clone(),
+        source_lines: derive_lines,
+    };
+
     let index = NarrativePage {
         page_title: "The derive track — serde line by line".to_string(),
         description: one_line(&format!(
@@ -812,13 +856,9 @@ fn write_narrative(out: &Path, repo: &Path, store: &Store, hl: &Highlighter) -> 
             units.len()
         )),
         units: nav.iter().map(clone_nnav).collect(),
-        steps: nav.iter().map(|u| u.steps).sum(),
-        cited_lines: units
-            .iter()
-            .flat_map(|u| u.steps.iter())
-            .map(|s| s.range.line_count())
-            .sum(),
-        crossings: nav.iter().map(|u| u.crossings).sum(),
+        steps: stats.steps,
+        cited_lines: stats.cited_lines,
+        crossings: stats.crossings,
         derive_version: derive_source.version.clone(),
         derive_lines,
         source_id: store.source_id.clone(),
@@ -938,7 +978,7 @@ fn write_narrative(out: &Path, repo: &Path, store: &Store, hl: &Highlighter) -> 
         };
         write(&dir.join(format!("{}.html", unit.unit.id)), &page.render()?)?;
     }
-    Ok(units.len())
+    Ok(stats)
 }
 
 fn clone_nnav(u: &NarrativeNav) -> NarrativeNav {
@@ -990,10 +1030,10 @@ fn locate(text: &str, snippet: &str) -> Option<(usize, usize)> {
 /// who wanted to compare two of them. The quoted code is read from the pinned
 /// tree here, not from the store, so what the site shows is what the pin
 /// protects.
-fn write_glossary(out: &Path, repo: &Path, store: &Store, hl: &Highlighter) -> Result<()> {
+fn write_glossary(out: &Path, repo: &Path, store: &Store, hl: &Highlighter) -> Result<Borrowed> {
     let items = slbl_core::read_glossary(repo)?;
     if items.is_empty() {
-        return Ok(());
+        return Ok(Borrowed::default());
     }
     let pin = vendor::load_pin(repo)?;
 
@@ -1076,6 +1116,11 @@ fn write_glossary(out: &Path, repo: &Path, store: &Store, hl: &Highlighter) -> R
         .sum();
 
     let entries = groups.iter().map(|g| g.entries.len()).sum();
+    let stats = Borrowed {
+        entries,
+        sources: groups.len(),
+        quoted_lines,
+    };
     let page = GlossaryPage {
         page_title: "Borrowed vocabulary — serde line by line".to_string(),
         description: format!(
@@ -1094,7 +1139,7 @@ fn write_glossary(out: &Path, repo: &Path, store: &Store, hl: &Highlighter) -> R
     let dir = out.join("glossary");
     std::fs::create_dir_all(&dir)?;
     write(&dir.join("index.html"), &page.render()?)?;
-    Ok(())
+    Ok(stats)
 }
 
 fn write_course(

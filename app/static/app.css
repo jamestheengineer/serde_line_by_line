@@ -478,7 +478,13 @@ main { padding: 0 0 80px; min-width: 0; }
 
 /* ---------- track switch ---------- */
 
-.tracks { display: flex; gap: 2px; }
+.tracks { display: flex; gap: 2px; align-items: stretch; }
+
+.navsep {
+  width: 1px;
+  background: var(--line-strong);
+  margin: 2px 7px;
+}
 
 .tracks a {
   font-size: 12px;
@@ -525,6 +531,9 @@ main { padding: 0 0 80px; min-width: 0; }
 }
 .tracknote h2 { font-size: 14px; margin: 0 0 6px; color: var(--fg); }
 .tracknote p { margin: 0; }
+.tracknote p + p, .tracknote h2 + p { margin-top: 8px; }
+.tracknote h2 { margin-top: 16px; }
+.tracknote > h2:first-child { margin-top: 0; }
 
 .unitlist { padding: 8px 32px 40px; max-width: 860px; }
 
@@ -749,3 +758,28 @@ main { padding: 0 0 80px; min-width: 0; }
 /* The mirror of `.ahead`: a step naming one already read, rather than one the
    reader has not reached. Same rule, opposite direction, so it is quieter. */
 .ahead.back { border-left-color: var(--line-strong); color: var(--fg-faint); }
+
+/* ---------- end-of-track pointer ---------- */
+
+/* Each track index ends by naming where the reader goes next, so the three
+   are a route rather than three doors in a header. */
+.whatnext {
+  margin: 0 32px 44px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  max-width: 860px;
+  color: var(--fg-muted);
+  font-size: 13.5px;
+}
+.whatnext h2 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--fg-faint);
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+.whatnext p { margin: 0 0 7px; }
+.whatnext p:last-child { margin-bottom: 0; }
+.whatnext a { text-decoration: none; font-weight: 600; }
+.whatnext a:hover { text-decoration: underline; }

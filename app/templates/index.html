@@ -18,13 +18,44 @@
 </section>
 
 <section class="tracknote">
-  <h2>Two ways through</h2>
+  <h2>Three ways through</h2>
   <p>
     The <b>reference track</b> below walks the source tree, file by file, and
     claims every one of the {{ total_lines }} lines. The
     <a href="{{ root }}course/index.html"><b>course track</b></a> is the same
     annotations in teaching order &mdash; {{ course_units }} units, from why a
-    data model exists to the macros that generate a third of the crate.
+    data model exists to the macros that generate a third of the crate. The
+    <a href="{{ root }}derive/index.html"><b>derive track</b></a> leaves this
+    crate and follows one struct and one enum through
+    <code>serde_derive</code> {{ derive.version }} &mdash;
+    {{ derive.units }} units, {{ derive.steps }} stops &mdash; ending with the
+    expansion <a href="{{ root }}expand/index.html">running in your browser</a>.
+  </p>
+
+  <h2>What each of them claims</h2>
+  <p>
+    Every line of every <i>annotated</i> crate is claimed. That is
+    <code>serde_core</code>, and the coverage gate fails the build over one
+    unclaimed line, one overlap, or one range left behind by a version bump.
+  </p>
+  <p>
+    <code>serde_derive</code> is <b>walked, not claimed</b>. Its
+    {{ derive.source_lines }} lines are the derive track's territory and no
+    file of it is ever declared complete; the walk cites
+    {{ derive.cited_lines }} of them where the story goes through them, and
+    {{ derive.crossings }} times it crosses back into an annotation the
+    reference track already wrote. A percentage over a walk would be a lie told
+    in a number.
+  </p>
+  <p>
+    Borrowed vocabulary is quoted, pinned, and named as borrowed. The
+    {{ glossary.entries }} types from
+    {% if glossary.sources > 0 %}{{ glossary.sources }} crates{% else %}upstream{% endif %}
+    that <code>serde_derive</code> reads but does not define get
+    <a href="{{ root }}glossary/index.html">{{ glossary.quoted_lines }} lines
+    quoted from the pinned trees</a> and a definition each &mdash; never an
+    annotation, because they are not ours to claim
+    (<a href="https://github.com/jamestheengineer/serde_line_by_line/blob/main/docs/decisions.md">D9</a>).
   </p>
 </section>
 

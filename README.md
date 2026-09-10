@@ -12,23 +12,38 @@ side-by-side with the source and runnable micro-examples.
 
 Along the way it teaches Rust: lifetimes, trait design, associated types,
 generic bounds, `macro_rules!`, and `no_std` engineering, using one of the most
-carefully written crates in the ecosystem as the worked example.
+carefully written crates in the ecosystem as the worked example. And then it
+answers the question most readers actually arrive with — **what does
+`#[derive(Serialize)]` turn into?** — by following one struct and one enum
+through `serde_derive` and running the expansion in the browser.
 
-> **Status: live, and complete on both tracks.** Every line of `serde_core` is
-> annotated — all 19 files at 100%, listed in `annotations/manifest.toml`, so
-> the coverage gate hard-fails on any gap or overlap — and the site rebuilds and
-> deploys to the URL above on every push to `main`.
+> **Status: live, and complete on all three tracks.**
 >
-> **All 14 course units are written**, and the track is
-> walkable start to finish. Five of them are supplementary in whole or in part:
-> ownership and lifetime basics entirely, since serde_core exercises lifetimes
-> only in their advanced forms and ordinary ownership not at all, and
-> `PhantomData`, errors and iterators-and-closures in part — the crate writes
-> thirteen closures in twelve thousand lines and declares no `Fn` bound at all.
-> That material is written from scratch, with runnable examples and twelve
-> committed compile-fail cases, and every unit labels which of it came from the
-> crate and which did not. See
-> **[PLAN.md](PLAN.md)** for the roadmap and
+> **Reference** — every line of `serde_core` is annotated: all 19 files at
+> 100%, listed in `annotations/manifest.toml`, so the coverage gate hard-fails
+> on any gap or overlap. The site rebuilds and deploys to the URL above on
+> every push to `main`.
+>
+> **Course** — all 14 units are written and the track is walkable start to
+> finish. Five of them are supplementary in whole or in part: ownership and
+> lifetime basics entirely, since serde_core exercises lifetimes only in their
+> advanced forms and ordinary ownership not at all, and `PhantomData`, errors
+> and iterators-and-closures in part — the crate writes thirteen closures in
+> twelve thousand lines and declares no `Fn` bound at all. That material is
+> written from scratch, with runnable examples and twelve committed
+> compile-fail cases, and every unit labels which of it came from the crate and
+> which did not.
+>
+> **Derive** — 9 units and 85 steps follow one struct and one enum from a
+> `syn::DeriveInput` to an emitted `impl`, citing 1,875 lines of pinned
+> `serde_derive` and `syn` and crossing nine times into annotations the
+> reference track already wrote. `serde_derive` is **walked, not claimed**: no
+> file of it is declared complete and no percentage is reported over it. Thirty
+> steps quote the code their citation emits, and those quotations are sliced
+> out of a real expansion at build time rather than stored, so the page does
+> not build if the crate stops emitting them.
+>
+> See **[PLAN.md](PLAN.md)** for the roadmap and
 > **[docs/decisions.md](docs/decisions.md)** for the architecture calls.
 >
 > ```
@@ -61,13 +76,23 @@ the tree to understand something.
 
 ## What "every line" means here
 
-Not a slogan. `cargo xtask coverage` verifies that every line of every vendored
-source file is claimed by exactly one annotation, and CI fails on regressions
-once a file is marked complete.
+Not a slogan, and not a claim over the whole `vendor/` tree either. Five crates
+are pinned, and `vendor/pin.toml` gives each one a **role** that decides what
+the gates ask of it:
 
-The work is roughly **1,195 annotation units** averaging ~10 lines each — not
-12,037 individual comments, because doc-comment blocks and repeated macro
-invocations compress heavily.
+| role | crate | what is promised |
+|---|---|---|
+| `coverage` | `serde_core` | every line claimed by exactly one annotation; `cargo xtask coverage` fails on a gap, an overlap, or a dangling reference |
+| `narrative` | `serde_derive` | **walked, not claimed** — cited ranges must resolve and must not be forward references, but no file is ever declared complete and no percentage is reported |
+| `glossary` | `syn`, `quote`, `proc-macro2` | **quoted, not annotated** — a definition is pinned to a line range, and the gate fails if the quotation drifts from the tree |
+
+A role the gates do not know is a build failure, which is what keeps the
+promise from quietly widening. The reasoning is D9 in
+[`docs/decisions.md`](docs/decisions.md).
+
+The `serde_core` work is roughly **1,195 annotation units** averaging ~10 lines
+each — not 12,037 individual comments, because doc-comment blocks and repeated
+macro invocations compress heavily.
 
 ## Shape of the app
 
@@ -91,7 +116,7 @@ Axum + Askama. Examples are real crates, compiled to WASM for the browser and
 runnable under local `cargo` for real rustc errors and debugger stepping. Every
 example's output is asserted in CI, so explanations cannot drift from behavior.
 
-Two ways to read it:
+Three ways to read it:
 
 - **Reference track** — file by file, 100% coverage, the spine.
 - **Course track** — the same annotations reordered as a Rust curriculum: 14
@@ -99,16 +124,35 @@ Two ways to read it:
   cannot supply — ownership in imperative code, lifetime basics, iterators and
   closures — are written from scratch and labelled **supplementary** in the UI,
   rather than pretending the crate demonstrates them.
+- **Derive track** — one struct and one enum followed out of `serde_core` and
+  through `serde_derive`, from the `TokenStream` the compiler hands over to the
+  `impl` it gets back. 9 units, 85 steps, and where the path crosses back into
+  `serde_core` it links to the annotation rather than explaining the same lines
+  twice.
+
+And two tools the derive track leans on, reachable on their own:
+
+- **`expand`** — `serde_derive` itself compiled to wasm, expanding the two
+  worked types in the browser. A golden transcript asserts the site's output is
+  byte-identical to the host's, so the page cannot show one thing and `cargo
+  expand` another. Every quotation of generated code on the derive track is
+  sliced out of this expansion at build time.
+- **`glossary`** — the 62 `syn`, `quote` and `proc-macro2` types `serde_derive`
+  reads but does not define, each with a definition and 1,123 lines quoted from
+  its own pinned tree.
 
 ## Repository layout
 
 | path | contents |
 |---|---|
 | `PLAN.md` | full design and roadmap |
-| `vendor/` | pinned, unmodified `serde_core` 1.0.229 (MIT/Apache-2.0) |
+| `vendor/` | five pinned, unmodified crates (MIT/Apache-2.0); `vendor/pin.toml` gives each a role |
 | `annotations/` | the explanations, as TOML keyed to line ranges |
 | `annotations/course.toml` | the course track's units, ordering, and honesty labels |
+| `narrative/` | the derive track's units and steps, as TOML citing pinned line ranges |
+| `glossary/` | borrowed-vocabulary entries, each pinned to a quoted range |
 | `examples/` | micro-example crates, CI-verified |
+| `expand/`, `expander/` | the `serde_derive` expansion harness and its wasm front end |
 | `app/` | Axum + Askama reader |
 | `xtask/` | coverage gate, version-bump migration, build and WASM pipeline |
 | `docs/` | style guide, Rust-feature vocabulary, migration runbook, contributing |
@@ -143,8 +187,10 @@ across the diff, and reports the annotations whose code changed underneath them.
 
 Project content and code: **MIT OR Apache-2.0**.
 
-`vendor/serde_core-1.0.229/` is an unmodified copy of the upstream crate by
-Erick Tryzelaar and David Tolnay, also MIT OR Apache-2.0. See
+Everything under `vendor/` is an unmodified copy of a published crate —
+`serde_core` and `serde_derive` by Erick Tryzelaar and David Tolnay, `syn` and
+`quote` by David Tolnay, `proc-macro2` by David Tolnay and Alex Crichton — all
+MIT OR Apache-2.0. Provenance, checksums and copyright for each are in
 [`vendor/NOTICE.md`](vendor/NOTICE.md).
 
 This project is not affiliated with or endorsed by the Serde maintainers.

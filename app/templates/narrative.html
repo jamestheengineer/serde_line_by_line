@@ -64,4 +64,26 @@
   </article>
   {% endfor %}
 </section>
+
+<section class="whatnext">
+  <h2>Next</h2>
+  <p>
+    <a href="{{ root }}expand/index.html">Run the expansion &rarr;</a>
+    &mdash; <code>serde_derive</code> {{ derive_version }} itself, compiled to
+    wasm, over the two types this track follows. Every quotation above is
+    sliced out of that output at build time.
+  </p>
+  <p>
+    <a href="{{ root }}glossary/index.html">Borrowed vocabulary</a>
+    &mdash; the <code>syn</code>, <code>quote</code> and
+    <code>proc-macro2</code> types the walk names but does not annotate,
+    quoted from their own pinned trees.
+  </p>
+  <p>
+    <a href="{{ root }}index.html">The reference track</a>
+    &mdash; back inside <code>serde_core</code>, where the
+    <code>impl</code> this track emits has to satisfy a trait that is claimed
+    line by line.
+  </p>
+</section>
 {% endblock %}

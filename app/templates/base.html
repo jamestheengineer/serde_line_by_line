@@ -22,6 +22,9 @@
     <a href="{{ root }}index.html"{% if track == "reference" %} class="on"{% endif %}>reference</a>
     <a href="{{ root }}course/index.html"{% if track == "course" %} class="on"{% endif %}>course</a>
     <a href="{{ root }}derive/index.html"{% if track == "derive" %} class="on"{% endif %}>derive</a>
+    {# Three tracks, then the two tools they lean on. The rule separates them
+       so the header does not read as five equal ways in. #}
+    <span class="navsep" aria-hidden="true"></span>
     <a href="{{ root }}expand/index.html"{% if track == "expand" %} class="on"{% endif %}>expand</a>
     <a href="{{ root }}glossary/index.html"{% if track == "glossary" %} class="on"{% endif %}>glossary</a>
   </nav>

@@ -108,7 +108,7 @@ than discovered in month three.
 |---|---|---|
 | App form | **Web app, custom reader** — static site generator, Askama templates, Axum dev server ([D3](docs/decisions.md)) | Full control over the three-pane layout and narrative flow; deployable so others can read it; matches the existing Rust web stack. |
 | Example execution | **Both** — WASM for deploy, local cargo for development | Real computed output in the browser with no backend; real rustc errors and debugger stepping locally. |
-| Content sequencing | **Two tracks in parallel** | Reference track guarantees 100% coverage; course track serves the teaching objective. One annotation store, two orderings. |
+| Content sequencing | **Tracks in parallel** | Reference track guarantees 100% coverage; course track serves the teaching objective. One annotation store, two orderings. |
 | Source handling | **Vendored + checksum-pinned** | Annotations are line-range keyed. Upstream drift must be an explicit migration, never a silent break. |
 
 ### The load-bearing decision: annotations are data, not pages
@@ -223,7 +223,7 @@ diagnostics, and `rust-lldb` for stepping. The browser gets pre-compiled WASM.
 
 ---
 
-## 7. The two tracks
+## 7. The reference and course tracks
 
 **Reference track** — the spine. File-by-file, dependency order, 100% coverage.
 This is the "every line" promise. Navigation mirrors the source tree.
@@ -307,10 +307,12 @@ serde_line_by_line/
 | **7 — Course track** | Ordering, prereq DAG, ~12 supplementary units | — | Course track walkable start to finish |
 | **8 — Ship** | Deploy, polish, contribution docs | — | Public URL |
 
-**All eight phases are done.** The site is live at
+**All eight phases are done**, and so is the derive track that followed them
+(§11). The site is live at
 <https://jamestheengineer.github.io/serde_line_by_line/>, rebuilt and deployed
-from the annotation store on every push to `main` (D6). Both tracks are
-complete: 12,037 lines claimed by 468 annotations, 14 course units written.
+from the annotation store on every push to `main` (D6). All three tracks are
+complete: 12,037 lines claimed by 468 annotations, 14 course units written, and
+9 derive units walking `serde_derive` in 85 steps.
 
 Two more gates went in during phase 8. Listed beside the coverage gate from
 phase 0, they are what makes the promises in this document checkable rather
@@ -451,7 +453,7 @@ they would need.
 | **N2 — Glossary** ✅ | [D9](docs/decisions.md): `glossary/*.toml`, the `glossary` field on annotations, renderer support | 62 entries, every citation resolves, a quoted definition that drifts from its pinned tree fails the gate |
 | **N3 — Expansion harness** ✅ | The [§9](docs/derive-track-scope.md) patch applied by `expand/build.rs`, native golden transcripts, a second wasm module fetched only on derive pages | An expansion on the site is byte-identical to the host's, and the generated code is asserted to carry the pinned version |
 | **N4 — The narrative** ✅ | 8–10 units, one struct and one enum, end to end | Walkable start to finish; every cited range resolves; no forward references (the D8 check, across two sources) |
-| **N5 — Ship** | Track navigation, the restated promise, `README` | The three tracks are each reachable and each honest about what they claim |
+| **N5 — Ship** ✅ | Track navigation, the restated promise, `README` | The three tracks are each reachable and each honest about what they claim |
 
 N4 shipped as nine units and 85 steps, citing 1,875 lines across the two pinned
 sources, nine of them crossings into annotated `serde_core`. Thirty steps quote
@@ -462,3 +464,27 @@ N1 is deliberately first and deliberately boring: every later phase needs a
 source that is not `serde_core`, and the pin is the thing that has protected
 every line range in this repo since phase 0. It does not get loosened to make
 room.
+
+### What N5 shipped
+
+The header separates the three tracks from the two tools they lean on, and each
+track index ends by naming where the reader goes next rather than sending them
+back to the header. Reference → derive is the crossing that matters: it is the
+one a reader arrives wanting and the one the first eight phases could not make.
+
+The front page now restates the promise in the form §11 asked for, with the
+numbers counted during the build rather than typed:
+
+> Every line of every *annotated* crate is claimed — that is `serde_core`, and
+> the coverage gate fails the build over one unclaimed line. `serde_derive` is
+> walked, not claimed: 8,975 lines of territory, 1,875 of them cited where the
+> story goes through them, no file declared complete, and no percentage,
+> because a percentage over a walk would be a lie told in a number. Borrowed
+> vocabulary is quoted, pinned, and named as borrowed — 62 entries, 1,123
+> quoted lines, never an annotation ([D9](docs/decisions.md)).
+
+Those three sentences are one per **role** in `vendor/pin.toml`, which is the
+point of the roles: what a source promises is a field in the pin, the gates
+read it, and a role no gate knows fails the build. The README says the same
+thing as a table, so the promise reads identically in both places a reader
+might check it.
