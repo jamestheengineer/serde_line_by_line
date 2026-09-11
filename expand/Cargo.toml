@@ -13,12 +13,16 @@ publish = false
 doctest = false
 
 [dependencies]
+# Exact pins, checked against vendor/pin.toml by `cargo xtask coverage`: these
+# three are the glossary's sources, and an expander built from a release the
+# glossary does not describe is drift the vendor checksum cannot see.
+#
 # No `proc-macro` feature anywhere: that is what puts proc-macro2 into its
 # fallback implementation and lets serde_derive's own code run off the
 # compiler thread — natively here, and in the browser through `expander`.
-proc-macro2 = { version = "1.0.107", default-features = false }
-quote = { version = "1.0.47", default-features = false }
-syn = { version = "3.0.3", default-features = false, features = [
+proc-macro2 = { version = "=1.0.107", default-features = false }
+quote = { version = "=1.0.47", default-features = false }
+syn = { version = "=3.0.3", default-features = false, features = [
     "clone-impls",
     "derive",
     "parsing",

@@ -4,12 +4,13 @@
 //! slogan. It proves that every line of every pinned source file is claimed by
 //! exactly one annotation, and that every cross-reference resolves.
 
+use crate::harness;
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use slbl_core::schema::{
     Annotation, CourseFile, CourseUnit, Kind, LineRange, Manifest, Supplement, Track, UnitStatus,
 };
-use slbl_core::vendor;
+use slbl_core::vendor::{self, Pin};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
@@ -117,6 +118,7 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
     let pin = vendor::load_pin(repo)?;
     let primary = pin.primary()?;
     check_example_pins(repo, &primary.name, &primary.version, &mut diag)?;
+    check_harness_pins(repo, &pin, &mut diag)?;
     let annotations = slbl_core::read_annotations(repo, &source_id)?;
 
     // 2. Identity and cross-reference integrity.
@@ -894,6 +896,52 @@ fn declares(text: &str, name: &str) -> bool {
             .lines()
             .map(str::trim_start)
             .any(|l| l.starts_with("pub use") && l.trim_end_matches(';').ends_with(name))
+}
+
+/// The expansion harness compiles the versions the pin names.
+///
+/// `expand/` is the one crate that builds *against* pinned sources rather than
+/// reading them: `syn`, `quote` and `proc-macro2` are Cargo dependencies there
+/// and vendored trees here. Nothing but this connects the two, and the failure
+/// it prevents is a quiet one — the glossary quoting `syn` 3.0.3 while the
+/// expansions on the site were produced by whatever `syn` Cargo felt like
+/// resolving. The same drift the vendor checksum exists to stop, arriving
+/// through the dependency graph instead of the tree.
+///
+/// The manifest and the lockfile are both checked, because the manifest says
+/// what is permitted and the lockfile says what is compiled.
+fn check_harness_pins(repo: &Path, pin: &Pin, diag: &mut Diagnostics) -> Result<()> {
+    let path = harness::manifest_path(repo);
+    if !path.is_file() {
+        return Ok(());
+    }
+    let text = std::fs::read_to_string(&path)?;
+    for source in &pin.sources {
+        let Some((_, req)) = harness::dep_req(&text, &source.name) else {
+            // Not a dependency of the harness. `serde_core` never is, and
+            // `serde_derive` is compiled out of `vendor/` by build.rs rather
+            // than resolved by Cargo.
+            continue;
+        };
+        let want = format!("={}", source.version);
+        if req != want {
+            diag.error(format!(
+                "{}: builds against `{} = \"{req}\"`, but the pinned tree is {} — pin it \
+                 exactly (`\"{want}\"`) so the expander cannot run a release the glossary \
+                 does not describe",
+                harness::MANIFEST,
+                source.name,
+                source.version,
+            ));
+        } else if !harness::lock_has(repo, &source.name, &source.version)? {
+            diag.error(format!(
+                "Cargo.lock has no {} {}, so the harness is not built from the pinned tree; \
+                 run `cargo update -p {} --precise {}`",
+                source.name, source.version, source.name, source.version,
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The glossary resolves, and nothing cites an entry that is not there.

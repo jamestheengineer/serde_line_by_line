@@ -2,13 +2,15 @@
 //!
 //! Usage:
 //!   cargo xtask coverage [--json]   verify annotations against the pinned source
-//!   cargo xtask bump <version>      migrate the store to a new serde_core release
+//!   cargo xtask bump [--source NAME] <version>
+//!                                   migrate the stores to a new release of a pinned source
 //!   cargo xtask pin                 rehash every vendored tree into pin.toml + NOTICE.md
 //!   cargo xtask stats               structural inventory of the pinned source
 //!   cargo xtask wasm                build the example playground for the browser
 
 mod bump;
 mod coverage;
+mod harness;
 mod stats;
 mod store_edit;
 mod wasm;
@@ -44,11 +46,13 @@ fn print_help() {
     eprintln!(
         "serde_line_by_line xtask\n\n\
          cargo xtask coverage [--json]   verify annotations against the pinned source\n\
-         cargo xtask bump <version>      migrate the annotation store to a new release\n\
+         cargo xtask bump <version>      migrate the stores to a new release\n\
+         \x20   --source NAME              which pinned source to move (default: the\n\
+         \x20                              coverage source)\n\
          \x20   --dry-run                  report the migration without writing anything\n\
          \x20   --archive PATH             use a local .crate instead of downloading\n\
          \x20   --sha256 HEX               expected archive checksum, when offline\n\
-         \x20   --allow-orphans            drop annotations whose lines no longer exist\n\
+         \x20   --allow-orphans            drop records whose lines no longer exist\n\
          \x20   --keep-old                 leave the previous vendor/ tree in place\n\
          cargo xtask pin                 rehash vendor/pin.toml and NOTICE.md\n\
          cargo xtask stats               structural inventory of the pinned source\n\

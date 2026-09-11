@@ -610,3 +610,87 @@ points at the wrong paragraph after a bump.
 declared complete, ranges may overlap, and no percentage is computed. A walk
 that promised exhaustiveness would be a lie told in a number, and the number is
 the thing this project has been careful about since phase 0.
+
+## D11 — a bump is role-driven, and the harness is pinned like the trees
+
+**Decision:** `cargo xtask bump [--source <name>] <version>` migrates any
+pinned source, and which stores it rewrites is derived from that source's
+`role` rather than from a list kept in the tool. Separately, every pinned
+source the expansion harness *builds against* is pinned exactly in
+`expand/Cargo.toml` and checked against `vendor/pin.toml` by the coverage gate.
+
+### The problem this is for
+
+D7 built the migration tool when the repo pinned one crate. N1 grew the pin to
+five sources with roles; N2 keyed 62 glossary entries to three of them; N4
+keyed 85 narrative steps to a fourth. `cargo xtask bump` was never taught any
+of it. It read `pin.primary()`, rewrote `annotations/`, and had no way to be
+pointed at anything else.
+
+Two things were wrong with that, and only one of them was the obvious one.
+
+**The missing path.** Four of the five pinned sources could not be moved by the
+tool at all. `syn` had in fact already moved — 3.0.3 → 3.0.5 — with nothing in
+the repo able to notice or act on it.
+
+**The silent half-migration.** `narrative/*.toml` is keyed to *two* sources at
+once: 76 steps cite `serde_derive`, nine cross into `serde_core`. A
+`serde_core` bump rewrote `annotations/` and left those nine crossings pointing
+into a tree that no longer existed. Nothing would have failed: the ranges still
+parse, the containment check still finds an annotation, and the page still
+renders — at whatever code now occupies those line numbers. Exactly the failure
+D7 was built to prevent, in the one store D7 predates.
+
+### The mechanism
+
+The role already says what the gates ask of a source. It now also says what a
+bump has to rewrite:
+
+| role | stores keyed to it |
+|---|---|
+| `coverage` | `annotations/`, **and the narrative's crossings into it** |
+| `narrative` | `narrative/` |
+| `glossary` | the one `glossary/` file that quotes it |
+
+Three consequences, all of them in the rewriter:
+
+1. **`Edit::Keep`.** Every record in a rewritten file must still be accounted
+   for — that rule is what makes a forgotten range impossible — so a step
+   citing the source *not* being bumped is explicitly carried through rather
+   than absent from the edit set.
+2. **A record may name its own source.** `annotations/` and `glossary/` name
+   theirs once in the file header; `narrative/` names one per step, and a
+   file-level rewrite there would retarget the steps the bump is leaving alone.
+3. **No coverage column for a source that makes no coverage promise.** The
+   `unclaimed` count is computed for the `coverage` role and omitted for the
+   others, in the plan, in the printed table, and in the report. A percentage
+   over a walk would be a lie told in a number (PLAN.md §11), and a migration
+   report is no place to start telling it.
+
+### The harness pin
+
+`expand/` is the one crate that builds *against* pinned sources instead of
+reading them: `syn`, `quote` and `proc-macro2` are Cargo dependencies there and
+vendored trees here, and nothing connected the two. `expand/build.rs` reads the
+pin to find the `serde_derive` tree — but the parser it hands that tree to was
+whatever `syn = "3.0.3"` resolved to, and a caret requirement resolves to
+whatever was published most recently.
+
+So a single `cargo update` would have built the expander from `syn` 3.0.5 while
+the glossary went on quoting 3.0.3, and the site would have shown expansions
+produced by a release no page describes. The tree hash cannot see this: the
+tree is untouched. It is the same drift arriving through the dependency graph
+instead of the filesystem.
+
+The fix is the one the examples already use (D7): an exact `=` requirement,
+retargeted by the bump, checked by the gate. Both the manifest and `Cargo.lock`
+are checked, because the manifest says what is permitted and the lock says what
+is compiled.
+
+### What this does not do
+
+It does not make a non-coverage bump cheap. A `serde_derive` bump rewrites
+ranges mechanically and then hands back a list of steps whose prose describes
+code that changed — and, because the expander is built from that same tree, a
+transcript diff to read as well. The tool says so in the report's checklist;
+reading it is still the work.

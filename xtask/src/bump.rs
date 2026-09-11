@@ -1,7 +1,8 @@
-//! `cargo xtask bump <version>` — moving the pinned source, on purpose.
+//! `cargo xtask bump [--source <name>] <version>` — moving a pinned source, on
+//! purpose.
 //!
-//! Every annotation in this repo is keyed to `(file, line-range)` in a pinned
-//! tree. That is what makes "every line" checkable, and it is also what makes a
+//! Every annotation, glossary entry and narrative step in this repo is keyed to
+//! `(file, line-range)` in a pinned tree. That is what makes "every line" checkable, and it is also what makes a
 //! dependency update dangerous: swapping the source under the store leaves
 //! hundreds of explanations pointing at whatever code happens to occupy those
 //! lines now. Nothing would fail to compile. The site would render, confidently
@@ -16,17 +17,27 @@
 //! The order matters. Nothing in the repository is touched until the whole
 //! migration has been planned against a staged copy of the new tree, so a
 //! failure at any point before `apply` leaves a clean checkout.
+//!
+//! Five sources are pinned and any of them can move, so the tool is told which
+//! one — `--source`, defaulting to the coverage source because that is the one
+//! a reader means by "the pinned source". What it then rewrites is decided by
+//! the source's [`Role`] and not by a list kept here: the roles exist so that
+//! what a source promises is a field in the pin, and a gate that does not know
+//! a role is a build failure (PLAN.md §11, N1).
 
+use crate::harness;
 use crate::store_edit::{self, Edit};
 use anyhow::{bail, Context, Result};
 use slbl_core::remap::{Change, FileMap};
 use slbl_core::schema::{AnnotationFile, LineRange};
-use slbl_core::vendor::{self, Pin};
+use slbl_core::vendor::{self, Pin, Role, Source};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub struct Options {
+    /// Which pinned source to migrate. `None` means the coverage source.
+    pub source: Option<String>,
     pub version: String,
     /// A local `.crate` archive to use instead of downloading one.
     pub archive: Option<PathBuf>,
@@ -36,12 +47,13 @@ pub struct Options {
     pub dry_run: bool,
     /// Permit dropping annotations whose lines no longer exist.
     pub allow_orphans: bool,
-    /// Leave the outgoing `vendor/serde_core-<old>/` directory in place.
+    /// Leave the outgoing `vendor/<name>-<old>/` directory in place.
     pub keep_old: bool,
 }
 
 pub fn parse_args(args: &[String]) -> Result<Options> {
     let mut opts = Options {
+        source: None,
         version: String::new(),
         archive: None,
         sha256: None,
@@ -55,6 +67,9 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
             "--dry-run" => opts.dry_run = true,
             "--allow-orphans" => opts.allow_orphans = true,
             "--keep-old" => opts.keep_old = true,
+            "--source" => {
+                opts.source = Some(it.next().context("--source needs a crate name")?.clone())
+            }
             "--archive" => {
                 opts.archive = Some(PathBuf::from(it.next().context("--archive needs a path")?))
             }
@@ -67,18 +82,35 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
         }
     }
     if opts.version.is_empty() {
-        bail!("usage: cargo xtask bump <version> [--dry-run] [--archive PATH] [--sha256 HEX]");
+        bail!(
+            "usage: cargo xtask bump [--source NAME] <version> [--dry-run] [--archive PATH] \
+             [--sha256 HEX]"
+        );
     }
     Ok(opts)
 }
 
 pub fn run(repo: &Path, opts: &Options) -> Result<()> {
     let pin = vendor::load_pin(repo)?;
-    // A bump migrates the coverage source. Narrative and glossary sources are
-    // pinned the same way and re-pinned by `cargo xtask pin`, but nothing in
-    // the store is keyed to them by line range yet.
-    let name = pin.primary()?.name.clone();
-    let old_version = pin.primary()?.version.clone();
+    // Any pinned source can move. Which one is named on the command line;
+    // omitting it means the coverage source, which is what "the pinned
+    // source" meant when this tool had only one to move.
+    let target = match &opts.source {
+        Some(name) => pin.get(name).with_context(|| {
+            format!(
+                "--source {name}: pinned sources are {}",
+                pin.sources
+                    .iter()
+                    .map(|s| s.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })?,
+        None => pin.primary()?,
+    }
+    .clone();
+    let name = target.name.clone();
+    let old_version = target.version.clone();
     let old_root = vendor::crate_dir(repo, &name, &old_version);
     if !old_root.join("src").is_dir() {
         bail!(
@@ -140,7 +172,7 @@ pub fn run(repo: &Path, opts: &Options) -> Result<()> {
     }
 
     // 3. Plan the whole migration before touching anything.
-    let plan = Plan::build(repo, &pin, &old_root, &new_root, &opts.version)?;
+    let plan = Plan::build(repo, &target, &old_root, &new_root, &opts.version)?;
     plan.print();
 
     if opts.dry_run {
@@ -149,7 +181,7 @@ pub fn run(repo: &Path, opts: &Options) -> Result<()> {
     }
     if !plan.orphans.is_empty() && !opts.allow_orphans {
         bail!(
-            "{} annotation(s) claim lines that no longer exist. Re-cut them by hand against \
+            "{} record(s) cite lines that no longer exist. Re-cut them by hand against \
              the new source, or re-run with --allow-orphans to drop them — their full text is \
              written to the migration report either way.",
             plan.orphans.len()
@@ -161,11 +193,172 @@ pub fn run(repo: &Path, opts: &Options) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
+// The stores
+// ---------------------------------------------------------------------------
+
+/// A store of records keyed to line ranges in a pinned tree.
+///
+/// Which stores a bump rewrites follows from the source's role and nothing
+/// else, which is the reason the role is a field in the pin rather than
+/// knowledge the tool carries:
+///
+/// | role | stores keyed to it |
+/// |---|---|
+/// | `coverage` | `annotations/`, plus the narrative's crossings into it |
+/// | `narrative` | `narrative/` |
+/// | `glossary` | the one `glossary/` file that quotes it |
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Store {
+    Annotations,
+    Glossary,
+    Narrative,
+}
+
+impl Store {
+    fn header(self) -> &'static str {
+        match self {
+            Store::Annotations => "[[annotation]]",
+            Store::Glossary => "[[entry]]",
+            Store::Narrative => "[[step]]",
+        }
+    }
+
+    /// Whether the file names its source once, above the records. A narrative
+    /// file does not: each step names its own, because one unit cites two.
+    fn file_source(self) -> bool {
+        self != Store::Narrative
+    }
+
+    /// What one record is called, for messages a human reads.
+    fn record(self) -> &'static str {
+        match self {
+            Store::Annotations => "annotation",
+            Store::Glossary => "glossary entry",
+            Store::Narrative => "narrative step",
+        }
+    }
+}
+
+/// One record's claim on a pinned tree.
+struct Cite {
+    id: String,
+    file: String,
+    lines: String,
+    /// False for a record sitting in a file this bump rewrites that cites some
+    /// *other* source: the narrative's `serde_core` crossings during a
+    /// `serde_derive` bump, and the reverse. Those are carried through
+    /// untouched, and saying so explicitly is what stops them being silently
+    /// retargeted to a tree they were never read against.
+    targeted: bool,
+}
+
+struct StoreFile {
+    path: PathBuf,
+    store: Store,
+    cites: Vec<Cite>,
+}
+
+/// Every store file holding a citation of `target`.
+///
+/// Files that cite it not at all are absent; files that cite it alongside
+/// another source are present with the other source's records marked
+/// `targeted: false`.
+fn collect_cites(repo: &Path, target: &Source) -> Result<Vec<StoreFile>> {
+    let id = target.source_id();
+    let mut out = Vec::new();
+    match target.role {
+        Role::Coverage => {
+            for (path, parsed) in read_annotation_files(repo)? {
+                if parsed.source != id {
+                    bail!(
+                        "{}: names source {:?}, but the pin says {id:?}. Fix the store before \
+                         migrating it.",
+                        rel_display(repo, &path),
+                        parsed.source
+                    );
+                }
+                let cites = parsed
+                    .annotations
+                    .into_iter()
+                    .map(|a| Cite {
+                        id: a.id,
+                        file: a.file,
+                        lines: a.lines,
+                        targeted: true,
+                    })
+                    .collect();
+                out.push(StoreFile {
+                    path,
+                    store: Store::Annotations,
+                    cites,
+                });
+            }
+            out.extend(narrative_cites(repo, &id)?);
+        }
+        Role::Narrative => out.extend(narrative_cites(repo, &id)?),
+        Role::Glossary => {
+            for path in store_paths(repo, "glossary")? {
+                let parsed = slbl_core::schema::GlossaryFile::load(&path)?;
+                if parsed.source != id {
+                    continue;
+                }
+                let cites = parsed
+                    .entries
+                    .into_iter()
+                    .map(|e| Cite {
+                        id: e.id,
+                        file: e.file,
+                        lines: e.lines,
+                        targeted: true,
+                    })
+                    .collect();
+                out.push(StoreFile {
+                    path,
+                    store: Store::Glossary,
+                    cites,
+                });
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Narrative units, with every step marked for whether it cites `id`.
+///
+/// A unit with no step citing it is skipped rather than rewritten to no
+/// effect, so the diff of a bump names only files the bump changed.
+fn narrative_cites(repo: &Path, id: &str) -> Result<Vec<StoreFile>> {
+    let mut out = Vec::new();
+    for path in store_paths(repo, "narrative")? {
+        let parsed = slbl_core::schema::NarrativeFile::load(&path)?;
+        let cites: Vec<Cite> = parsed
+            .steps
+            .into_iter()
+            .map(|s| Cite {
+                targeted: s.source == id,
+                id: s.id,
+                file: s.file,
+                lines: s.lines,
+            })
+            .collect();
+        if cites.iter().any(|c| c.targeted) {
+            out.push(StoreFile {
+                path,
+                store: Store::Narrative,
+                cites,
+            });
+        }
+    }
+    Ok(out)
+}
+
+// ---------------------------------------------------------------------------
 // The plan
 // ---------------------------------------------------------------------------
 
-/// One annotation that survived the move but no longer describes the same code.
+/// One record that survived the move but no longer describes the same code.
 struct Review {
+    store: Store,
     id: String,
     file: String,
     from: String,
@@ -174,8 +367,9 @@ struct Review {
     inserted: u32,
 }
 
-/// One annotation with nothing left to point at.
+/// One record with nothing left to point at.
 struct Orphan {
+    store: Store,
     id: String,
     file: String,
     from: String,
@@ -189,32 +383,43 @@ struct FileOutcome {
     shifted: usize,
     edited: usize,
     dropped: usize,
-    unclaimed: u32,
+    /// Lines no annotation claims after the move. `None` for every role but
+    /// `coverage`: the narrative and the glossary make no claim over a file,
+    /// so a number here would be a coverage figure invented for a source that
+    /// never promised one (PLAN.md §11).
+    unclaimed: Option<u32>,
 }
 
-struct Plan {
-    /// The coverage source being migrated. Threaded through rather than a
-    /// constant, so the tool cannot disagree with the pin it just read.
-    name: String,
-    old_version: String,
-    new_version: String,
-    /// Per annotation file, the edit for every record it holds.
-    edits: BTreeMap<PathBuf, BTreeMap<String, Edit>>,
-    files: Vec<FileOutcome>,
-    added: Vec<(String, u32)>,
-    removed: Vec<String>,
-    reviews: Vec<Review>,
-    orphans: Vec<Orphan>,
+/// The two registries keyed to the coverage source's file list.
+struct Registries {
     reading_order: Vec<String>,
     complete: Vec<String>,
     /// Files still declared complete that the migration leaves with holes.
     now_incomplete: Vec<String>,
 }
 
+struct Plan {
+    /// The source being migrated. Threaded through rather than a constant, so
+    /// the tool cannot disagree with the pin it just read.
+    name: String,
+    role: Role,
+    old_version: String,
+    new_version: String,
+    /// Per store file, the edit for every record it holds.
+    edits: BTreeMap<PathBuf, (Store, BTreeMap<String, Edit>)>,
+    files: Vec<FileOutcome>,
+    added: Vec<(String, u32)>,
+    removed: Vec<String>,
+    reviews: Vec<Review>,
+    orphans: Vec<Orphan>,
+    /// `Some` only for the coverage source.
+    registries: Option<Registries>,
+}
+
 impl Plan {
     fn build(
         repo: &Path,
-        pin: &Pin,
+        target: &Source,
         old_root: &Path,
         new_root: &Path,
         new_version: &str,
@@ -224,7 +429,7 @@ impl Plan {
         let old_set: BTreeSet<&str> = old_files.iter().map(String::as_str).collect();
         let new_set: BTreeSet<&str> = new_files.iter().map(String::as_str).collect();
 
-        // One alignment per file, computed once and shared by every annotation
+        // One alignment per file, computed once and shared by every record
         // that lands in it.
         let mut maps: BTreeMap<String, FileMap> = BTreeMap::new();
         for rel in &old_files {
@@ -239,8 +444,9 @@ impl Plan {
         }
 
         let mut plan = Plan {
-            name: pin.primary()?.name.clone(),
-            old_version: pin.primary()?.version.clone(),
+            name: target.name.clone(),
+            role: target.role,
+            old_version: target.version.clone(),
             new_version: new_version.to_string(),
             edits: BTreeMap::new(),
             files: Vec::new(),
@@ -252,9 +458,7 @@ impl Plan {
                 .collect(),
             reviews: Vec::new(),
             orphans: Vec::new(),
-            reading_order: Vec::new(),
-            complete: Vec::new(),
-            now_incomplete: Vec::new(),
+            registries: None,
         };
         for rel in &new_files {
             if !old_set.contains(rel.as_str()) {
@@ -263,42 +467,51 @@ impl Plan {
             }
         }
 
-        // Walk the store file by file so each rewrite gets a complete edit set.
+        // Walk the stores file by file so each rewrite gets a complete edit
+        // set — every record accounted for, including the ones being left
+        // alone.
         let mut claimed: BTreeMap<String, Vec<LineRange>> = BTreeMap::new();
         let mut counts: BTreeMap<String, (usize, usize, usize)> = BTreeMap::new();
 
-        for (path, parsed) in read_store(repo)? {
+        for store_file in collect_cites(repo, target)? {
+            let store = store_file.store;
             let mut edits: BTreeMap<String, Edit> = BTreeMap::new();
-            for a in &parsed.annotations {
-                let range =
-                    LineRange::parse(&a.lines).with_context(|| format!("annotation {}", a.id))?;
-                let entry = counts.entry(a.file.clone()).or_default();
+            for cite in &store_file.cites {
+                if !cite.targeted {
+                    edits.insert(cite.id.clone(), Edit::Keep);
+                    continue;
+                }
+                let range = LineRange::parse(&cite.lines)
+                    .with_context(|| format!("{} {}", store.record(), cite.id))?;
+                let entry = counts.entry(cite.file.clone()).or_default();
 
-                let Some(map) = maps.get(&a.file) else {
+                let Some(map) = maps.get(&cite.file) else {
                     entry.2 += 1;
                     plan.orphans.push(Orphan {
-                        id: a.id.clone(),
-                        file: a.file.clone(),
-                        from: a.lines.clone(),
+                        store,
+                        id: cite.id.clone(),
+                        file: cite.file.clone(),
+                        from: cite.lines.clone(),
                         why: "the file is gone from the new release",
                     });
-                    edits.insert(a.id.clone(), Edit::Drop);
+                    edits.insert(cite.id.clone(), Edit::Drop);
                     continue;
                 };
 
                 let out = map
                     .remap(range)
-                    .with_context(|| format!("annotation {} in {}", a.id, a.file))?;
+                    .with_context(|| format!("{} {} in {}", store.record(), cite.id, cite.file))?;
                 match (out.range, out.change) {
                     (None, _) | (_, Change::Deleted) => {
                         entry.2 += 1;
                         plan.orphans.push(Orphan {
-                            id: a.id.clone(),
-                            file: a.file.clone(),
-                            from: a.lines.clone(),
+                            store,
+                            id: cite.id.clone(),
+                            file: cite.file.clone(),
+                            from: cite.lines.clone(),
                             why: "every line it claimed was deleted",
                         });
-                        edits.insert(a.id.clone(), Edit::Drop);
+                        edits.insert(cite.id.clone(), Edit::Drop);
                     }
                     (Some(new_range), change) => {
                         let text = fmt_range(new_range);
@@ -306,9 +519,10 @@ impl Plan {
                             Change::Edited { deleted, inserted } => {
                                 entry.1 += 1;
                                 plan.reviews.push(Review {
-                                    id: a.id.clone(),
-                                    file: a.file.clone(),
-                                    from: a.lines.clone(),
+                                    store,
+                                    id: cite.id.clone(),
+                                    file: cite.file.clone(),
+                                    from: cite.lines.clone(),
                                     to: text.clone(),
                                     deleted,
                                     inserted,
@@ -317,15 +531,18 @@ impl Plan {
                             Change::Shifted => entry.0 += 1,
                             Change::Unmoved | Change::Deleted => {}
                         }
-                        claimed.entry(a.file.clone()).or_default().push(new_range);
-                        edits.insert(a.id.clone(), Edit::Retarget(text));
+                        claimed
+                            .entry(cite.file.clone())
+                            .or_default()
+                            .push(new_range);
+                        edits.insert(cite.id.clone(), Edit::Retarget(text));
                     }
                 }
             }
-            plan.edits.insert(path, edits);
+            plan.edits.insert(store_file.path, (store, edits));
         }
 
-        // What the new tree will look like to the coverage gate.
+        // What the new tree will look like to the gate that watches it.
         for rel in &new_files {
             let new_lines = std::fs::read_to_string(new_root.join(rel))?.lines().count() as u32;
             let old_lines = match maps.get(rel) {
@@ -335,15 +552,17 @@ impl Plan {
             let (shifted, edited, dropped) = counts.get(rel).copied().unwrap_or_default();
             let mut ranges = claimed.remove(rel).unwrap_or_default();
             ranges.sort_by_key(|r| (r.start, r.end));
-            let mut unclaimed = 0u32;
-            let mut cursor = 1u32;
-            for r in &ranges {
-                if r.start > cursor {
-                    unclaimed += r.start - cursor;
+            let unclaimed = (target.role == Role::Coverage).then(|| {
+                let mut unclaimed = 0u32;
+                let mut cursor = 1u32;
+                for r in &ranges {
+                    if r.start > cursor {
+                        unclaimed += r.start - cursor;
+                    }
+                    cursor = cursor.max(r.end + 1);
                 }
-                cursor = cursor.max(r.end + 1);
-            }
-            unclaimed += new_lines.saturating_sub(cursor - 1);
+                unclaimed + new_lines.saturating_sub(cursor - 1)
+            });
 
             plan.files.push(FileOutcome {
                 file: rel.clone(),
@@ -358,40 +577,67 @@ impl Plan {
 
         // The registries: drop what is gone, append what is new. Position in
         // `reading_order` is a teaching decision, so a new file goes last and
-        // is reported rather than guessed at.
-        let manifest = slbl_core::schema::Manifest::load(&manifest_path(repo))?;
-        plan.complete = manifest
-            .complete
-            .into_iter()
-            .filter(|f| new_set.contains(f.as_str()))
-            .collect();
-        for f in &plan.complete {
-            if plan.files.iter().any(|o| &o.file == f && o.unclaimed > 0) {
-                plan.now_incomplete.push(f.clone());
+        // is reported rather than guessed at. Both registries describe the
+        // reference track, so both belong to the coverage source alone.
+        if target.role == Role::Coverage {
+            let manifest = slbl_core::schema::Manifest::load(&manifest_path(repo))?;
+            let complete: Vec<String> = manifest
+                .complete
+                .into_iter()
+                .filter(|f| new_set.contains(f.as_str()))
+                .collect();
+            let mut now_incomplete = Vec::new();
+            for f in &complete {
+                if plan
+                    .files
+                    .iter()
+                    .any(|o| &o.file == f && o.unclaimed.is_some_and(|n| n > 0))
+                {
+                    now_incomplete.push(f.clone());
+                }
             }
-        }
-        let course = slbl_core::schema::CourseFile::load(&course_path(repo))?;
-        plan.reading_order = course
-            .reading_order
-            .into_iter()
-            .filter(|f| new_set.contains(f.as_str()))
-            .collect();
-        for (rel, _) in &plan.added {
-            plan.reading_order.push(rel.clone());
+            let course = slbl_core::schema::CourseFile::load(&course_path(repo))?;
+            let mut reading_order: Vec<String> = course
+                .reading_order
+                .into_iter()
+                .filter(|f| new_set.contains(f.as_str()))
+                .collect();
+            for (rel, _) in &plan.added {
+                reading_order.push(rel.clone());
+            }
+            plan.registries = Some(Registries {
+                reading_order,
+                complete,
+                now_incomplete,
+            });
         }
 
         Ok(plan)
     }
 
+    /// What the gate asks of this source, in one line. A bump prints it
+    /// because it decides which half of this tool runs.
+    fn promise(&self) -> &'static str {
+        match self.role {
+            Role::Coverage => "every line claimed",
+            Role::Narrative => "annotated where the story goes",
+            Role::Glossary => "quoted, never claimed",
+        }
+    }
+
     fn print(&self) {
         println!(
-            "\n{} -> {}\n",
+            "\n{} -> {}   ({}, {})\n",
             vendor::source_id(&self.name, &self.old_version),
-            vendor::source_id(&self.name, &self.new_version)
+            vendor::source_id(&self.name, &self.new_version),
+            format!("{:?}", self.role).to_lowercase(),
+            self.promise(),
         );
+        let coverage = self.role == Role::Coverage;
+        let unclaimed_col = if coverage { "unclaimed" } else { "" };
         println!(
             "{:<26}{:>11}{:>9}{:>8}{:>8}{:>11}",
-            "file", "lines", "shifted", "edited", "dropped", "unclaimed"
+            "file", "lines", "shifted", "edited", "dropped", unclaimed_col
         );
         for f in &self.files {
             let moved = f.shifted + f.edited + f.dropped;
@@ -400,23 +646,33 @@ impl Plan {
             } else {
                 format!("{} -> {}", f.old_lines, f.new_lines)
             };
-            if moved == 0 && f.unclaimed == 0 && f.old_lines == f.new_lines {
+            if moved == 0 && f.unclaimed.unwrap_or(0) == 0 && f.old_lines == f.new_lines {
                 continue;
             }
             println!(
                 "{:<26}{:>11}{:>9}{:>8}{:>8}{:>11}",
-                f.file, lines, f.shifted, f.edited, f.dropped, f.unclaimed
+                f.file,
+                lines,
+                f.shifted,
+                f.edited,
+                f.dropped,
+                f.unclaimed.map(|n| n.to_string()).unwrap_or_default(),
             );
         }
         let untouched = self
             .files
             .iter()
-            .filter(|f| f.shifted + f.edited + f.dropped == 0 && f.unclaimed == 0)
+            .filter(|f| {
+                f.shifted + f.edited + f.dropped == 0
+                    && f.unclaimed.unwrap_or(0) == 0
+                    && f.old_lines == f.new_lines
+            })
             .count();
         println!("\n{untouched} file(s) unchanged and left alone");
 
         for (rel, n) in &self.added {
-            println!("  new file: {rel} ({n} lines, none annotated)");
+            let tail = if coverage { ", none annotated" } else { "" };
+            println!("  new file: {rel} ({n} lines{tail})");
         }
         for rel in &self.removed {
             println!("  removed:  {rel}");
@@ -424,7 +680,7 @@ impl Plan {
 
         if !self.reviews.is_empty() {
             println!(
-                "\n{} annotation(s) still point at real code, but the code changed:",
+                "\n{} record(s) still point at real code, but the code changed:",
                 self.reviews.len()
             );
             for r in self.reviews.iter().take(40) {
@@ -439,21 +695,23 @@ impl Plan {
         }
         if !self.orphans.is_empty() {
             println!(
-                "\n{} annotation(s) have nothing left to point at:",
+                "\n{} record(s) have nothing left to point at:",
                 self.orphans.len()
             );
             for o in &self.orphans {
                 println!("  {:<20} {} {}  — {}", o.id, o.file, o.from, o.why);
             }
         }
-        if !self.now_incomplete.is_empty() {
-            println!(
-                "\n{} file(s) are marked complete but will have unclaimed lines; \
-                 coverage will fail until they are annotated:",
-                self.now_incomplete.len()
-            );
-            for f in &self.now_incomplete {
-                println!("  {f}");
+        if let Some(r) = &self.registries {
+            if !r.now_incomplete.is_empty() {
+                println!(
+                    "\n{} file(s) are marked complete but will have unclaimed lines; \
+                     coverage will fail until they are annotated:",
+                    r.now_incomplete.len()
+                );
+                for f in &r.now_incomplete {
+                    println!("  {f}");
+                }
             }
         }
     }
@@ -470,13 +728,18 @@ impl Plan {
         let new_source = vendor::source_id(&self.name, &self.new_version);
         let mut dropped_text: Vec<(String, String)> = Vec::new();
 
-        // 1. The annotation store.
-        for (path, edits) in &self.edits {
+        // 1. The stores.
+        for (path, (store, edits)) in &self.edits {
             let text = std::fs::read_to_string(path)?;
-            let (out, outcome) = store_edit::rewrite(&text, &new_source, edits)
+            let spec = store_edit::Spec {
+                header: store.header(),
+                new_source: &new_source,
+                file_source: store.file_source(),
+            };
+            let (out, outcome) = store_edit::rewrite(&text, spec, edits)
                 .with_context(|| format!("rewriting {}", path.display()))?;
             dropped_text.extend(outcome.dropped_text);
-            if outcome.retargeted == 0 && outcome.dropped > 0 {
+            if outcome.retargeted == 0 && outcome.kept == 0 && outcome.dropped > 0 {
                 // Every record went away with the file it described.
                 std::fs::remove_file(path)?;
                 println!("removed {}", rel_display(repo, path));
@@ -485,18 +748,20 @@ impl Plan {
             }
         }
 
-        // 2. The registries.
-        let manifest = manifest_path(repo);
-        let text = std::fs::read_to_string(&manifest)?;
-        let text = store_edit::set_scalar(&text, "source", &new_source)?;
-        let text = store_edit::set_string_array(&text, "complete", &self.complete)?;
-        std::fs::write(&manifest, text)?;
+        // 2. The registries, which only the coverage source has.
+        if let Some(r) = &self.registries {
+            let manifest = manifest_path(repo);
+            let text = std::fs::read_to_string(&manifest)?;
+            let text = store_edit::set_scalar(&text, "source", &new_source)?;
+            let text = store_edit::set_string_array(&text, "complete", &r.complete)?;
+            std::fs::write(&manifest, text)?;
 
-        let course = course_path(repo);
-        let text = std::fs::read_to_string(&course)?;
-        let text = store_edit::set_scalar(&text, "source", &new_source)?;
-        let text = store_edit::set_string_array(&text, "reading_order", &self.reading_order)?;
-        std::fs::write(&course, text)?;
+            let course = course_path(repo);
+            let text = std::fs::read_to_string(&course)?;
+            let text = store_edit::set_scalar(&text, "source", &new_source)?;
+            let text = store_edit::set_string_array(&text, "reading_order", &r.reading_order)?;
+            std::fs::write(&course, text)?;
+        }
 
         // 3. The vendored tree. Moved into place only now, so an earlier
         //    failure leaves the old tree and the old store consistent.
@@ -507,7 +772,7 @@ impl Plan {
             std::fs::remove_dir_all(vendor::crate_dir(repo, &self.name, &self.old_version))?;
         }
 
-        // 4. The pin, which is what the coverage gate actually checks.
+        // 4. The pin, which is what the gates actually check.
         let mut new_pin = pin.clone();
         let migrated = new_pin
             .sources
@@ -523,21 +788,25 @@ impl Plan {
             notice(repo, &new_pin)?,
         )?;
 
-        // 5. Everything else that names the version.
+        // 5. Everything else that builds against the version by name.
         let bumped =
             bump_example_manifests(repo, &self.name, &self.old_version, &self.new_version)?;
+        let harness = harness::retarget(repo, &self.name, &self.new_version)?;
 
         let report = self.report(pin, archive, archive_sha, &dropped_text)?;
-        let report_path = repo
-            .join("docs")
-            .join("migrations")
-            .join(format!("{}-to-{}.md", self.old_version, self.new_version));
+        let report_path = repo.join("docs").join("migrations").join(format!(
+            "{}-{}-to-{}.md",
+            self.name, self.old_version, self.new_version
+        ));
         std::fs::create_dir_all(report_path.parent().unwrap())?;
         std::fs::write(&report_path, report)?;
 
         println!("\nwrote {}", rel_display(repo, &vendor::pin_path(repo)));
         println!("wrote {}", rel_display(repo, &report_path));
         println!("updated {bumped} example manifest(s)");
+        if harness {
+            println!("updated {}", harness::MANIFEST);
+        }
 
         let stale = stale_mentions(repo, &self.old_version)?;
         if !stale.is_empty() {
@@ -550,13 +819,28 @@ impl Plan {
             }
         }
 
+        println!("\nnext:");
         println!(
-            "\nnext:\n  cargo update -p {} --precise {}\n  cargo xtask coverage\n  cargo test --workspace\n  review {}",
-            self.name,
-            self.new_version,
-            rel_display(repo, &report_path)
+            "  cargo update -p {} --precise {}",
+            self.name, self.new_version
         );
+        if self.rebuilds_the_expander() {
+            println!("  cargo test -p expand -- --ignored   # the expansion transcripts");
+        }
+        println!("  cargo xtask coverage");
+        println!("  cargo test --workspace");
+        println!("  review {}", rel_display(repo, &report_path));
         Ok(())
+    }
+
+    /// Whether moving this source changes what the expander emits.
+    ///
+    /// `serde_derive` obviously; the glossary sources because they are the
+    /// parser, the printer and the token type it is built on. The committed
+    /// transcripts are the only thing that would notice, and they will notice
+    /// as a diff rather than a failure, so the bump says so out loud.
+    fn rebuilds_the_expander(&self) -> bool {
+        matches!(self.role, Role::Narrative | Role::Glossary)
     }
 
     fn report(
@@ -567,9 +851,13 @@ impl Plan {
         dropped_text: &[(String, String)],
     ) -> Result<String> {
         let mut s = String::new();
+        let flag = match self.role {
+            Role::Coverage => String::new(),
+            _ => format!("--source {} ", self.name),
+        };
         s.push_str(&format!(
             "# Migration: {} {} -> {}\n\n\
-             Generated by `cargo xtask bump {}`. This file is the record of what the\n\
+             Generated by `cargo xtask bump {flag}{}`. This file is the record of what the\n\
              migration did mechanically and what it left for a human.\n\n",
             self.name, self.old_version, self.new_version, self.new_version
         ));
@@ -577,6 +865,11 @@ impl Plan {
         s.push_str(&format!(
             "| | |\n|---|---|\n| archive | `{}` |\n",
             file_name(archive)
+        ));
+        s.push_str(&format!(
+            "| role | `{}` — {} |\n",
+            format!("{:?}", self.role).to_lowercase(),
+            self.promise()
         ));
         s.push_str(&format!("| crate sha256 | `{archive_sha}` |\n"));
         let previous = pin.get(&self.name)?;
@@ -590,11 +883,15 @@ impl Plan {
         ));
 
         s.push_str("## Files\n\n");
-        s.push_str("| file | lines | shifted | edited | dropped | unclaimed |\n");
-        s.push_str("|---|---:|---:|---:|---:|---:|\n");
+        let head = if self.role == Role::Coverage {
+            "| file | lines | shifted | edited | dropped | unclaimed |\n|---|---:|---:|---:|---:|---:|\n"
+        } else {
+            "| file | lines | shifted | edited | dropped |\n|---|---:|---:|---:|---:|\n"
+        };
+        s.push_str(head);
         for f in &self.files {
             if f.shifted + f.edited + f.dropped == 0
-                && f.unclaimed == 0
+                && f.unclaimed.unwrap_or(0) == 0
                 && f.old_lines == f.new_lines
             {
                 continue;
@@ -605,16 +902,27 @@ impl Plan {
                 format!("{} → {}", f.old_lines, f.new_lines)
             };
             s.push_str(&format!(
-                "| `{}` | {} | {} | {} | {} | {} |\n",
-                f.file, lines, f.shifted, f.edited, f.dropped, f.unclaimed
+                "| `{}` | {} | {} | {} | {} |",
+                f.file, lines, f.shifted, f.edited, f.dropped
             ));
+            match f.unclaimed {
+                Some(n) => s.push_str(&format!(" {n} |\n")),
+                None => s.push('\n'),
+            }
         }
         s.push('\n');
         for (rel, n) in &self.added {
-            s.push_str(&format!(
-                "- **New file** `{rel}` ({n} lines). Appended to `reading_order` at the end; \
-                 move it to where it belongs in the teaching order.\n"
-            ));
+            match self.role {
+                Role::Coverage => s.push_str(&format!(
+                    "- **New file** `{rel}` ({n} lines). Appended to `reading_order` at the end; \
+                     move it to where it belongs in the teaching order.\n"
+                )),
+                _ => s.push_str(&format!(
+                    "- **New file** `{rel}` ({n} lines). Nothing cites it, and nothing has to: \
+                     this source is {}.\n",
+                    self.promise()
+                )),
+            }
         }
         for rel in &self.removed {
             s.push_str(&format!("- **Removed file** `{rel}`.\n"));
@@ -623,25 +931,32 @@ impl Plan {
             s.push('\n');
         }
 
-        s.push_str("## Annotations to review\n\n");
+        s.push_str("## Records to review\n\n");
         if self.reviews.is_empty() {
-            s.push_str("None: every surviving annotation covers the same text it did before.\n\n");
+            s.push_str("None: every surviving record covers the same text it did before.\n\n");
         } else {
             s.push_str(
                 "These ranges were carried across and still cover real code, but the code inside \
                  them changed. The prose has not been checked against it.\n\n\
-                 | id | file | was | now | -lines | +lines |\n|---|---|---|---|---:|---:|\n",
+                 | id | store | file | was | now | -lines | +lines |\n\
+                 |---|---|---|---|---|---:|---:|\n",
             );
             for r in &self.reviews {
                 s.push_str(&format!(
-                    "| `{}` | `{}` | {} | {} | {} | {} |\n",
-                    r.id, r.file, r.from, r.to, r.deleted, r.inserted
+                    "| `{}` | {} | `{}` | {} | {} | {} | {} |\n",
+                    r.id,
+                    r.store.record(),
+                    r.file,
+                    r.from,
+                    r.to,
+                    r.deleted,
+                    r.inserted
                 ));
             }
             s.push('\n');
         }
 
-        s.push_str("## Annotations dropped\n\n");
+        s.push_str("## Records dropped\n\n");
         if dropped_text.is_empty() {
             s.push_str("None.\n\n");
         } else {
@@ -652,8 +967,12 @@ impl Plan {
             );
             for o in &self.orphans {
                 s.push_str(&format!(
-                    "- `{}` — {} ({}), {}\n",
-                    o.id, o.file, o.from, o.why
+                    "- `{}` ({}) — {} ({}), {}\n",
+                    o.id,
+                    o.store.record(),
+                    o.file,
+                    o.from,
+                    o.why
                 ));
             }
             s.push('\n');
@@ -668,24 +987,41 @@ impl Plan {
 
         s.push_str("## Checklist\n\n");
         s.push_str(&format!(
-            "- [ ] `cargo update -p {} --precise {}`\n\
-             - [ ] `cargo xtask coverage` is green\n\
-             - [ ] `cargo test --workspace` is green (examples still produce their transcripts)\n\
-             - [ ] every annotation in *Annotations to review* has been read against the new source\n",
+            "- [ ] `cargo update -p {} --precise {}`\n",
             self.name, self.new_version
         ));
-        if !self.now_incomplete.is_empty() {
-            for f in &self.now_incomplete {
+        if self.rebuilds_the_expander() {
+            s.push_str(
+                "- [ ] `cargo test -p expand -- --ignored` — the expander is built from this \
+                 source, so its transcripts move with it. Read the diff: it is the generated \
+                 code the site shows.\n",
+            );
+        }
+        s.push_str(
+            "- [ ] `cargo xtask coverage` is green\n\
+             - [ ] `cargo test --workspace` is green (examples still produce their transcripts)\n\
+             - [ ] every record in *Records to review* has been read against the new source\n",
+        );
+        if self.role == Role::Glossary && !self.orphans.is_empty() {
+            s.push_str(
+                "- [ ] a dropped glossary entry leaves every `see_also` and every annotation \
+                 that cited it dangling; coverage will name them\n",
+            );
+        }
+        if let Some(r) = &self.registries {
+            for f in &r.now_incomplete {
                 s.push_str(&format!(
                     "- [ ] `{f}` is marked complete but has unclaimed lines: annotate them\n"
                 ));
             }
         }
         for (rel, _) in &self.added {
-            s.push_str(&format!(
-                "- [ ] `{rel}` is new and entirely unannotated; add it to `annotations/` and to \
-                 `manifest.toml` once it is done\n"
-            ));
+            if self.role == Role::Coverage {
+                s.push_str(&format!(
+                    "- [ ] `{rel}` is new and entirely unannotated; add it to `annotations/` and \
+                     to `manifest.toml` once it is done\n"
+                ));
+            }
         }
         s.push_str("- [ ] prose outside the store that names the version (PLAN.md, README.md, docs/) is current\n");
         Ok(s)
@@ -795,24 +1131,34 @@ fn course_path(repo: &Path) -> PathBuf {
     repo.join("annotations").join("course.toml")
 }
 
-/// Every annotation file, paired with its path, in a stable order.
-fn read_store(repo: &Path) -> Result<Vec<(PathBuf, AnnotationFile)>> {
-    let dir = repo.join("annotations");
+/// Every `.toml` in one store directory, in a stable order.
+fn store_paths(repo: &Path, dir: &str) -> Result<Vec<PathBuf>> {
+    let dir = repo.join(dir);
+    if !dir.is_dir() {
+        return Ok(Vec::new());
+    }
     let mut entries: Vec<PathBuf> = std::fs::read_dir(&dir)?
         .collect::<std::io::Result<Vec<_>>>()?
         .into_iter()
         .map(|e| e.path())
-        .filter(|p| {
-            p.extension().is_some_and(|e| e == "toml")
-                && !p
-                    .file_name()
-                    .is_some_and(|n| n == "manifest.toml" || n == "course.toml")
-        })
+        .filter(|p| p.extension().is_some_and(|e| e == "toml"))
         .collect();
     entries.sort();
+    Ok(entries)
+}
 
+/// Every annotation file, paired with its path, in a stable order.
+fn read_annotation_files(repo: &Path) -> Result<Vec<(PathBuf, AnnotationFile)>> {
     let mut out = Vec::new();
-    for path in entries {
+    for path in store_paths(repo, "annotations")? {
+        // The manifest and the course registry live in the same directory but
+        // are not annotation files.
+        if path
+            .file_name()
+            .is_some_and(|n| n == "manifest.toml" || n == "course.toml")
+        {
+            continue;
+        }
         let text = std::fs::read_to_string(&path)?;
         let parsed: AnnotationFile =
             toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
@@ -1016,5 +1362,95 @@ mod tests {
     fn a_single_line_range_stays_single() {
         assert_eq!(fmt_range(LineRange { start: 7, end: 7 }), "7");
         assert_eq!(fmt_range(LineRange { start: 7, end: 9 }), "7-9");
+    }
+
+    fn repo() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("xtask/ has a parent")
+            .to_path_buf()
+    }
+
+    fn stores(name: &str) -> Vec<StoreFile> {
+        let pin = vendor::load_pin(&repo()).unwrap();
+        collect_cites(&repo(), pin.get(name).unwrap()).unwrap()
+    }
+
+    fn dirs(files: &[StoreFile]) -> BTreeSet<String> {
+        files
+            .iter()
+            .map(|f| {
+                f.path
+                    .parent()
+                    .and_then(|p| p.file_name())
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect()
+    }
+
+    /// The role decides which stores move, and the narrative is keyed to two
+    /// sources at once. Bumping either one has to reach the narrative and
+    /// leave the other one's steps alone — before this was role-aware, a
+    /// `serde_core` bump rewrote `annotations/` and silently left the
+    /// narrative's crossings pointing into the old tree.
+    #[test]
+    fn which_stores_a_bump_rewrites_follows_from_the_role() {
+        let coverage = stores("serde_core");
+        assert_eq!(
+            dirs(&coverage),
+            ["annotations", "narrative"]
+                .map(String::from)
+                .into_iter()
+                .collect()
+        );
+
+        let narrative = stores("serde_derive");
+        assert_eq!(
+            dirs(&narrative),
+            ["narrative"].map(String::from).into_iter().collect()
+        );
+
+        let glossary = stores("syn");
+        assert_eq!(
+            dirs(&glossary),
+            ["glossary"].map(String::from).into_iter().collect()
+        );
+        assert!(
+            glossary.iter().all(|f| f.path.ends_with("syn.toml")),
+            "a glossary bump touches the one file that quotes that crate"
+        );
+    }
+
+    /// Both halves of a mixed file are accounted for: the steps citing the
+    /// source being bumped, and the ones citing the other, which must be
+    /// carried through rather than retargeted or forgotten.
+    #[test]
+    fn a_narrative_unit_is_rewritten_whole_and_moved_in_part() {
+        for (name, other) in [
+            ("serde_core", "serde_derive"),
+            ("serde_derive", "serde_core"),
+        ] {
+            let files = stores(name);
+            let narrative: Vec<&StoreFile> = files
+                .iter()
+                .filter(|f| f.store == Store::Narrative)
+                .collect();
+            assert!(!narrative.is_empty(), "{name} cites no narrative unit");
+            assert!(
+                narrative.iter().all(|f| f.cites.iter().any(|c| c.targeted)),
+                "a unit with nothing to move is not rewritten at all"
+            );
+            let left_alone: usize = narrative
+                .iter()
+                .flat_map(|f| &f.cites)
+                .filter(|c| !c.targeted)
+                .count();
+            assert!(
+                left_alone > 0,
+                "bumping {name} should leave {other}'s steps in place"
+            );
+        }
     }
 }
