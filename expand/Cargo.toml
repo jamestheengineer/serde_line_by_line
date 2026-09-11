@@ -22,7 +22,7 @@ doctest = false
 # compiler thread — natively here, and in the browser through `expander`.
 proc-macro2 = { version = "=1.0.107", default-features = false }
 quote = { version = "=1.0.47", default-features = false }
-syn = { version = "=3.0.3", default-features = false, features = [
+syn = { version = "=3.0.5", default-features = false, features = [
     "clone-impls",
     "derive",
     "parsing",

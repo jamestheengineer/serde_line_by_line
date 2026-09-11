@@ -397,11 +397,21 @@ measurements behind each:
 
 **Still open:** nothing.
 
-> As of the last check, `serde_core` 1.0.229 is still the newest published
+> As of 2026-09-10, `serde_core` 1.0.229 is still the newest published
 > release, so there is nothing to bump *to*. The migration path is built and
 > exercised — `1.0.229 → 1.0.228` and back returns the tree byte for byte, and
 > `1.0.220 → 1.0.229` is verified as a dry run because it is the hard shape: a
 > file added, a file removed, eleven annotations whose contents moved.
+>
+> One of the other four pins did move, and moving it is what made the tool
+> role-aware ([D11](docs/decisions.md)). `syn` 3.0.3 → 3.0.5 is the first bump
+> of a source that is quoted rather than claimed: `cargo xtask bump --source
+> <name>` now migrates any pinned source, and the role decides which store it
+> rewrites. Two things fell out of doing it properly. The coverage bump had a
+> hole — the narrative's nine crossings into `serde_core` were keyed to a tree
+> it would have replaced without retargeting them — and the expansion harness
+> was free to build against a `syn` the glossary does not describe, which no
+> tree hash can see, because the tree is not what moved.
 
 ---
 

@@ -24,12 +24,12 @@ rather than annotated is D9 in `docs/decisions.md`.
 - License: MIT OR Apache-2.0 (see `serde_derive-1.0.229/LICENSE-MIT` and `serde_derive-1.0.229/LICENSE-APACHE`)
 - Copyright: Erick Tryzelaar <erick.tryzelaar@gmail.com>, David Tolnay <dtolnay@gmail.com>
 
-## syn 3.0.3 (glossary)
+## syn 3.0.5 (glossary)
 
-- crates.io: https://crates.io/crates/syn/3.0.3
+- crates.io: https://crates.io/crates/syn/3.0.5
 - Upstream: https://github.com/dtolnay/syn
-- sha256: `53e9bae58849f64dfa4f5d5ae372c8341f7305f82a3868709269343628b659a3`
-- License: MIT OR Apache-2.0 (see `syn-3.0.3/LICENSE-MIT` and `syn-3.0.3/LICENSE-APACHE`)
+- sha256: `12df2e0110f65b775f769bb17ef989067a1d931b2eb822bd4346631eeada89f9`
+- License: MIT OR Apache-2.0 (see `syn-3.0.5/LICENSE-MIT` and `syn-3.0.5/LICENSE-APACHE`)
 - Copyright: David Tolnay <dtolnay@gmail.com>
 
 ## quote 1.0.47 (glossary)

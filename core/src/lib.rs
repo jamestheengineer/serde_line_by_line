@@ -252,7 +252,7 @@ pub fn read_annotations(repo: &Path, source_id: &str) -> Result<Vec<Annotation>>
 pub struct GlossaryItem {
     pub entry: schema::GlossaryEntry,
     pub range: LineRange,
-    /// `"syn-3.0.3"` — which pinned tree the quotation comes from.
+    /// `"syn-3.0.5"` — which pinned tree the quotation comes from.
     pub source_id: String,
     /// The quoted lines, read from the pinned tree at load time. Never stored
     /// in the toml: a copy in the store is a copy that can rot, and the whole

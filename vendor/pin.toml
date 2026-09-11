@@ -26,10 +26,10 @@ src_tree_sha256 = "510e108f5ac71439f41fb8dc6b0da87d155ae14421706e27d93e8ca916989
 
 [[source]]
 name = "syn"
-version = "3.0.3"
+version = "3.0.5"
 role = "glossary"
-crate_sha256 = "53e9bae58849f64dfa4f5d5ae372c8341f7305f82a3868709269343628b659a3"
-src_tree_sha256 = "d1594f4c97daa8d78edb2c54fa26ecd1deb51317823d5828bc84639674841ad0"
+crate_sha256 = "12df2e0110f65b775f769bb17ef989067a1d931b2eb822bd4346631eeada89f9"
+src_tree_sha256 = "9ac68490ba2e6345011b2d96b3a06674ae3f5dcc0e0a27e9c5e944f91d7ab147"
 
 [[source]]
 name = "quote"

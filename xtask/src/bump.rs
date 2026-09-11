@@ -820,9 +820,13 @@ impl Plan {
         }
 
         println!("\nnext:");
+        // `-p name` is ambiguous whenever two majors of a crate are in the
+        // graph, which is the normal case here: the highlighter pulls syn 2
+        // while the harness is on syn 3. Naming the outgoing version disposes
+        // of that.
         println!(
-            "  cargo update -p {} --precise {}",
-            self.name, self.new_version
+            "  cargo update -p {}@{} --precise {}",
+            self.name, self.old_version, self.new_version
         );
         if self.rebuilds_the_expander() {
             println!("  cargo test -p expand -- --ignored   # the expansion transcripts");
@@ -987,8 +991,8 @@ impl Plan {
 
         s.push_str("## Checklist\n\n");
         s.push_str(&format!(
-            "- [ ] `cargo update -p {} --precise {}`\n",
-            self.name, self.new_version
+            "- [ ] `cargo update -p {}@{} --precise {}`\n",
+            self.name, self.old_version, self.new_version
         ));
         if self.rebuilds_the_expander() {
             s.push_str(

@@ -99,7 +99,7 @@ things; the tool lists the lines and leaves them.
 ```
 cargo xtask bump 1.0.230 --dry-run     # read the plan first, always
 cargo xtask bump 1.0.230
-cargo update -p serde_core --precise 1.0.230
+cargo update -p serde_core@1.0.229 --precise 1.0.230
 cargo xtask coverage
 cargo test --workspace
 ```
@@ -110,7 +110,8 @@ more step:
 ```
 cargo xtask bump --source syn 3.0.5 --dry-run
 cargo xtask bump --source syn 3.0.5
-cargo update -p syn --precise 3.0.5
+cargo update -p syn@3.0.3 --precise 3.0.5   # `-p syn` is ambiguous: syn 2 is
+                                            # in the graph too
 cargo test -p expand -- --ignored      # the expander is built from it
 cargo xtask coverage
 cargo test --workspace

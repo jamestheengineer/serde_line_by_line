@@ -903,9 +903,9 @@ fn declares(text: &str, name: &str) -> bool {
 /// `expand/` is the one crate that builds *against* pinned sources rather than
 /// reading them: `syn`, `quote` and `proc-macro2` are Cargo dependencies there
 /// and vendored trees here. Nothing but this connects the two, and the failure
-/// it prevents is a quiet one — the glossary quoting `syn` 3.0.3 while the
-/// expansions on the site were produced by whatever `syn` Cargo felt like
-/// resolving. The same drift the vendor checksum exists to stop, arriving
+/// it prevents is a quiet one — the glossary quoting one release of `syn`
+/// while the expansions on the site were produced by whatever release Cargo
+/// felt like resolving. The same drift the vendor checksum exists to stop, arriving
 /// through the dependency graph instead of the tree.
 ///
 /// The manifest and the lockfile are both checked, because the manifest says

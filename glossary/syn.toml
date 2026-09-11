@@ -6,7 +6,7 @@
 # copy here would be a second thing to keep true.
 
 schema = 1
-source = "syn-3.0.3"
+source = "syn-3.0.5"
 
 [[entry]]
 id    = "syn::AngleBracketedGenericArguments"
