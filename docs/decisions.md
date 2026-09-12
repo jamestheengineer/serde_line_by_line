@@ -528,7 +528,10 @@ D9 settled the prerequisite for a `serde_derive` track, and both shapes in
 [`derive-track-scope.md`](derive-track-scope.md) have now been chosen: the
 narrative one shipped as PLAN.md §11, and the reference one is PLAN.md §12.
 
-D12, the one question §12 opened, is answered below.
+D12, the one question §12 opened, is answered below, and §12 itself is
+complete: two annotated crates at 100%, a course track spanning both, and a
+walk that became an ordering over the store rather than a track with citations
+of its own.
 
 **Still open: nothing.**
 

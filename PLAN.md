@@ -319,9 +319,12 @@ from the annotation store on every push to `main` (D6). All three tracks are
 complete: 12,037 lines claimed by 468 annotations, 14 course units written, and
 9 derive units walking `serde_derive` in 85 steps.
 
-What follows them is **§12**: the reference half of the derive track, which the
-walk deliberately did not make. `serde_derive` becomes a second source that
-promises every line, and the walk becomes an ordering over it.
+What followed them is **§12**, now also complete: the reference half of the
+derive track, which the walk deliberately did not make. `serde_derive` is a
+second source promising every line, and the walk is an ordering over it. The
+counts above are `serde_core`'s alone; the project's are 21,012 lines of two
+annotated crates claimed by 871 annotations, 21 course units, and the same
+9-unit walk.
 
 Two more gates went in during phase 8. Listed beside the coverage gate from
 phase 0, they are what makes the promises in this document checkable rather
@@ -599,7 +602,7 @@ exactly the lie §11 refused to tell about the walk.
 | **R4 — `internals/`** ✅ | `attr.rs` (1,818 lines, the attribute DSL), `check.rs`, `ast.rs`, `case.rs`, `name.rs`, `symbol.rs`, `ctxt.rs`, `respan.rs`, `mod.rs` | 102 | the `#[serde(...)]` surface is claimed, including what upstream rejects and why |
 | **R5 — Plumbing** ✅ | `bound.rs`, `receiver.rs`, `pretend.rs`, `lib.rs`, `fragment.rs`, `deprecated.rs`, `this.rs`, `dummy.rs` | 39 | **every line of `serde_derive` claimed**; all 28 files in its manifest; the gate hard-fails on regression; all 85 narrative steps name a containing annotation |
 | **R6 — Course units** ✅ | 7 new units: proc-macro basics, spans, `syn`'s AST, `quote!` interpolation, the attribute DSL, generating an impl, the four enum representations; the cross-crate prereq DAG | — | the course track spans both crates, walkable start to finish, D8's forward-reference check enforcing across sources |
-| **R7 — Ship** | Navigation for four reference file-trees' worth of pages, the restated promise, `README` | — | both reference tracks reachable and each honest about what it claims |
+| **R7 — Ship** ✅ | Navigation across two reference file-trees, the restated promise, `README` | — | both reference tracks reachable and each honest about what it claims |
 
 ### What R1 shipped
 
@@ -766,6 +769,45 @@ One thing did not need doing. `supplement` still means what it meant; all seven
 new units are `none`, because the second crate genuinely teaches all of it. The
 field's doc comment moved from "taught entirely from serde_core" to "from the
 annotated crates" and that was the whole change.
+
+### What R7 shipped, and what §12 came to
+
+The sidebar is grouped by crate with a figure per group, a file nobody has
+written about is listed with its zero and not linked, and a reference page for
+a file the walk goes through links into the walk at the unit that reaches it
+first — reference → derive, which N5 called the crossing that matters, now made
+per file rather than per track.
+
+The front page states the promise in the form this project has used since phase
+8, with the numbers counted during the build rather than typed:
+
+> Every line of every *annotated* crate is claimed by exactly one annotation,
+> and the coverage gate fails the build over one unclaimed line, one overlap,
+> or one range left behind by a version bump. Both crates above are at 100% and
+> every one of their 47 files is named as complete, so from here a gap is a
+> build failure rather than a warning.
+>
+> There are two figures above and there is deliberately no third combining
+> them. The two crates make the same promise about different amounts of code; a
+> percentage spanning them would be a fact about an arithmetic operation rather
+> than about either crate (D12).
+>
+> The derive walk makes no coverage claim of its own and never did. It is a
+> path: 9 units and 85 stops picking one route through `serde_derive`, and all
+> 85 of them now land inside an annotation and link there. The percentage
+> belongs to the track underneath it.
+
+**§12 is complete.** Two annotated crates at 100% — 12,037 and 8,975 lines, 871
+annotations — a 21-unit course track spanning both with prereq edges crossing
+between them, a 9-unit walk that is now an ordering over the store rather than
+a track with citations of its own, and 62 glossary entries quoting 1,123 lines
+of borrowed vocabulary that is still never claimed.
+
+Against the scope doc: **403 derive annotations against a projected ~502**, and
+the 15–19 sessions it estimated from an empty start, of which N1–N3 had already
+spent three. The two estimates that moved both moved the same way — the crate
+compresses better than a count of `quote!` blocks can see — and the gate is what
+makes that claim checkable rather than a thing to take on trust.
 
 R3–R5 are pure content throughput and can be reordered freely, with one
 exception: `internals/attr.rs` is the density risk the scope doc flagged

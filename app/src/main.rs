@@ -175,6 +175,10 @@ struct IndexPage {
     /// One row per annotated crate. There is deliberately no figure spanning
     /// them — see where this is built.
     sources: Vec<SourceSummary>,
+    /// How many source files are declared complete, across both crates. A
+    /// count of files is not a coverage percentage: it says how much of the
+    /// promise is hard-gated, which is the same fact for either crate.
+    complete_files: usize,
     course_units: usize,
     derive: Narrated,
     glossary: Borrowed,
@@ -401,6 +405,12 @@ struct FilePage {
     /// Which annotated crate this file belongs to. Shown on the page because
     /// `src/lib.rs` is now an ambiguous title (D12).
     source: String,
+    /// Where the derive walk goes through this file, if it does. Empty
+    /// otherwise — the template tests it rather than carrying an `Option`.
+    /// N5 called reference → derive the crossing that matters; this is it made
+    /// per file rather than per track.
+    walk_href: String,
+    walk_title: String,
     file: String,
     percent: f64,
     percent_label: String,
@@ -455,6 +465,18 @@ fn main() -> Result<()> {
     }
     let expansions = expansions_for(cases.iter())?;
 
+    // Which narrative unit walks each file, for the link from a reference page
+    // into the walk. First unit wins: a file walked by several is reached most
+    // naturally at the earliest stop.
+    let mut walked: BTreeMap<(String, String), (String, String)> = BTreeMap::new();
+    for unit in &narrative {
+        for step in &unit.steps {
+            walked
+                .entry((step.crate_name.clone(), step.step.file.clone()))
+                .or_insert_with(|| (unit.unit.id.clone(), unit.unit.title.clone()));
+        }
+    }
+
     // Highlighted once for the whole build: the reference track renders each
     // file on its own page, and the course track pulls spans out of a dozen
     // files into one unit page. Keyed by crate as well as path — two of the
@@ -502,6 +524,12 @@ fn main() -> Result<()> {
                 nav: nav_for(&nav),
                 file: file.clone(),
                 source: source.name.clone(),
+                walk_href: walked
+                    .get(&(source.name.clone(), file.clone()))
+                    .map_or(String::new(), |(id, _)| format!("{id}.html")),
+                walk_title: walked
+                    .get(&(source.name.clone(), file.clone()))
+                    .map_or(String::new(), |(_, title)| title.clone()),
                 percent: percent_of(units, *lines),
                 percent_label: format!("{:.1}", percent_of(units, *lines)),
                 lines: *lines,
@@ -562,6 +590,7 @@ fn main() -> Result<()> {
                 complete_files: s.complete.len(),
             })
             .collect(),
+        complete_files: store.sources.iter().map(|s| s.complete.len()).sum(),
         course_units: store.course.len(),
         derive,
         glossary,

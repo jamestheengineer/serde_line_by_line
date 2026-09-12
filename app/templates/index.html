@@ -1,11 +1,12 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="hero">
-  <h1>Every line of <code>serde_core</code>, and now <code>serde_derive</code></h1>
+  <h1>Every line of <code>serde_core</code> and <code>serde_derive</code></h1>
   <p class="lede">
     A guided walkthrough of the crate that holds Serde&rsquo;s trait definitions
-    and the one that generates the code calling into it, with explanations
-    beside the source and runnable micro-examples.
+    and the crate that generates the code calling into it &mdash; explanations
+    beside the source, runnable micro-examples, and the derive macro expanding
+    live in your browser.
   </p>
 
   {# One block per annotated crate, never a combined figure. The two crates
@@ -44,17 +45,26 @@
 
   <h2>What each of them claims</h2>
   <p>
-    Every line of every <i>annotated</i> crate is claimed, and the coverage
-    gate fails the build over one unclaimed line, one overlap, or one range
-    left behind by a version bump. There are two annotated crates and
-    therefore two figures above; there is no third figure combining them,
-    because 21,012 lines is not a promise anyone made.
+    Every line of every <i>annotated</i> crate is claimed by exactly one
+    annotation, and the coverage gate fails the build over one unclaimed line,
+    one overlap, or one range left behind by a version bump. Both crates above
+    are at 100% and every one of their {{ complete_files }} files is named as
+    complete, so from here a gap is a build failure rather than a warning.
   </p>
   <p>
-    A crate is claimed <i>file by file</i>. A file named as complete may never
-    develop a hole &mdash; that is a build failure &mdash; and a file nobody
-    has begun is reported at zero rather than quietly left out of the
-    denominator.
+    There are two figures above and there is deliberately no third combining
+    them. The two crates make the same promise about different amounts of code;
+    a percentage spanning them would be a fact about an arithmetic operation
+    rather than about either crate
+    (<a href="https://github.com/jamestheengineer/serde_line_by_line/blob/main/docs/decisions.md">D12</a>).
+  </p>
+  <p>
+    The <a href="{{ root }}derive/index.html">derive walk</a> makes no coverage
+    claim of its own and never did. It is a path: {{ derive.units }} units and
+    {{ derive.steps }} stops picking one route through
+    <code>serde_derive</code>, and all {{ derive.crossings }} of them now land
+    inside an annotation and link there. The percentage belongs to the track
+    underneath it.
   </p>
   <p>
     Borrowed vocabulary is quoted, pinned, and named as borrowed. The

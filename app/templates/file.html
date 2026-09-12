@@ -8,6 +8,12 @@
     <span>{{ percent_label }}% annotated</span>
   </div>
   <div class="bar thin"><i style="width:{{ percent }}%"></i></div>
+  {% if !walk_href.is_empty() %}
+  <p class="walkto">
+    The <a href="{{ root }}derive/{{ walk_href }}">derive walk</a> goes through
+    this file: <i>{{ walk_title }}</i>.
+  </p>
+  {% endif %}
 </div>
 
 {% for b in blocks %}

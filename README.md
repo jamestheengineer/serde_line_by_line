@@ -7,16 +7,21 @@
 
 **Read it: <https://jamestheengineer.github.io/serde_line_by_line/>**
 
-A guided walkthrough of **every line** of [`serde_core`](https://crates.io/crates/serde_core) —
-the crate that holds Serde's actual trait definitions — with explanations
-side-by-side with the source and runnable micro-examples.
+A guided walkthrough of **every line** of
+[`serde_core`](https://crates.io/crates/serde_core) — the crate that holds
+Serde's actual trait definitions — and of
+[`serde_derive`](https://crates.io/crates/serde_derive), the crate that
+generates the code calling into it. Explanations side-by-side with the source,
+runnable micro-examples, and the derive macro expanding live in the browser.
 
-Along the way it teaches Rust: lifetimes, trait design, associated types,
-generic bounds, `macro_rules!`, and `no_std` engineering, using one of the most
-carefully written crates in the ecosystem as the worked example. And then it
-answers the question most readers actually arrive with — **what does
-`#[derive(Serialize)]` turn into?** — by following one struct and one enum
-through `serde_derive` and running the expansion in the browser.
+Along the way it teaches Rust twice over: lifetimes, trait design, associated
+types, generic bounds, `macro_rules!` and `no_std` engineering from
+`serde_core`; and then spans, an AST of your own, an attribute language and the
+bound inference behind a generated impl from `serde_derive`. Two of the most
+carefully written crates in the ecosystem as the worked examples. And it answers
+the question most readers actually arrive with — **what does
+`#[derive(Serialize)]` turn into?** — by following one struct and one enum all
+the way through and running the expansion in your browser.
 
 > **Status: live, and the reference track now covers two crates.**
 > `serde_derive` is complete at 8,975 of 8,975 lines, alongside `serde_core`'s
@@ -110,9 +115,20 @@ The third state the gate needs for this is *not started*: a file no annotation
 claims is counted, not warned about, because it is the roadmap rather than a
 defect.
 
-The `serde_core` work is roughly **1,195 annotation units** averaging ~10 lines
-each — not 12,037 individual comments, because doc-comment blocks and repeated
-macro invocations compress heavily.
+Both crates are now claimed in full, and what "every line" cost in each is
+worth stating side by side, because the two numbers are different for a reason:
+
+| | lines | annotations | lines each |
+|---|---:|---:|---:|
+| `serde_core` | 12,037 | 468 | 25.7 |
+| `serde_derive` | 8,975 | 403 | 22.3 |
+
+`serde_core` compresses because 45 `macro_rules!` definitions generate 288
+invocations and a `macro-use` annotation costs a line of reference rather than a
+paragraph. `serde_derive` has 2 `macro_rules!` and 271 `quote!` blocks, every
+one emitting something different — so it is 25% smaller and costs nearly as
+much. What compression it does have is sharing: three of the four enum
+representations read their payload through one function.
 
 ## Shape of the app
 

@@ -161,6 +161,27 @@ Nothing structural is left to find out. The remaining choice is between §6 and
 about appetite, not feasibility. The site's first readers should weigh in,
 since it has not had any yet.
 
+**Done, 2026-09-12.** Both were built, in that order, and the measurements
+this document made are worth comparing against what happened.
+
+| | projected | actual |
+|---|---:|---:|
+| annotations | ~500 (450–580) | **403** |
+| lines per annotation | 18 | 22.3 |
+| codegen group | ~338 at 14 | 261 at 18.1 |
+| `internals/` | ~108 at 28 | 102 at 29.6 |
+| plumbing | ~56 at 22 | 39 at 31.6 |
+| course units | 6–8 | 7 |
+
+The volume estimate in §2 was built from the `quote!` count, which is a good
+proxy for "how much of this file is different from the rest of it" and a poor
+one for how much of it is *shared*. Three of the four enum representations read
+their payload through one function; a struct variant's fields are read
+identically whatever encloses them; `attr.rs`'s attribute chains are worth
+explaining by group rather than by branch. §2's stated risk was the opposite —
+that `attr.rs` would refuse large spans — and it took the largest in the
+project.
+
 **Decided, 2026-09-12: both, in that order.** §7 shipped first as PLAN.md §11,
 which was the cheap way to find out whether the material is worth the larger
 commitment. §6 is now PLAN.md §12. The walk is not thrown away by it — once
