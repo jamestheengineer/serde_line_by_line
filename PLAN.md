@@ -314,6 +314,10 @@ from the annotation store on every push to `main` (D6). All three tracks are
 complete: 12,037 lines claimed by 468 annotations, 14 course units written, and
 9 derive units walking `serde_derive` in 85 steps.
 
+What follows them is **§12**: the reference half of the derive track, which the
+walk deliberately did not make. `serde_derive` becomes a second source that
+promises every line, and the walk becomes an ordering over it.
+
 Two more gates went in during phase 8. Listed beside the coverage gate from
 phase 0, they are what makes the promises in this document checkable rather
 than stated:
@@ -344,7 +348,7 @@ compression proven in phase 2.
 | **Line-range brittleness.** Any edit to vendored source invalidates annotations. | Checksum gate in CI. Version bumps are explicit migrations, performed by `cargo xtask bump` ([D7](docs/decisions.md), [migration.md](docs/migration.md)). |
 | **Macro-heavy files become tedious.** `de/impls.rs` could read as 106 near-identical entries. | `kind = "macro-use"` renders compactly and links to the def. Prove this in phase 2 before committing to phase 5. |
 | **Course track over-claims.** Pretending serde_core teaches all of Rust would be dishonest. | §2 is committed to the repo. Supplementary units are labeled as such in the UI. |
-| **Scope creep to `serde` / `serde_derive`.** | Out of scope for v1. The reference track has since hit 100%, so the revisit was done and measured: [`docs/derive-track-scope.md`](docs/derive-track-scope.md). It is a comparable project, not an increment — 15–19 sessions against the 20 this one took. Both of its unknowns are now closed: `serde_derive` expands live in the browser (scope §9), and borrowed `syn` vocabulary is quoted and pinned rather than annotated ([D9](docs/decisions.md)). Whether to build it is undecided. |
+| **Scope creep to `serde` / `serde_derive`.** | Out of scope for v1. The reference track has since hit 100%, so the revisit was done and measured: [`docs/derive-track-scope.md`](docs/derive-track-scope.md). It is a comparable project, not an increment — 15–19 sessions against the 20 this one took. Both of its unknowns are now closed: `serde_derive` expands live in the browser (scope §9), and borrowed `syn` vocabulary is quoted and pinned rather than annotated ([D9](docs/decisions.md)). The narrative half of it shipped as §11; the reference half is now the plan, §12. |
 
 **Resolved in phase 0** — see [`docs/decisions.md`](docs/decisions.md) for the
 measurements behind each:
@@ -395,7 +399,12 @@ measurements behind each:
    six unit introductions were rewritten to match, and the check is now a hard
    failure so the count cannot climb back off zero.
 
-**Still open:** nothing.
+**Still open:** one, and §12 opens it — **D12, whether the project reports
+one coverage number or two.** `Pin::primary()` currently refuses a second
+`coverage` source on the grounds that two crates each promising 100% make
+"the" coverage table ambiguous. The reference derive track needs that refusal
+lifted, and lifting it is R1's real work: the objection has to be answered in
+the reporting, not argued away.
 
 > As of 2026-09-10, `serde_core` 1.0.229 is still the newest published
 > release, so there is nothing to bump *to*. The migration path is built and
@@ -498,3 +507,119 @@ point of the roles: what a source promises is a field in the pin, the gates
 read it, and a role no gate knows fails the build. The README says the same
 thing as a table, so the promise reads identically in both places a reader
 might check it.
+
+---
+
+## 12. The `serde_derive` reference track
+
+[`docs/derive-track-scope.md`](docs/derive-track-scope.md) measured two shapes
+and §8 left the choice to appetite. §11 built the smaller one. **This is the
+larger one**: §6 of that document — every line of `serde_derive` claimed by
+exactly one annotation, the same promise the first eight phases made about
+`serde_core`, defended by the same gate.
+
+### What the narrative track becomes
+
+Not deleted, and not left beside it. `serde_derive` stops being a `narrative`
+source and becomes a second `coverage` source, and the moment it does, all 85
+narrative steps are citing annotated ground. The narrative becomes what the
+course track already is: **a curated ordering over the annotation store**,
+which is what §3 said tracks were from the beginning — two orderings, one
+dataset, not two copies of the content.
+
+That is a real conversion, not a re-label. `check_narrative` already requires a
+step citing *the* coverage source to name the reference-track annotation
+containing it; nine steps do that today. After R5 all 85 must, and the
+annotations they name do not exist yet. The retargeting happens per file, as
+each file is declared complete.
+
+### The measurement, re-taken
+
+Against the vendored tree as pinned, not the projection:
+
+| group | files | lines | lines/annot | annotations |
+|---|---:|---:|---:|---:|
+| codegen — `ser.rs`, `de.rs`, `de/*.rs` | 11 | 4,728 | 14 | ~338 |
+| attributes and validation — `internals/*` | 9 | 3,015 | 28 | ~108 |
+| plumbing — `bound.rs`, `receiver.rs`, `pretend.rs`, … | 8 | 1,232 | 22 | ~56 |
+| **total** | **28** | **8,975** | **18** | **~502** |
+
+Two numbers decide the shape of the work, and both confirm §2 of the scope doc:
+
+- **271 `quote!` / `quote_spanned!` invocations** — 76 in `ser.rs`, 53 in
+  `de/struct_.rs`, 49 in `de.rs`. Each emits different code and needs its own
+  explanation, next to what it emits.
+- **2 `macro_rules!` in the whole crate**, both in `fragment.rs`, against 45 in
+  `serde_core`. The `macro-def` / `macro-use` compression that held
+  `de/impls.rs` to 122 annotations over 3,173 lines **does not exist here**.
+  Nothing else will take its place; the 502 is the real number.
+
+### The engineering delta the scope doc did not have to name
+
+§4 listed four deltas and N1–N3 discharged three of them. The fourth —
+"a cross-crate course DAG" — is half a session and still stands. But the
+narrative track never needed a second *annotation store*, so nothing forced
+this out into the open until now:
+
+**The store is single-source, and says so on purpose.** `core::load` reads
+`pin.primary()`, one `annotations/manifest.toml`, one `annotations/course.toml`,
+and requires every annotation file's `source` to match one id.
+`Pin::primary()` does not merely assume one coverage source, it **hard-fails on
+two**, with the reason written into the code:
+
+> exactly one is allowed, because two crates each promising 100% would make
+> "the" coverage table ambiguous with no reader-visible gain.
+
+R1 overturns that, and it is a decision to be argued (D12), not a refactor to
+be performed quietly. The gain is now reader-visible — it is the second track —
+but the objection was never wrong: there is no such thing as "the" coverage
+number any more. Percentages become per-source everywhere they are reported,
+`coverage.json` grows a level, and the front page states two, because one
+number spanning 21,012 lines of two crates with different promises would be
+exactly the lie §11 refused to tell about the walk.
+
+### Roadmap
+
+| phase | scope | annots | exit criteria |
+|---|---|---:|---|
+| **R1 — Two coverage sources** | `Pin::primary` retires; `Store`, `manifest.toml`, `course.toml` and `coverage.json` become per-source; D12 | 0 | `cargo xtask coverage` reports `serde_core` 12,037/12,037 **and** `serde_derive` 0/8,975 without error; every existing gate still fires on the first source; a role no gate knows is still a build failure |
+| **R2 — Vertical slice: `ser.rs`** | The densest codegen file, 1,369 lines and 76 `quote!` blocks, and the one the narrative already walks | ~98 | `ser.rs` at 100%; the `codegen` kind proven in the renderer; an annotation's `emits` checked against a real expansion at annotation granularity (D10); its narrative steps retargeted |
+| **R3 — The rest of codegen** | `de.rs`, then `de/struct_.rs`, `de/tuple.rs`, `de/unit.rs`, `de/identifier.rs`, and the four enum representations | ~240 | codegen at 100%; the four representations read as four variations, not four transcripts |
+| **R4 — `internals/`** | `attr.rs` (1,818 lines, the attribute DSL), `check.rs`, `ast.rs`, `case.rs`, `name.rs`, `symbol.rs`, `ctxt.rs`, `respan.rs`, `mod.rs` | ~108 | the `#[serde(...)]` surface is claimed, including what upstream rejects and why |
+| **R5 — Plumbing** | `bound.rs`, `receiver.rs`, `pretend.rs`, `lib.rs`, `fragment.rs`, `deprecated.rs`, `this.rs`, `dummy.rs` | ~56 | **every line of `serde_derive` claimed**; all 28 files in its manifest; the gate hard-fails on regression; all 85 narrative steps name a containing annotation |
+| **R6 — Course units** | 6–8 new units: proc-macro basics, `TokenStream` and spans, hygiene, `syn`'s AST, `quote!` interpolation, the attribute DSL, codegen for the four enum representations; the cross-crate prereq DAG | — | the course track spans both crates, walkable start to finish, D8's forward-reference check enforcing across sources |
+| **R7 — Ship** | Navigation for four reference file-trees' worth of pages, the restated promise, `README` | — | both reference tracks reachable and each honest about what it claims |
+
+R2 is a vertical slice for the same reason phase 1 was: it proves the `codegen`
+kind, the `emits` verification at annotation granularity, and the writing voice
+against real content *before* 400 more annotations are committed to a shape
+that might be wrong. `ser.rs` is the right file for it because the narrative
+already walks it, so R2 is also the first retargeting and will find whatever
+the conversion above actually costs.
+
+R3–R5 are pure content throughput and can be reordered freely, with one
+exception: `internals/attr.rs` is the density risk the scope doc flagged
+(450 annotations if the enum representations compress, 580 if `attr.rs` refuses
+large spans), so R4 landing before R5 keeps the worst estimate away from the
+finish line.
+
+### Cost, with what N1–N5 already paid
+
+| item | sessions | status |
+|---|---:|---|
+| multi-source vendoring — the pin half | 1 | **spent (N1)** |
+| expansion harness | 1 | **spent (N3)** |
+| glossary mechanism | 1 | **spent (N2)** |
+| multi-source vendoring — the store half (R1) | 1 | new; not in the scope doc's table |
+| narrative retargeting (R2–R5) | 0.5 | new; falls out of the role change |
+| cross-crate course DAG (R6) | 0.5 | |
+| ~502 annotations (R2–R5) | 5–7 | |
+| 6–8 course units (R6) | 6–8 | |
+| ship (R7) | 0.5 | |
+| **remaining** | **14–18** | |
+
+The scope doc's 15–19 was from an empty start. Three sessions of it are already
+in the repo and two more were hiding in it, which is close enough to say the
+estimate held. About 60% of what is left is prose, and §5 of the scope doc is
+right that the course units are the long pole — 468 annotations landed across
+four working days, while 14 course units took six.

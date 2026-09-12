@@ -161,6 +161,22 @@ Nothing structural is left to find out. The remaining choice is between §6 and
 about appetite, not feasibility. The site's first readers should weigh in,
 since it has not had any yet.
 
+**Decided, 2026-09-12: both, in that order.** §7 shipped first as PLAN.md §11,
+which was the cheap way to find out whether the material is worth the larger
+commitment. §6 is now PLAN.md §12. The walk is not thrown away by it — once
+`serde_derive` is a claimed source, the narrative becomes an ordering over the
+annotation store rather than a track with its own citations, which is the shape
+PLAN.md §3 described for the course track and the reason the content was kept
+as data in the first place.
+
+Two corrections this document owes the phase that follows it. The session
+table in §6 folds "multi-source vendoring" into one line; N1 only did the pin
+half, and the store half — `Pin::primary()`, one `manifest.toml`, one
+`course.toml`, one `source_id` — is a second session, and a decision (D12)
+rather than a refactor. And the role change hands the narrative's 85 steps a
+requirement they do not meet today: a step citing a coverage source must name
+the annotation containing it, which nine of them do and the rest will have to.
+
 ## 9. The wasm spike, run
 
 Measured 2026-09-06, rustc 1.95.0, wasm-bindgen 0.2.127 (the pinned version),

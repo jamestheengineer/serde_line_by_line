@@ -524,9 +524,16 @@ Nothing in the shipped project. D4, the last open question there, was resolved
 above; D7 closes the last piece of tooling PLAN.md promised, and D8 closes the
 last promise PLAN.md made that was not yet enforced.
 
-D9 settles the prerequisite for a `serde_derive` track. **Whether to build that
-track at all is undecided** — the estimate and the two shapes it could take are
-in [`derive-track-scope.md`](derive-track-scope.md).
+D9 settled the prerequisite for a `serde_derive` track, and both shapes in
+[`derive-track-scope.md`](derive-track-scope.md) have now been chosen: the
+narrative one shipped as PLAN.md §11, and the reference one is PLAN.md §12.
+
+**One question is open, and §12's first phase is where it gets answered: D12 —
+does the project report one coverage number or two?** `Pin::primary()` refuses
+a second `coverage` source today, on the recorded grounds that two crates each
+promising 100% make "the" coverage table ambiguous with no reader-visible gain.
+The gain is now visible, but the ambiguity is real, so lifting the refusal has
+to come with an answer for what a percentage means once there are two of them.
 
 ---
 
