@@ -7,7 +7,8 @@ file  = "src/internals/mod.rs"
 lines = "1-16"
 title = "internals — the module boundary between parsing and generating"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "17-syn-and-a-narrower-ast"
 body = """
 Three modules public, six private, and the split is the design. `ast`, `attr`
 and `name` are the vocabulary `ser.rs` and `de.rs` speak; `case`, `check`,
@@ -24,7 +25,8 @@ file  = "src/internals/mod.rs"
 lines = "17-28"
 title = "Derive, and the one-function detour every type check needs"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "17-syn-and-a-narrower-ast"
 glossary = ["syn::Type"]
 body = """
 `Derive` tells `check` which half of the attributes to validate — a

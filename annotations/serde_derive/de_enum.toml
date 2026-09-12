@@ -20,7 +20,8 @@ file  = "src/de/enum_.rs"
 lines = "14-37"
 title = "deserialize — the split between tagged and untagged variants"
 kind  = "codegen"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "21-enum-representations"
 rust_features = ["closures"]
 body = """
 An enum can have *both* — some variants tagged, some marked
@@ -41,7 +42,8 @@ file  = "src/de/enum_.rs"
 lines = "38-54"
 title = "deserialize_homogeneous_enum — the four-way fork"
 kind  = "codegen"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "21-enum-representations"
 rust_features = ["pattern-matching"]
 body = """
 The counterpart of `serialize_variant`'s tag match on the other side, and much
@@ -60,7 +62,8 @@ file  = "src/de/enum_.rs"
 lines = "55-96"
 title = "prepare_enum_variant_enum — the variant identifier every tagged form needs"
 kind  = "codegen"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "21-enum-representations"
 body = """
 Every tagged representation needs to turn a name into a variant, and this builds
 the `__Field` enum and visitor that does it. Shared here rather than duplicated

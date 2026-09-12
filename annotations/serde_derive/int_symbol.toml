@@ -7,7 +7,8 @@ file  = "src/internals/symbol.rs"
 lines = "1-6"
 title = "Symbol — a `&'static str` that can be compared to an Ident"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 glossary = ["syn::Ident", "syn::Path"]
 body = """
 A one-field newtype over a string literal. Its whole reason to exist is the
@@ -22,7 +23,8 @@ file  = "src/internals/symbol.rs"
 lines = "7-42"
 title = "…and the thirty-five names that are the whole `#[serde(...)]` surface"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 body = """
 This is the attribute vocabulary in one screen, and it is worth reading as a
 list rather than as code. Everything `#[serde(...)]` accepts is here, and
@@ -41,7 +43,8 @@ file  = "src/internals/symbol.rs"
 lines = "43-71"
 title = "…and four PartialEq impls, so comparison reads like English"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 glossary = ["syn::Ident", "syn::Path"]
 body = """
 Four impls rather than one, because the parser holds identifiers sometimes by

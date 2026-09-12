@@ -7,7 +7,8 @@ file  = "src/internals/name.rs"
 lines = "1-8"
 title = "name — what a field or variant is called on the wire"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 glossary = ["syn::LitStr", "proc_macro2::Span", "quote::ToTokens"]
 body = """
 The type that answers "what string does this field appear as", and it is not
@@ -21,7 +22,8 @@ file  = "src/internals/name.rs"
 lines = "9-58"
 title = "MultiName — up to four answers, and two flags"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 body = """
 `serialize`, `deserialize`, a set of aliases, and a `renamed` bool for each
 direction. The bools are not redundant with comparing against the source name:
@@ -42,7 +44,8 @@ file  = "src/internals/name.rs"
 lines = "59-70"
 title = "Name — a string and the span it came from"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "16-tokens-and-spans"
 glossary = ["syn::LitStr", "quote::ToTokens"]
 body = """
 The span is the point. A `Name` interpolated into generated code becomes a
@@ -59,7 +62,8 @@ file  = "src/internals/name.rs"
 lines = "71-113"
 title = "…and the comparison impls, which ignore the span"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 body = """
 `Ord`, `Eq` and `PartialEq` all compare only `value`. Two `Name`s from different
 source locations with the same text are the same name, which is what makes the

@@ -7,7 +7,8 @@ file  = "src/internals/respan.rs"
 lines = "1-8"
 title = "respan — rewriting every span in a token stream"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "16-tokens-and-spans"
 glossary = ["proc_macro2::TokenStream", "proc_macro2::Span"]
 body = """
 Sixteen lines, one job: take a token stream and make every token claim a
@@ -25,7 +26,8 @@ file  = "src/internals/respan.rs"
 lines = "9-16"
 title = "…and the recursion through groups"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "16-tokens-and-spans"
 glossary = ["proc_macro2::Group", "proc_macro2::TokenTree"]
 body = """
 `set_span` on a `Group` sets the span of its delimiters and nothing inside, so

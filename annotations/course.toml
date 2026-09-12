@@ -5,13 +5,18 @@
 # A unit's content is the annotations tagged with its `id` in `course_unit`,
 # plus the framing written here.
 #
-# `supplement` is the honesty field. serde_core exercises lifetimes, traits and
-# macros exhaustively and ordinary imperative Rust barely at all (PLAN.md §2),
-# so some units cannot be taught from this crate. Saying which is the point:
+# `supplement` is the honesty field. The annotated crates exercise lifetimes,
+# traits, macros and code generation exhaustively and ordinary imperative Rust
+# barely at all (PLAN.md §2), so some units cannot be taught from them. Saying
+# which is the point:
 #
-#   none    — taught entirely from serde_core; nothing invented
-#   partial — serde_core shows part of it, written material fills the rest
-#   full    — serde_core does not exercise this; the unit is written from scratch
+#   none    — taught entirely from the annotated crates; nothing invented
+#   partial — they show part of it, written material fills the rest
+#   full    — they do not exercise this; the unit is written from scratch
+#
+# Units 15-21 draw from `serde_derive` (PLAN.md §12, R6). Their reading-order
+# entries are qualified with the crate name, because both crates have a
+# `src/lib.rs` and a bare path means the first source (D12).
 #
 # `status` is "written" once the unit's framing and its supplementary material
 # both exist; "planned" until then. The coverage gate warns on planned units so
@@ -44,6 +49,33 @@ reading_order = [
     "src/private/seed.rs",
     "src/private/size_hint.rs",
     "src/private/string.rs",
+
+    # serde_derive, in the order the derive units walk it: the boundary, then
+    # the parsed input, then what is generated from it.
+    "serde_derive:src/lib.rs",
+    "serde_derive:src/dummy.rs",
+    "serde_derive:src/deprecated.rs",
+    "serde_derive:src/internals/ctxt.rs",
+    "serde_derive:src/internals/respan.rs",
+    "serde_derive:src/internals/receiver.rs",
+    "serde_derive:src/this.rs",
+    "serde_derive:src/internals/mod.rs",
+    "serde_derive:src/internals/symbol.rs",
+    "serde_derive:src/internals/case.rs",
+    "serde_derive:src/internals/name.rs",
+    "serde_derive:src/internals/attr.rs",
+    "serde_derive:src/internals/check.rs",
+    "serde_derive:src/internals/ast.rs",
+    "serde_derive:src/fragment.rs",
+    "serde_derive:src/bound.rs",
+    "serde_derive:src/pretend.rs",
+    "serde_derive:src/ser.rs",
+    "serde_derive:src/de.rs",
+    "serde_derive:src/de/enum_.rs",
+    "serde_derive:src/de/enum_externally.rs",
+    "serde_derive:src/de/enum_internally.rs",
+    "serde_derive:src/de/enum_adjacently.rs",
+    "serde_derive:src/de/enum_untagged.rs",
 ]
 
 [[unit]]
@@ -723,4 +755,360 @@ Four compile-fail cases carry the rejections a running program cannot show: a
 `for` loop consuming the vector it was handed, a `push` while a loop over the
 same vector is alive, two identical closures refused from one `vec![]`, and a
 counting closure offered where `Fn` was demanded.
+"""
+
+[[unit]]
+id = "15-proc-macro-basics"
+title = "What a derive macro is, and is not"
+supplement = "none"
+status = "written"
+prereqs = ["01-why-a-data-model"]
+rust_features = ["proc-macro-boundary", "modules", "result", "custom-errors"]
+summary = """
+A derive macro is a function from tokens to tokens, run by the compiler, with no
+access to types, names or anything outside the item it was given. Everything
+awkward about `serde_derive` follows from that, and so does everything clever.
+"""
+body = """
+The whole public surface of `serde_derive` is fourteen lines. Two functions,
+each taking a `TokenStream` and returning one, and that is the entire contract
+with the compiler.
+
+Read what those fourteen lines do *not* have. There is no type information: the
+macro sees `x: MyType` as three tokens and cannot ask whether `MyType`
+implements anything. There is no name resolution: `PhantomData` in a field type
+might be `std::marker::PhantomData` or a local struct, and the crate decides by
+comparing the string. There is no way to return an error: a failure has to be
+*emitted as code*, which is what `syn::Error::into_compile_error` does — it
+produces a `compile_error!` invocation that the compiler then executes.
+
+Three consequences shape the rest of the crate.
+
+**Errors are collected, not propagated.** `Ctxt` exists because a macro gets one
+chance to report, and a user with four bad attributes should see four messages.
+Its `Drop` impl panics if you forget to check, which is a deliberate choice to
+make the macro author's mistake loud rather than the user's problem.
+
+**Output needs a scope of its own.** Generated code cannot assume `serde` is in
+scope, cannot introduce names into the user's namespace, and must work inside a
+function body as well as at module scope. `wrap_in_const` is one anonymous
+`const` block answering all three.
+
+**The expansion has to be polite.** A `#[deprecated]` type produces a warning
+when the generated code mentions it — in the user's build, about their own
+deliberate deprecation — so the expansion carries `#[allow(deprecated)]` when it
+needs to. There is a small file whose entire job is deciding that.
+
+This is also the unit where the derive track's live expander is worth opening:
+everything below is easier to read once you have seen what comes out.
+"""
+
+[[unit]]
+id = "16-tokens-and-spans"
+title = "Spans, and where a compiler error points"
+supplement = "none"
+status = "written"
+prereqs = ["15-proc-macro-basics"]
+rust_features = ["proc-macro-boundary", "macro-hygiene", "lifetimes"]
+summary = """
+Every token carries a source location. A macro that gets those wrong produces
+diagnostics pointing at nothing, and serde's reputation for good error messages
+is almost entirely the story of getting them right.
+"""
+body = """
+A `proc_macro2::Span` says where a token came from, and the compiler uses it to
+draw the squiggle. Tokens a macro invents have no natural location, so the macro
+has to choose one — and the choice is the difference between
+
+    error[E0277]: the trait bound `Foo: Serialize` is not satisfied
+      --> src/main.rs:4:12
+       |
+    4  |     inner: Foo,
+       |            ^^^ the trait `Serialize` is not implemented for `Foo`
+
+and the same error pointing at `#[derive(Serialize)]` with no indication which
+field caused it.
+
+**`quote_spanned!` is the tool.** It is `quote!` with a span applied to every
+token it produces, and `serde_derive` uses it at exactly the points where
+generated code can fail to type-check: the call to `Serialize::serialize` for a
+field, the call to a user's `serialize_with` function, the `Default::default()`
+for a defaulted field. Each carries the span of the thing the user wrote, so the
+error lands there.
+
+Notice what is *not* spanned. Braces, structural keywords, the impl header —
+all `call_site`, because they came from the macro and pointing at the user's
+code would be a lie.
+
+**Rewriting spans afterwards** is the other half. `respan` walks a token stream
+and re-stamps everything, including recursively inside groups — `set_span` on a
+group sets only its delimiters, which is a classic source of "why does this
+error point at the wrong place". Its one caller is `replace_receiver`, which
+substitutes `Self` for the concrete type before anything else runs, because the
+generated impl is a different impl and `Self` there would mean the visitor.
+
+**And there is no hygiene at all for generic parameters.** A derive macro cannot
+introduce a type parameter the user's code definitely cannot see, so the crate
+uses a convention — `__S`, `__D`, `__field0`, `__serde_state` — and a
+`precondition` that rejects a user lifetime literally called `'de`. Convention
+and a check, because the language offers nothing better.
+"""
+
+[[unit]]
+id = "17-syn-and-a-narrower-ast"
+title = "Parsing into your own AST, not syn's"
+supplement = "none"
+status = "written"
+prereqs = ["16-tokens-and-spans"]
+rust_features = ["pattern-matching", "trait-objects", "modules"]
+summary = """
+`syn` gives you a tree that describes Rust. `serde_derive` immediately converts
+it into a smaller tree that describes what serde needs, and the difference
+between the two is where most of the design lives.
+"""
+body = """
+The input arrives as a `syn::DeriveInput`: a faithful syntax tree with three
+data kinds, four field shapes and every generic form Rust allows. Almost none of
+that distinction matters to code generation, and some of what does matter is not
+in it.
+
+So `internals::ast` defines its own. `Data` has two variants rather than three,
+because unions are rejected before the tree is built. `Style` has four rather
+than syn's three, because serde needs *newtype* separated from tuple — a
+one-field tuple struct has its own place in the data model, and that single
+extra variant is why a newtype wrapper is free on the wire.
+
+Three lessons generalize past serde.
+
+**Reject early, and narrow the type.** Every case that survives `from_ast` is a
+case codegen must handle, which means no generator carries an arm for something
+that cannot happen. The alternative — passing syn's types down and checking at
+every use — is how a macro ends up with `unreachable!` in forty places instead
+of four.
+
+**Keep the original.** Every node here holds a borrow of the syn node it came
+from, purely so an error can be spanned on the user's tokens. The parsed form is
+for generating; the original is for complaining.
+
+**Validate in two passes.** Anything decidable from one attribute is checked
+while parsing it; anything needing two is checked afterwards, in `check.rs`,
+against the assembled tree. The comment at the top of that file states the rule,
+and following it is why the attribute parser is a flat chain rather than a
+tangle.
+
+There is a fourth thing worth noticing, because it is a wart rather than a
+lesson: `check.rs` does not only check. `check_transparent` picks the field that
+`#[serde(transparent)]` refers to and *records* it, which is why `check` takes
+`&mut` and why the module is slightly misnamed. It is still the right call —
+deriving that field twice, in two generators, with the same three-condition
+rule, would be worse.
+"""
+
+[[unit]]
+id = "18-quote-and-interpolation"
+title = "Writing code that writes code"
+supplement = "none"
+status = "written"
+prereqs = ["17-syn-and-a-narrower-ast"]
+rust_features = ["macro-rules", "macro-repetition", "zero-cost"]
+summary = """
+`quote!` looks like a template language and behaves like one, with two twists
+that decide how the whole crate is structured: interpolation is typed, and
+repetition is driven by iterators.
+"""
+body = """
+`quote!(fn #name() { #body })` produces tokens. Anything after `#` is
+interpolated through the `ToTokens` trait, which means interpolation is *typed*:
+a `syn::Ident` renders as an identifier, a `Name` renders as a string literal
+carrying its original span, `None` renders as nothing at all.
+
+That last one is used constantly and is worth internalizing. `#let_mut` in
+`ser.rs` is an `Option<TokenStream>` that is `Some(mut)` or `None`, so the
+template has no conditional in it — a struct whose fields are all skipped simply
+gets `let __serde_state` with no `mut`, and no unused-mut warning in a build the
+user cannot fix.
+
+**Repetition** is `#(...)*`, and it iterates whatever the interpolated variables
+iterate. `#(#serialize_stmts)*` splices a `Vec<TokenStream>` in sequence;
+`#(#members: #placeholders),*` zips two iterators with a comma between. There is
+one limitation the crate hits three times: a variable cannot be both a repeating
+and a non-repeating interpolation in the same template, which is why you will
+find `let private2 = private;` in `enum_untagged.rs`, `identifier.rs` and
+`pretend.rs`.
+
+**The `Fragment` type** is the crate's own addition and the thing most worth
+stealing. Generated code goes into three kinds of position — expression,
+statement sequence, match arm — and each needs different punctuation. Rather
+than deciding at the splice site, every generator returns a `Fragment` saying
+whether it produced an expression or a block, and three adapter types apply the
+right braces or comma. Getting it wrong produces code that does not compile,
+which is exactly where you want that class of mistake.
+
+Finally, a worked example of a template with no runtime at all: `pretend.rs`
+generates code whose only purpose is to be *compiled*. A remote derive's
+placeholder struct never has its fields read, so rustc calls them dead; this
+file emits `match None::<&T> { Some(T { a: __v0 }) => {} _ => {} }` to say
+otherwise. For a `repr(packed)` struct it cannot even bind the fields — a
+binding borrows, and a packed field cannot be borrowed — so it takes their
+addresses instead.
+"""
+
+[[unit]]
+id = "19-the-attribute-dsl"
+title = "Designing an attribute language"
+supplement = "none"
+status = "written"
+prereqs = ["18-quote-and-interpolation"]
+rust_features = ["pattern-matching", "custom-errors", "strings"]
+summary = """
+`#[serde(...)]` accepts thirty-five names, most in two or three forms, with
+rules about which may appear together. It is a language with a grammar, a
+namespace and a type checker, and all three are in `internals/`.
+"""
+body = """
+Start with the vocabulary: `symbol.rs` is thirty-five `const`s and four
+`PartialEq` impls, and the impls are the point. They let a parser write
+`if path == RENAME` instead of `path.is_ident("rename")`, which turns a typo
+from an attribute that silently never matches into a compile error in the macro
+itself.
+
+**Accumulate, do not return.** Every attribute is parsed into an `Attr` slot
+that reports its own duplicates, so writing `rename` twice produces one message
+from one place rather than sixty call sites each remembering to check. `VecAttr`
+is the same thing for attributes that may legitimately repeat, with an
+`at_most_one` for the ones that may not.
+
+**Two forms for free.** `rename = "x"` and `rename(serialize = "x",
+deserialize = "y")` are the same attribute, and one function — `get_ser_and_de`
+— handles both for `rename`, `rename_all`, `bound` and `alias`. That is why the
+parser is a flat chain of two-line branches rather than a tangle.
+
+**Parse strings as Rust.** `bound = "T: Serialize"` is not carried as text; it
+is parsed into where-predicates immediately, and `respan` puts the user's own
+span on every token of the result. A malformed bound is a syntax error
+underlining the offending part *inside the string*, rather than a mystery in
+generated code.
+
+**Compile-time, not run-time.** `rename_all = "camelCase"` becomes a
+`RenameRule` at parse time and is applied to every field name before codegen
+starts. Nothing about renaming survives into the output: the emitted
+`serialize_field` call carries the literal `"xCoord"`. If you internalize one
+thing from this unit, make it that — renaming reads like a runtime feature in
+the documentation and is entirely a compile-time one.
+
+**Cross-cutting rules go somewhere else.** `check.rs` holds the ten checks that
+need more than one attribute — the tag cannot collide with a field name, a
+tuple field with a default requires defaults after it, `transparent` cannot
+combine with `from`. The comment at the top of that file is the rule that keeps
+the parser flat.
+
+And one piece of restraint: `is_cow` carries a twenty-line comment stating its
+own false positives and false negatives with examples. Every derive macro that
+reasons about types by name has that limitation. Almost none of them say so.
+"""
+
+[[unit]]
+id = "20-generating-an-impl"
+title = "Bounds, generics, and types invented to hold a borrow"
+supplement = "none"
+status = "written"
+prereqs = ["19-the-attribute-dsl", "04-generic-bounds", "09-phantomdata-and-variance"]
+rust_features = ["generic-params", "where-clauses", "lifetimes", "marker-types", "associated-types"]
+summary = """
+The generics of a generated impl are never the generics of the input. Inferring
+the difference is the hardest non-obvious work in the crate, and the wrapper
+types it produces are a small masterclass in `PhantomData`.
+"""
+body = """
+`impl<T> Serialize for S<T>` does not compile unless `T: Serialize` — but adding
+that bound unconditionally rejects types that would have worked. `bound.rs` is
+four hundred lines deciding which parameters actually need it.
+
+**The inference.** A hand-written visitor walks the type of every field the
+filter accepts, recording which declared parameters appear. A skipped field's
+type is never visited, so its parameters pick up no bound. A field of type
+`T::Assoc` records `T::Assoc: Serialize` rather than `T: Serialize`, because
+bounding `T` says nothing about its associated type.
+
+**And one hardcoded exception.** `PhantomData<T>` implements `Serialize` for
+every `T`, so a parameter appearing only inside one must not be bounded. Five
+lines, matched by name, with a comment saying "hardcoded exception" — and
+without them every user with a non-serializable marker type would have to write
+`#[serde(bound = "")]`. There is no way to ask this question properly from
+inside a proc macro, because a proc macro has no type system.
+
+**Declaration and use are different.** A default (`T = u32`) is legal in a
+struct declaration and illegal in an impl header, where it parses as an
+associated-type binding — so `without_defaults` strips them. A lifetime is
+declared with bounds (`'de: 'a`) and used without them, which is why the
+deserialize side has two wrapper types with hand-written `ToTokens` impls just
+to render the same generics two ways.
+
+**Wrapper types, and why they all carry `PhantomData`.** Three times in this
+crate a value has to be passed somewhere that wants one `Serialize` — a
+`serialize_with` field, an adjacently tagged payload, a flattened struct variant
+— and each time the answer is a generated struct holding *references* to the
+real fields. Each one needs a fresh lifetime, added by `with_lifetime_bound`
+along with a bound on every existing parameter. And each one carries
+`phantom: PhantomData<Type<Generics>>`, without which a parameter appearing only
+behind a reference would be unconstrained and the impl would not compile.
+
+Unit 09 introduced `PhantomData` as a marker. This is what it looks like when
+something actually depends on it.
+"""
+
+[[unit]]
+id = "21-enum-representations"
+title = "Four ways to put an enum on the wire"
+supplement = "none"
+status = "written"
+prereqs = ["20-generating-an-impl", "13-errors-and-control-flow"]
+rust_features = ["pattern-matching", "zero-cost", "custom-errors"]
+summary = """
+External, internal, adjacent and untagged. They cost wildly different amounts to
+read, and the reason is visible in the generated code: three of the four have to
+buffer the input before they can decide what it is.
+"""
+body = """
+Writing an enum is easy in all four representations — a `match` over `*self`,
+one arm per variant, each arm calling a `Serializer` method. Reading one is
+where they diverge, and the divergence is the whole content of this unit.
+
+**Externally tagged** is the default and the only cheap one. The format's
+`EnumAccess` hands over the variant name and *then* the payload, in order, so
+the generated code dispatches on the name and reads the payload directly. Four
+`VariantAccess` methods, one per shape, and nothing is held in memory.
+
+**Internally tagged** puts the discriminant in a field of the payload's own map —
+so the tag can arrive anywhere, and nothing can be parsed until it is found. The
+generated code calls `deserialize_any` once with a visitor that buffers the
+*entire* payload into serde's private `Content` type, finds the tag, then
+replays the buffer into the chosen variant. That is not an implementation
+choice; the representation forces it.
+
+**Adjacently tagged** is the longest deserializer in the crate — 324 lines — and
+almost all of them are about ordering. Tag first costs nothing. Content first
+means buffering until the tag arrives. Then there are duplicate keys, unknown
+keys to step over or reject, and a sequence form where a two-field struct is two
+elements. The `Serialize` side is 120 lines.
+
+**Untagged** buffers once and re-runs the buffer against every variant in order,
+taking the first that succeeds. The `TODO` above the failure message is
+upstream's and is worth reading: by the time the last variant fails, the reasons
+the earlier ones failed have been discarded, so the error can only say "none of
+these matched".
+
+Two things to take away beyond enums.
+
+The first is that **a representation that cannot tell the format what to expect
+cannot work with a non-self-describing format.** `deserialize_any` is the call
+that says "I do not know"; it appears in the internally tagged, adjacently
+tagged and untagged paths and nowhere else.
+
+The second is how much is *shared*. `enum_untagged::deserialize_variant` is
+called by three of the four. `struct_::deserialize` reads a struct variant's
+fields identically whatever encloses them. `deserialize_seq` serves tuples and
+structs. Four representations, three reading paths — which is why the reference
+track claims 4,728 lines of codegen in 261 annotations rather than the 338 a
+count of `quote!` blocks predicted.
 """

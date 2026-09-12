@@ -7,7 +7,8 @@ file  = "src/this.rs"
 lines = "1-17"
 title = "this_type — the same path, in type position"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "16-tokens-and-spans"
 glossary = ["syn::Path", "syn::PathArguments"]
 body = """
 A remote path may be written either way — `Remote<T>` or `Remote::<T>` — and in
@@ -23,7 +24,8 @@ file  = "src/this.rs"
 lines = "18-32"
 title = "…and this_value, which adds the turbofish back"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "16-tokens-and-spans"
 glossary = ["syn::Path", "syn::Token"]
 body = """
 The exact inverse, for expression position, where `Remote<T>` parses as a

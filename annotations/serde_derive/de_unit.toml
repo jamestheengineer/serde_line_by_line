@@ -40,6 +40,7 @@ lines = "19-32"
 title = "…the visitor type, and the two PhantomData fields every one has"
 kind  = "codegen"
 tracks = ["reference"]
+prereqs = ["de-mod-0043"]
 rust_features = ["marker-types", "lifetime-de"]
 body = """
 `__Visitor` is the type the format calls back into. It holds no data — it cannot,

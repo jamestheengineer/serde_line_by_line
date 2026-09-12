@@ -7,7 +7,8 @@ file  = "src/internals/attr.rs"
 lines = "1-22"
 title = "attr — the whole `#[serde(...)]` surface, and the rule it follows"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 glossary = ["syn::meta::ParseNestedMeta", "syn::parse::ParseStream", "syn::punctuated::Punctuated", "proc_macro2::TokenStream"]
 body = """
 1,818 lines, one job: turn `#[serde(...)]` into three structs. The module
@@ -27,7 +28,8 @@ file  = "src/internals/attr.rs"
 lines = "23-51"
 title = "Attr — a slot that reports its own duplicates"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 glossary = ["quote::ToTokens"]
 body = """
 Every attribute is accumulated into one of these, and the duplicate check lives
@@ -49,7 +51,8 @@ file  = "src/internals/attr.rs"
 lines = "52-75"
 title = "…and four more ways to fill it, each with a different meaning"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 body = """
 `set_opt` for a parser that may have produced nothing, `set_if_none` for a value
 the crate itself is supplying rather than the user — `skip_deserializing`
@@ -66,7 +69,8 @@ file  = "src/internals/attr.rs"
 lines = "76-91"
 title = "BoolAttr — presence, with the same duplicate check"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 body = """
 A newtype over `Attr<()>`. `#[serde(transparent)]` has no value, but it can
 still be written twice, and wrapping the general type rather than using a plain
@@ -79,7 +83,8 @@ file  = "src/internals/attr.rs"
 lines = "92-131"
 title = "VecAttr — for the attributes that may repeat, and the ones that may not"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 body = """
 `#[serde(alias)]` may appear any number of times, so its values accumulate.
 `rename(serialize = ..., deserialize = ...)` may not, and `at_most_one` is where
@@ -98,7 +103,8 @@ file  = "src/internals/attr.rs"
 lines = "132-136"
 title = "unraw — `r#type` is the field named `type`"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 glossary = ["syn::Ident"]
 body = """
 A raw identifier is a Rust escaping mechanism, not part of the name. A field
@@ -187,7 +193,8 @@ file  = "src/internals/attr.rs"
 lines = "235-261"
 title = "Container::from_ast — twenty-two accumulators, declared up front"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 body = """
 One `Attr` or `BoolAttr` per attribute, all created before parsing starts. Note
 the pairs: `ser_name` and `de_name` are both `Attr::none(cx, RENAME)`, because
@@ -203,7 +210,8 @@ file  = "src/internals/attr.rs"
 lines = "262-275"
 title = "…the loop, and the two things it skips"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 glossary = ["syn::Attribute", "syn::Meta"]
 body = """
 Every attribute on the item is examined. A non-`serde` one is checked for
@@ -223,7 +231,8 @@ file  = "src/internals/attr.rs"
 lines = "276-302"
 title = "…rename and rename_all, the two that come in two forms"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 glossary = ["syn::meta::ParseNestedMeta", "syn::LitStr"]
 body = """
 `rename = "x"` and `rename(serialize = "x", deserialize = "y")` are the same
@@ -325,7 +334,8 @@ file  = "src/internals/attr.rs"
 lines = "477-504"
 title = "…the last four, and the error for a name nobody knows"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 body = """
 `field_identifier`, `variant_identifier`, `crate`, `expecting` — then the
 `else` that catches everything else.
@@ -364,7 +374,8 @@ file  = "src/internals/attr.rs"
 lines = "519-546"
 title = "…and the struct, assembled with every default in one place"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 body = """
 Every `unwrap_or` in the file is here. An unset `rename_all` becomes
 `RenameRule::None`, an unset `default` becomes `Default::None`, and so on — so
@@ -396,7 +407,8 @@ file  = "src/internals/attr.rs"
 lines = "622-681"
 title = "decide_tag — eight combinations of three attributes"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 rust_features = ["pattern-matching"]
 body = """
 `untagged`, `tag` and `content` are parsed independently and only make sense
@@ -420,7 +432,8 @@ file  = "src/internals/attr.rs"
 lines = "682-726"
 title = "decide_identifier — the same shape, over data kind as well"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 rust_features = ["pattern-matching"]
 glossary = ["syn::DataStruct", "syn::DataUnion"]
 body = """
@@ -499,7 +512,8 @@ file  = "src/internals/attr.rs"
 lines = "830-855"
 title = "…with, which is two attributes in one"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 glossary = ["syn::ExprPath"]
 body = """
 `#[serde(with = "module")]` expands to `serialize_with = "module::serialize"`
@@ -685,7 +699,8 @@ file  = "src/internals/attr.rs"
 lines = "1188-1194"
 title = "…and the implicit default that skip_deserializing carries"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 body = """
 Seven lines with a real consequence: a skipped field gets `Default::default()`
 unless something else supplies a value. Without this, `#[serde(skip)]` would be
@@ -703,7 +718,8 @@ file  = "src/internals/attr.rs"
 lines = "1195-1245"
 title = "…and the Cow special case, which is the whole of zero-copy borrowing"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 rust_features = ["lifetimes", "borrowing", "lifetime-de"]
 body = """
 Fifty lines, and the comment above them is the clearest statement in the crate
@@ -755,7 +771,8 @@ file  = "src/internals/attr.rs"
 lines = "1341-1385"
 title = "get_ser_and_de — why every attribute accepts two forms for free"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 rust_features = ["closures", "generic-params"]
 glossary = ["syn::meta::ParseNestedMeta", "syn::Token"]
 body = """
@@ -794,7 +811,8 @@ file  = "src/internals/attr.rs"
 lines = "1411-1454"
 title = "get_lit_str — unwrapping groups, and rejecting a suffix"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 glossary = ["syn::Expr", "syn::ExprLit", "syn::Lit", "syn::LitStr"]
 body = """
 The workhorse: pull a string literal out of an attribute value.
@@ -870,7 +888,8 @@ file  = "src/internals/attr.rs"
 lines = "1579-1608"
 title = "is_implicitly_borrowed, and the comment on is_cow that admits its limits"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 rust_features = ["borrowing"]
 body = """
 `&str`, `&[u8]`, and `Option` of either: types that can only ever borrow, so no

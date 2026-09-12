@@ -7,7 +7,8 @@ file  = "src/de/enum_internally.rs"
 lines = "1-19"
 title = "Internally tagged — and the three modules it borrows from"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "21-enum-representations"
 body = """
 The module doc names the attribute it implements. What the import list says is
 that this representation does not generate most of its own code: `struct_`,
@@ -36,7 +37,8 @@ file  = "src/de/enum_internally.rs"
 lines = "46-63"
 title = "…and the buffering that internal tagging requires"
 kind  = "codegen"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "21-enum-representations"
 body = """
 Four lines that explain why internally tagged enums cost what they do.
 
@@ -93,7 +95,8 @@ file  = "src/de/enum_internally.rs"
 lines = "95-106"
 title = "…and three shapes handed to other modules"
 kind  = "codegen"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "21-enum-representations"
 body = """
 Newtype goes to the untagged module's helper, struct to `struct_` with
 `StructForm::InternallyTagged`, and tuple is unreachable — there are no field

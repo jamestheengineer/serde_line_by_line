@@ -7,7 +7,8 @@ file  = "src/de/enum_adjacently.rs"
 lines = "1-17"
 title = "Adjacently tagged — the longest deserializer in the crate"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "21-enum-representations"
 body = """
 324 lines to read a two-field map, and every one of them is about an ordering
 the wire does not guarantee. `tag` and `content` can arrive in either order, and
@@ -115,7 +116,8 @@ file  = "src/de/enum_adjacently.rs"
 lines = "120-147"
 title = "next_relevant_key — stepping over keys nobody asked about"
 kind  = "codegen"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "21-enum-representations"
 rust_features = ["pattern-matching"]
 body = """
 When unknown fields are allowed, this loop consumes them until it finds the tag,
@@ -199,7 +201,8 @@ file  = "src/de/enum_adjacently.rs"
 lines = "226-252"
 title = "…tag first: the easy path, fully commented upstream"
 kind  = "codegen"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "21-enum-representations"
 body = """
 The comments in this block are upstream's and are unusually good — read them
 rather than this annotation.
@@ -215,7 +218,8 @@ file  = "src/de/enum_adjacently.rs"
 lines = "253-278"
 title = "…and content first, which has to buffer"
 kind  = "codegen"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "21-enum-representations"
 body = """
 The content arrives before the tag that says how to interpret it, so it is read
 into serde's `Content` type and held. Only when the tag arrives can

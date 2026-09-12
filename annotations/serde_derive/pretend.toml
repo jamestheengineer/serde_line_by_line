@@ -7,7 +7,8 @@ file  = "src/pretend.rs"
 lines = "1-31"
 title = "pretend_used — generating code purely to suppress a warning"
 kind  = "codegen"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "18-quote-and-interpolation"
 glossary = ["quote::format_ident"]
 body = """
 The comment, with its two quoted `rustc` warnings, is the entire justification:
@@ -26,7 +27,8 @@ file  = "src/pretend.rs"
 lines = "32-64"
 title = "…and thirty lines of comment showing exactly what comes out"
 kind  = "codegen"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "18-quote-and-interpolation"
 body = """
 Four worked examples, one per case, and they are better than any paraphrase:
 the ordinary struct, the packed struct on new rustc, the packed struct on old
@@ -55,7 +57,8 @@ file  = "src/pretend.rs"
 lines = "79-93"
 title = "…the ordinary case: destructure a value that does not exist"
 kind  = "codegen"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "18-quote-and-interpolation"
 rust_features = ["pattern-matching"]
 body = """
 `match None::<&T> { Some(T { a: __v0, b: __v1 }) => {} _ => {} }`.
@@ -74,7 +77,8 @@ file  = "src/pretend.rs"
 lines = "94-112"
 title = "…and the packed case, which cannot bind fields at all"
 kind  = "codegen"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "18-quote-and-interpolation"
 rust_features = ["unsafe", "borrowing"]
 body = """
 A field of a `repr(packed)` struct cannot be borrowed, and a binding pattern
@@ -106,7 +110,8 @@ file  = "src/pretend.rs"
 lines = "141-188"
 title = "pretend_variants_used — constructing every variant, unreachably"
 kind  = "codegen"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "18-quote-and-interpolation"
 rust_features = ["pattern-matching"]
 body = """
 The other half of the problem: a remote enum's variants are never *constructed*

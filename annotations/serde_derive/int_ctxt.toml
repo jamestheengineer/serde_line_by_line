@@ -7,7 +7,8 @@ file  = "src/internals/ctxt.rs"
 lines = "1-27"
 title = "Ctxt — an error collector that panics if you ignore it"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "15-proc-macro-basics"
 rust_features = ["interior-mutability"]
 body = """
 The doc comment states the contract and it is unusual enough to be worth
@@ -34,7 +35,8 @@ file  = "src/internals/ctxt.rs"
 lines = "28-44"
 title = "…and two ways to add an error, one of them deliberately un-generic"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "15-proc-macro-basics"
 rust_features = ["interior-mutability", "monomorphization"]
 body = """
 `error_spanned_by` is generic over the tokenizable thing to point at, and the
@@ -56,7 +58,8 @@ file  = "src/internals/ctxt.rs"
 lines = "45-67"
 title = "…and check, which folds every error into one"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "15-proc-macro-basics"
 rust_features = ["custom-errors"]
 body = """
 `Error::combine` is syn's way of carrying several diagnostics in one value, and

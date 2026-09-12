@@ -7,7 +7,8 @@ file  = "src/de/enum_externally.rs"
 lines = "1-21"
 title = "Externally tagged — the default, and the only one that does not buffer"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "21-enum-representations"
 body = """
 The representation you get with no attributes, and the cheap one to read: the
 format's own `EnumAccess` hands over the variant name and then the payload, in
@@ -78,7 +79,9 @@ file  = "src/de/enum_externally.rs"
 lines = "79-105"
 title = "…the visitor, whose one method is visit_enum"
 kind  = "codegen"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "21-enum-representations"
+prereqs = ["de-mod-0058"]
 rust_features = ["marker-types", "lifetime-de"]
 body = """
 The same visitor shape as everywhere else, with `visit_enum` as the only
@@ -128,7 +131,8 @@ file  = "src/de/enum_externally.rs"
 lines = "132-161"
 title = "…and the four shapes, each through VariantAccess"
 kind  = "codegen"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "21-enum-representations"
 rust_features = ["pattern-matching"]
 body = """
 `VariantAccess` has one method per shape — `unit_variant`, `newtype_variant`,

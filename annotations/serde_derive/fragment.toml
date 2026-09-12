@@ -7,7 +7,8 @@ file  = "src/fragment.rs"
 lines = "1-24"
 title = "Fragment — the distinction that runs through every generator"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "18-quote-and-interpolation"
 glossary = ["proc_macro2::TokenStream", "quote::ToTokens"]
 body = """
 Two variants, and the doc comments state the contract precisely: a `Block`'s
@@ -37,7 +38,8 @@ file  = "src/fragment.rs"
 lines = "25-74"
 title = "Expr, Stmts and Match — three positions, three punctuations"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "18-quote-and-interpolation"
 glossary = ["quote::ToTokens"]
 body = """
 The three adapters, and they are the reason `Fragment` is worth having. Each is

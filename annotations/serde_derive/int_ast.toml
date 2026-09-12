@@ -7,7 +7,8 @@ file  = "src/internals/ast.rs"
 lines = "1-7"
 title = "ast — serde's own model of the input"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "17-syn-and-a-narrower-ast"
 body = """
 "A Serde ast, parsed from the Syn ast and ready to generate Rust code." The
 whole point is the second half: syn's tree describes Rust, and this one
@@ -20,7 +21,8 @@ file  = "src/internals/ast.rs"
 lines = "8-59"
 title = "Container, Data, Variant, Field — serde's model, narrower than syn's"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "17-syn-and-a-narrower-ast"
 glossary = ["syn::DeriveInput", "syn::Generics", "syn::Data"]
 body = """
 Five types, and every one is smaller than the syn type it corresponds to.
@@ -47,7 +49,8 @@ file  = "src/internals/ast.rs"
 lines = "60-84"
 title = "from_ast — parse the attributes, then the body, and reject unions"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "17-syn-and-a-narrower-ast"
 body = """
 The order is attributes first, because the container's `default` reaches every
 field's parser and the container's rename rules reach every variant's.
@@ -63,7 +66,8 @@ file  = "src/internals/ast.rs"
 lines = "85-105"
 title = "…and where rename_all is actually applied"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "17-syn-and-a-narrower-ast"
 body = """
 This is the answer to "when does `rename_all` happen", and it is here, once,
 after all parsing: the container's rule is applied to variants, and the
@@ -84,7 +88,8 @@ file  = "src/internals/ast.rs"
 lines = "106-132"
 title = "…and check, called last, from inside the constructor"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "17-syn-and-a-narrower-ast"
 rust_features = ["trait-objects", "iterators"]
 body = """
 `check::check` runs here rather than at the call site, so no caller can forget
@@ -103,7 +108,8 @@ file  = "src/internals/ast.rs"
 lines = "133-173"
 title = "enum_from_ast — and the ordering rule for untagged variants"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "17-syn-and-a-narrower-ast"
 body = """
 Every variant is parsed, then one global rule is enforced: `#[serde(untagged)]`
 variants must come last.
@@ -124,7 +130,8 @@ file  = "src/internals/ast.rs"
 lines = "174-197"
 title = "struct_from_ast — where Newtype is separated from Tuple"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "17-syn-and-a-narrower-ast"
 glossary = ["syn::Fields"]
 body = """
 Four lines of real content: an unnamed-field list of length one is `Newtype`,
@@ -141,7 +148,8 @@ file  = "src/internals/ast.rs"
 lines = "198-225"
 title = "fields_from_ast — and the index that becomes `.0`"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "17-syn-and-a-narrower-ast"
 glossary = ["syn::Member", "syn::punctuated::Punctuated"]
 body = """
 `Member::Unnamed(dst_fields.len().into())` numbers positional fields by their

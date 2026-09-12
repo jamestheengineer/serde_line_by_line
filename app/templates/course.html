@@ -18,14 +18,17 @@
   <p class="lede">
     The same annotations as the reference track, ordered by what has to be
     understood first. {{ total_units }} units, {{ course_annotations }}
-    annotations drawn from across the crate.
+    annotations drawn from across both annotated crates.
   </p>
   <p class="lede small">
-    serde_core teaches lifetimes, trait design and <code>macro_rules!</code>
-    better than almost any crate in the ecosystem, and teaches ordinary
-    imperative Rust hardly at all. Units it cannot supply are written from
-    scratch and labelled <b>supplementary</b> rather than dressed up as
-    something the crate demonstrates.
+    Units 1&ndash;14 are read out of <code>serde_core</code>, which teaches
+    lifetimes, trait design and <code>macro_rules!</code> better than almost any
+    crate in the ecosystem, and teaches ordinary imperative Rust hardly at all.
+    Units 15&ndash;21 are read out of <code>serde_derive</code> and are about
+    writing a procedural macro: spans, an AST of your own, an attribute
+    language, and inferring the bounds of an impl you are generating. Units
+    neither crate can supply are written from scratch and labelled
+    <b>supplementary</b> rather than dressed up as something they demonstrate.
   </p>
   <div class="progress">
     <div class="figures">

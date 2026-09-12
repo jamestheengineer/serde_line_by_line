@@ -1280,9 +1280,9 @@ fn write_course(out: &Path, store: &Store, ctx: &Render<'_>) -> Result<()> {
     let index = CoursePage {
         page_title: "Course track — serde line by line".to_string(),
         description: one_line(
-            "A Rust course read out of serde_core: 14 units in teaching order, from why a \
-             data model exists to the macros that generate a third of the crate. What it \
-             cannot teach is labelled as supplementary.",
+            "A Rust course read out of serde_core and serde_derive: 21 units in teaching \
+             order, from why a data model exists to writing a procedural macro that \
+             generates one. What neither crate can teach is labelled as supplementary.",
         ),
         units: nav.iter().map(clone_unit).collect(),
         written: store

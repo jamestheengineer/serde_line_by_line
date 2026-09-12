@@ -7,7 +7,8 @@ file  = "src/dummy.rs"
 lines = "1-31"
 title = "wrap_in_const — the alias, and the const block every expansion lives in"
 kind  = "codegen"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "15-proc-macro-basics"
 body = """
 Two ways to bind the alias, and one wrapper around everything.
 `#[serde(crate = "path")]` becomes a `use`; the default is `extern crate serde

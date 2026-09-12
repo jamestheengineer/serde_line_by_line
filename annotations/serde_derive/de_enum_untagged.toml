@@ -7,7 +7,8 @@ file  = "src/de/enum_untagged.rs"
 lines = "1-20"
 title = "Untagged — no tag at all, and two modules to read shapes with"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "21-enum-representations"
 body = """
 The representation with the least information on the wire and the most work to
 read it. Nothing identifies the variant, so deserialization is a sequence of
@@ -39,7 +40,8 @@ file  = "src/de/enum_untagged.rs"
 lines = "44-59"
 title = "…buffer once, then re-run the buffer against each variant"
 kind  = "codegen"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "21-enum-representations"
 body = """
 The input is read once into `Content` and then replayed by
 `ContentRefDeserializer` for every attempt — by *reference*, because each
@@ -107,7 +109,8 @@ file  = "src/de/enum_untagged.rs"
 lines = "111-135"
 title = "deserialize_newtype_variant — used by three representations"
 kind  = "codegen"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "21-enum-representations"
 body = """
 Both comments above it are pointing at the same fact: this is the shared newtype
 reader, reached from untagged, internally tagged and adjacently tagged code.

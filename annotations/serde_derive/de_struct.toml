@@ -157,6 +157,7 @@ lines = "163-198"
 title = "…and the template all of that lands in"
 kind  = "codegen"
 tracks = ["reference"]
+prereqs = ["de-mod-0043", "de-mod-0058"]
 rust_features = ["marker-types", "lifetime-de"]
 emits_from = "deserialize"
 emits_case = "struct_rename"

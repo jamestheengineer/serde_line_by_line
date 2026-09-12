@@ -7,7 +7,8 @@ file  = "src/internals/check.rs"
 lines = "1-20"
 title = "check — ten cross-cutting rules, and the line that says what belongs here"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "17-syn-and-a-narrower-ast"
 body = """
 The comment above `check` is the file's charter: these are the checks that
 *require looking at more than one attrs object*. Anything decidable from a
@@ -25,7 +26,8 @@ file  = "src/internals/check.rs"
 lines = "21-53"
 title = "check_default_on_tuple — and the reason it is a rule at all"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 body = """
 The six-line comment is the whole justification and is worth reading before the
 code. A tuple field's default is only reached when the sequence ran out at that
@@ -80,7 +82,8 @@ file  = "src/internals/check.rs"
 lines = "99-137"
 title = "check_flatten — flatten needs names, so two shapes are refused"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 body = """
 Tuple and newtype structs have no field names, and flatten's whole mechanism is
 merging *keys* into the enclosing map. There is nothing to merge.
@@ -96,7 +99,8 @@ file  = "src/internals/check.rs"
 lines = "138-149"
 title = "check_identifier — the three-page match, and its contract"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "17-syn-and-a-narrower-ast"
 body = """
 The comment states three separate rules, and the function below enforces all of
 them with a single `match` on a four-tuple. Reading the comment first is
@@ -110,7 +114,8 @@ file  = "src/internals/check.rs"
 lines = "150-196"
 title = "…matching on (style, identifier, other, tag) — the four error arms"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "17-syn-and-a-narrower-ast"
 rust_features = ["pattern-matching"]
 body = """
 A four-tuple match where each arm is a rule. `#[serde(other)]` is refused on a
@@ -231,7 +236,8 @@ file  = "src/internals/check.rs"
 lines = "369-395"
 title = "check_transparent — three attributes it cannot be combined with"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 body = """
 `from`, `try_from` and `into` all replace the type's representation with another
 type's, and `transparent` replaces it with a field's. Two replacements are not a
@@ -262,7 +268,8 @@ file  = "src/internals/check.rs"
 lines = "414-447"
 title = "…and the mutation: mark_transparent, which is not a check at all"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "19-the-attribute-dsl"
 body = """
 The surprise in this file. `check` does not only validate — here it *writes*,
 calling `mark_transparent()` on the one eligible field, and `ser.rs` and `de.rs`

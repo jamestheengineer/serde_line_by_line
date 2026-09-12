@@ -83,6 +83,7 @@ lines = "88-123"
 title = "…the visitor, and deserialize_identifier as the hint"
 kind  = "codegen"
 tracks = ["reference"]
+prereqs = ["de-mod-0043"]
 rust_features = ["marker-types", "lifetime-de"]
 body = """
 The usual visitor shape, with the method bodies coming from the shared

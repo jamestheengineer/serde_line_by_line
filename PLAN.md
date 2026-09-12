@@ -598,7 +598,7 @@ exactly the lie §11 refused to tell about the walk.
 | **R3 — The rest of codegen** ✅ | `de.rs`, then `de/struct_.rs`, `de/tuple.rs`, `de/unit.rs`, `de/identifier.rs`, and the four enum representations | 165 | codegen at 100%; the four representations read as four variations, not four transcripts |
 | **R4 — `internals/`** ✅ | `attr.rs` (1,818 lines, the attribute DSL), `check.rs`, `ast.rs`, `case.rs`, `name.rs`, `symbol.rs`, `ctxt.rs`, `respan.rs`, `mod.rs` | 102 | the `#[serde(...)]` surface is claimed, including what upstream rejects and why |
 | **R5 — Plumbing** ✅ | `bound.rs`, `receiver.rs`, `pretend.rs`, `lib.rs`, `fragment.rs`, `deprecated.rs`, `this.rs`, `dummy.rs` | 39 | **every line of `serde_derive` claimed**; all 28 files in its manifest; the gate hard-fails on regression; all 85 narrative steps name a containing annotation |
-| **R6 — Course units** | 6–8 new units: proc-macro basics, `TokenStream` and spans, hygiene, `syn`'s AST, `quote!` interpolation, the attribute DSL, codegen for the four enum representations; the cross-crate prereq DAG | — | the course track spans both crates, walkable start to finish, D8's forward-reference check enforcing across sources |
+| **R6 — Course units** ✅ | 7 new units: proc-macro basics, spans, `syn`'s AST, `quote!` interpolation, the attribute DSL, generating an impl, the four enum representations; the cross-crate prereq DAG | — | the course track spans both crates, walkable start to finish, D8's forward-reference check enforcing across sources |
 | **R7 — Ship** | Navigation for four reference file-trees' worth of pages, the restated promise, `README` | — | both reference tracks reachable and each honest about what it claims |
 
 ### What R1 shipped
@@ -740,6 +740,32 @@ against 14. The compression the `quote!` count could not see is that the four
 enum representations share three reading paths between them, and that
 `attr.rs`'s attribute chains are worth explaining by group rather than by
 branch.
+
+### What R6 shipped
+
+Seven units, 15 through 21, and the course track now runs 21 units across both
+annotated crates. 138 `serde_derive` annotations are tagged onto them, and the
+track's own figures move from 202 course annotations to 340.
+
+The units are about **writing a procedural macro**, which is a different subject
+from units 1–14 and is the right one for the second crate: what a derive macro
+can and cannot see, where a compiler error points and why `quote_spanned!`
+decides it, parsing into an AST narrower than syn's, `quote!` interpolation and
+the `Fragment` type, designing an attribute language, inferring the bounds of an
+impl you are generating, and the four enum representations compared by what they
+cost to *read*.
+
+**The cross-crate DAG is real, not nominal.** `reading_order` grew 23 qualified
+entries (`serde_derive:src/ser.rs`), seven derive annotations declare prereqs
+pointing into `serde_core` — the emitted impl header leans on `Serializer:
+Sized` and `type Ok`, the generated visitor on `Visitor` — and D8's check was
+verified by pointing a unit-15 annotation at a unit-21 one and watching the
+build fail with the unit named. Two crates, one graph, one ordering.
+
+One thing did not need doing. `supplement` still means what it meant; all seven
+new units are `none`, because the second crate genuinely teaches all of it. The
+field's doc comment moved from "taught entirely from serde_core" to "from the
+annotated crates" and that was the whole change.
 
 R3–R5 are pure content throughput and can be reordered freely, with one
 exception: `internals/attr.rs` is the density risk the scope doc flagged

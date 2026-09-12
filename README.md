@@ -21,8 +21,8 @@ through `serde_derive` and running the expansion in the browser.
 > **Status: live, and the reference track now covers two crates.**
 > `serde_derive` is complete at 8,975 of 8,975 lines, alongside `serde_core`'s
 > 12,037 — two crates, two hard gates, and no number that spans them
-> (PLAN.md §12, [D12](docs/decisions.md)). The course track has not been
-> extended across the second crate yet; that is R6.
+> (PLAN.md §12, [D12](docs/decisions.md)). The course track spans both crates
+> at 21 units, with prereq edges crossing between them.
 >
 > **Reference** — every line of both annotated crates: `serde_core`'s 19 files
 > and `serde_derive`'s 28, all at 100% and all listed in their
@@ -30,8 +30,12 @@ through `serde_derive` and running the expansion in the browser.
 > overlap. 871 annotations between them. The site rebuilds and deploys to the
 > URL above on every push to `main`.
 >
-> **Course** — all 14 units are written and the track is walkable start to
-> finish. Five of them are supplementary in whole or in part: ownership and
+> **Course** — all 21 units are written and the track is walkable start to
+> finish. Units 1&ndash;14 are read out of `serde_core`; units 15&ndash;21 out
+> of `serde_derive`, and they are about writing a procedural macro — spans, an
+> AST of your own, an attribute language, inferring the bounds of an impl you
+> are generating, and what the four enum representations cost to read. Five of
+> the first fourteen are supplementary in whole or in part: ownership and
 > lifetime basics entirely, since serde_core exercises lifetimes only in their
 > advanced forms and ordinary ownership not at all, and `PhantomData`, errors
 > and iterators-and-closures in part — the crate writes thirteen closures in

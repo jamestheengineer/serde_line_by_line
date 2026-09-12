@@ -7,7 +7,8 @@ file  = "src/deprecated.rs"
 lines = "1-11"
 title = "allow_deprecated — an attribute the expansion sometimes needs"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "15-proc-macro-basics"
 body = """
 Deriving `Serialize` on a `#[deprecated]` type generates code that mentions it,
 and that code would warn — in the user's build, about their own deliberate
@@ -24,7 +25,8 @@ file  = "src/deprecated.rs"
 lines = "12-31"
 title = "…and the two places a deprecation can be"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "15-proc-macro-basics"
 body = """
 The doc comment lists both triggers: the type is deprecated, or the user already
 wrote `#[allow(deprecated)]` themselves — in which case they have said they know,
@@ -40,7 +42,8 @@ file  = "src/deprecated.rs"
 lines = "32-56"
 title = "…and the scan, which parses inside `allow(...)`"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "15-proc-macro-basics"
 glossary = ["syn::Attribute", "syn::Meta"]
 body = """
 `#[deprecated]` is a path match. `#[allow(deprecated)]` needs the nested meta

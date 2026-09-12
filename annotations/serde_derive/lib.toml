@@ -7,7 +7,8 @@ file  = "src/lib.rs"
 lines = "1-15"
 title = "The crate doc: two macros, and a link to the real documentation"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "15-proc-macro-basics"
 body = """
 Fifteen lines for a crate that is one of the most used in the ecosystem, and
 that is the right amount. `serde_derive` has no API to document beyond two
@@ -24,7 +25,8 @@ file  = "src/lib.rs"
 lines = "16-67"
 title = "…and fifty lines of suppressed lints"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "15-proc-macro-basics"
 rust_features = ["cfg", "msrv"]
 body = """
 Two `allow` blocks, one for clippy and one for clippy-pedantic, and four of the
@@ -48,7 +50,8 @@ file  = "src/lib.rs"
 lines = "68-94"
 title = "…the extern crates, and the module list"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "15-proc-macro-basics"
 glossary = ["proc_macro2::TokenStream", "syn::parse_macro_input"]
 body = """
 `extern crate proc_macro;` is the one that is not decoration: `proc_macro` is
@@ -66,7 +69,8 @@ file  = "src/lib.rs"
 lines = "95-112"
 title = "private — a lowercase struct used as a token, and the versioned module name"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "15-proc-macro-basics"
 glossary = ["quote::ToTokens", "quote::TokenStreamExt", "proc_macro2::Ident"]
 body = """
 The trick that keeps serde's private API private across releases, and the thing
@@ -93,7 +97,8 @@ file  = "src/lib.rs"
 lines = "113-127"
 title = "…and the two entry points, seven lines each"
 kind  = "codegen"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "15-proc-macro-basics"
 rust_features = ["proc-macro-boundary"]
 glossary = ["syn::parse_macro_input", "syn::DeriveInput"]
 body = """
