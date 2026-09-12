@@ -1,0 +1,230 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "de-tup-0001"
+file  = "src/de/tuple.rs"
+lines = "1-11"
+title = "Tuples — and the two imports behind a feature"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+Two of the imports are `cfg`-gated, which is the file's shape in miniature: the
+second half is an in-place twin of the first, compiled only when the
+`deserialize_in_place` feature is on.
+"""
+
+[[annotation]]
+id    = "de-tup-0002"
+file  = "src/de/tuple.rs"
+lines = "12-28"
+title = "deserialize — one function for tuple structs, newtypes and tuple variants"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+The assertion states the invariant in a sentence: flatten needs field names and
+a tuple has none, so `internals::check` rejects the combination and this is the
+backstop.
+
+`field_count` counts only fields that are read, and it is what the format is
+told to expect. A skipped field is not in the input, so counting it would make
+every correct input look short.
+"""
+
+[[annotation]]
+id    = "de-tup-0003"
+file  = "src/de/tuple.rs"
+lines = "29-50"
+title = "…the path the value is constructed through"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Two decisions folded into one token stream. `has_getter` means the remote type
+has private fields, so the *local* placeholder is constructed and converted
+afterwards. Then the form decides whether that path is used alone or with
+`::Variant` appended.
+
+Doing it this way is what lets `deserialize_seq` be shared: it takes a
+`type_path` and interpolates it, knowing nothing about variants or remote types.
+"""
+
+[[annotation]]
+id    = "de-tup-0004"
+file  = "src/de/tuple.rs"
+lines = "51-60"
+title = "…and the expecting message, which names the variant when there is one"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+"tuple struct Meters" or "tuple variant Shape::Rect". The distinction matters in
+an error: an untagged enum that fails reports on every variant it tried, and
+messages that all said "tuple" would be useless.
+"""
+
+[[annotation]]
+id    = "de-tup-0005"
+file  = "src/de/tuple.rs"
+lines = "61-77"
+title = "…visit_newtype_struct, for a one-field tuple struct only"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+A newtype struct gets an extra visitor method, and only in the `Tuple` form.
+`Deserializer::deserialize_newtype_struct` is a distinct hint in serde's data
+model — it lets a format unwrap `struct Meters(f64)` to a bare number rather than
+a one-element sequence, which is what makes newtype wrappers free on the wire.
+
+A one-field tuple *variant* does not get it: the payload slot is already
+provided by `VariantAccess`.
+"""
+
+[[annotation]]
+id    = "de-tup-0006"
+file  = "src/de/tuple.rs"
+lines = "78-98"
+title = "…and the dispatch, four ways into the same visitor"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+One visitor, four entry calls. `deserialize_newtype_struct` for a one-field
+tuple struct, `deserialize_tuple_struct` for the rest, `VariantAccess::tuple_variant`
+for an externally tagged variant, and `deserialize_tuple` for an untagged one.
+
+Every one of them is a *hint* carrying the field count, which is what a
+non-self-describing format needs to know how many elements to read.
+"""
+
+[[annotation]]
+id    = "de-tup-0007"
+file  = "src/de/tuple.rs"
+lines = "99-104"
+title = "…and the `_` binding for a tuple with nothing to read"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`mut __seq` would warn as unused when every field is skipped, in the user's
+build, on code they did not write. Same class of care as the serialize side's
+`mut_if`, and the same reason it is worth a branch.
+"""
+
+[[annotation]]
+id    = "de-tup-0008"
+file  = "src/de/tuple.rs"
+lines = "105-134"
+title = "…and the template, where the pieces land"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["marker-types", "lifetime-de"]
+body = """
+The visitor with its two markers, `expecting`, the optional
+`#visit_newtype_struct` splicing to nothing when absent, `visit_seq`, and the
+dispatch.
+
+`visit_seq` is where the real work is, and it is `deserialize_seq` from the
+parent module — shared with struct-shaped reads, which also accept a sequence.
+"""
+
+[[annotation]]
+id    = "de-tup-0009"
+file  = "src/de/tuple.rs"
+lines = "135-162"
+title = "deserialize_newtype_struct — the unwrapping method"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Called when the format took the newtype hint and is handing over the inner value
+directly rather than as a sequence.
+
+`__e` rather than `__deserializer` as the parameter name, because this
+deserializer is a *different* one from the outer method's — it is the format's
+view of the inner value — and reusing the name would shadow in a way that reads
+as a bug.
+"""
+
+[[annotation]]
+id    = "de-tup-0010"
+file  = "src/de/tuple.rs"
+lines = "163-183"
+title = "…and the value, with the getter conversion again"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`let __field0: #field_ty = ...` with an explicit annotation, because in the
+`deserialize_with` case nothing else would tell inference what the user's
+function returns.
+
+The `has_getter` wrap is the same three lines as in `deserialize_seq`. Two
+copies rather than a helper, which is defensible at this size but is the sort of
+thing that drifts.
+"""
+
+[[annotation]]
+id    = "de-tup-0011"
+file  = "src/de/tuple.rs"
+lines = "184-210"
+title = "deserialize_in_place — the twin, and its assertion"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+The same opening as `deserialize`, minus `this_value` — there is no value to
+construct, only a place to fill.
+
+`assert!(fields[0].attrs.deserialize_with().is_none())` is a note about the
+caller: `de.rs` declines to generate in-place code when every field has a custom
+function, so by the time a one-field tuple gets here the field cannot have one.
+"""
+
+[[annotation]]
+id    = "de-tup-0012"
+file  = "src/de/tuple.rs"
+lines = "211-230"
+title = "…visit_newtype_struct, recursing in place"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+`Deserialize::deserialize_in_place(__e, &mut self.place.0)` — the in-place
+property is propagated to the inner type rather than stopping at this level. If
+the inner type also has a derived in-place impl, no allocation is made at either
+level.
+
+That recursion is the whole value of the feature, and it is also why it has
+never stabilized: every type in the chain has to opt in for it to pay.
+"""
+
+[[annotation]]
+id    = "de-tup-0013"
+file  = "src/de/tuple.rs"
+lines = "231-254"
+title = "…and the two extra generics the place needs"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["cfg", "lifetimes"]
+body = """
+`de_impl_generics.in_place()` and `de_ty_generics.in_place()` are the
+conversions from `de.rs`, producing headers that carry `'place` as well as
+`'de`. `place_lifetime()` is the same lifetime again, as a value, for the field
+declaration below.
+
+Three calls, and between them they are the entire reason those wrapper types and
+their hand-written `ToTokens` impls exist.
+"""
+
+[[annotation]]
+id    = "de-tup-0014"
+file  = "src/de/tuple.rs"
+lines = "255-283"
+title = "…and the in-place visitor, which holds a reference instead of a marker"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["cfg", "lifetimes"]
+body = """
+The one structural difference from every other visitor in the crate: `place:
+&'place mut Self` where the others have `marker: PhantomData<T>`. This visitor
+has somewhere to write, so it does not need a marker to justify its type
+parameters — the reference uses them.
+
+`type Value = ()`. Nothing is returned; everything went through the place.
+"""

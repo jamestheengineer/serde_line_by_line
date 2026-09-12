@@ -595,7 +595,7 @@ exactly the lie §11 refused to tell about the walk.
 |---|---|---:|---|
 | **R1 — Two coverage sources** ✅ | `Pin::primary` retires; `Store`, `manifest.toml` and `coverage.json` become per-source; D12 | 0 | `cargo xtask coverage` reports `serde_core` 12,037/12,037 **and** `serde_derive` 0/8,975 without error; every existing gate still fires on the first source; a role no gate knows is still a build failure |
 | **R2 — Vertical slice: `ser.rs`** ✅ | The densest codegen file, 1,369 lines and 76 `quote!` blocks, and the one the narrative already walks | 96 | `ser.rs` at 100%; the `codegen` kind proven in the renderer; an annotation's `emits` checked against a real expansion at annotation granularity (D10); its narrative steps retargeted |
-| **R3 — The rest of codegen** | `de.rs`, then `de/struct_.rs`, `de/tuple.rs`, `de/unit.rs`, `de/identifier.rs`, and the four enum representations | ~240 | codegen at 100%; the four representations read as four variations, not four transcripts |
+| **R3 — The rest of codegen** ✅ | `de.rs`, then `de/struct_.rs`, `de/tuple.rs`, `de/unit.rs`, `de/identifier.rs`, and the four enum representations | 165 | codegen at 100%; the four representations read as four variations, not four transcripts |
 | **R4 — `internals/`** | `attr.rs` (1,818 lines, the attribute DSL), `check.rs`, `ast.rs`, `case.rs`, `name.rs`, `symbol.rs`, `ctxt.rs`, `respan.rs`, `mod.rs` | ~108 | the `#[serde(...)]` surface is claimed, including what upstream rejects and why |
 | **R5 — Plumbing** | `bound.rs`, `receiver.rs`, `pretend.rs`, `lib.rs`, `fragment.rs`, `deprecated.rs`, `this.rs`, `dummy.rs` | ~56 | **every line of `serde_derive` claimed**; all 28 files in its manifest; the gate hard-fails on regression; all 85 narrative steps name a containing annotation |
 | **R6 — Course units** | 6–8 new units: proc-macro basics, `TokenStream` and spans, hygiene, `syn`'s AST, `quote!` interpolation, the attribute DSL, codegen for the four enum representations; the cross-crate prereq DAG | — | the course track spans both crates, walkable start to finish, D8's forward-reference check enforcing across sources |
@@ -659,6 +659,35 @@ inside any single annotation, which is the useful signal: four were annotation
 boundaries drawn too finely for a stop the walk had already justified as one
 idea, and they were merged; one was a step whose prose had outgrown what it
 cited, and it was rewritten. R3 through R5 should expect the same ratio.
+
+### What R3 shipped
+
+The codegen group is complete: 11 files, 4,728 lines, 261 annotations including
+R2's. `serde_derive` is at 52.7%.
+
+**The density came in under the projection, and the estimate should move.**
+The scope doc projected codegen at 14 lines per annotation and ~338
+annotations; it landed at **18.1 and 261**. Not because anything was skipped —
+every line is claimed and the file-by-file checks all pass — but because the
+four enum representations compress against each other far better than the
+`quote!` count suggested. `enum_untagged::deserialize_variant` is called by
+three of the four; `struct_::deserialize` reads the fields of a struct variant
+identically whatever encloses it; `deserialize_seq` serves tuples and structs
+both. Explaining that sharing once is cheaper than explaining four transcripts,
+which is exactly the exit criterion this phase was given.
+
+Carried forward at the projected densities, the whole track now looks like
+**~425 annotations rather than ~502** — within the scope doc's own stated lower
+bound of 450 only if `internals/` runs dense, and below it otherwise. The 502
+was never a promise; the coverage gate is. But R4 is where the remaining
+uncertainty lives, because `internals/attr.rs` is 1,818 lines and the doc's
+upper bound of 580 assumed it would refuse large spans.
+
+**The narrative ratchet held again**, at a better ratio than R2's. Declaring
+nine files complete turned on 19 gate errors, and 18 of the 19 steps already sat
+inside a single annotation — one pair had to merge. R2's five-out-of-thirteen
+was the vertical slice finding the boundaries; R3 suggests the boundaries are
+now roughly right.
 
 R3–R5 are pure content throughput and can be reordered freely, with one
 exception: `internals/attr.rs` is the density risk the scope doc flagged

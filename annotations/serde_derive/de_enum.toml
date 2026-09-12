@@ -1,0 +1,83 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "de-enum-0001"
+file  = "src/de/enum_.rs"
+lines = "1-13"
+title = "The dispatcher's imports, and the four representations"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+Five sibling modules, one per representation plus the identifier machinery. This
+file is 96 lines and does no code generation of its own worth the name: it picks
+which of the four files below does the work.
+"""
+
+[[annotation]]
+id    = "de-enum-0002"
+file  = "src/de/enum_.rs"
+lines = "14-37"
+title = "deserialize — the split between tagged and untagged variants"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["closures"]
+body = """
+An enum can have *both* — some variants tagged, some marked
+`#[serde(untagged)]` individually — and `ast.rs` has already checked that the
+untagged ones come last. So the list is split, and the tagged half is tried
+first.
+
+The mechanism for "tried" is worth a slow read. The tagged body is wrapped in an
+immediately-invoked closure, and the whole thing is matched against `Ok(__ok)`
+so a failure falls through to the untagged attempts instead of returning. The
+turbofish `Result::<_, __D::Error>::Ok` is there because a body that never fails
+would otherwise leave the error type unconstrained — the comment says so.
+"""
+
+[[annotation]]
+id    = "de-enum-0003"
+file  = "src/de/enum_.rs"
+lines = "38-54"
+title = "deserialize_homogeneous_enum — the four-way fork"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+The counterpart of `serialize_variant`'s tag match on the other side, and much
+smaller, because each representation is a whole module here rather than a
+function.
+
+Four representations, and their deserialization costs are wildly unequal:
+external tagging reads a key and dispatches, while internal, adjacent and
+untagged all have to *buffer* the input first. That difference is why
+`serde_core` carries a private `Content` type that no user ever names.
+"""
+
+[[annotation]]
+id    = "de-enum-0004"
+file  = "src/de/enum_.rs"
+lines = "55-96"
+title = "prepare_enum_variant_enum — the variant identifier every tagged form needs"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Every tagged representation needs to turn a name into a variant, and this builds
+the `__Field` enum and visitor that does it. Shared here rather than duplicated
+three times.
+
+`#[serde(other)]` marks the variant that catches unrecognized names, and it
+becomes the `fallthrough` — the arm the generated matcher takes instead of
+raising `unknown_variant`. `find` rather than a filter: `internals::check`
+already rejected a second one.
+
+`VARIANTS` is the list a format sees in an `unknown_variant` error, and it is
+built from `aliases()` — the renamed name plus every `#[serde(alias)]`. So the
+message offers every spelling that would have worked, not just the canonical
+one.
+
+`deserialize_generated` is `identifier.rs`'s entry point and does the real work.
+The `false` argument is commented in place: variant identifiers do not care
+about flattened fields, because a variant name is never a key in a flattened
+map.
+"""

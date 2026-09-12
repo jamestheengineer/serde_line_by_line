@@ -1,0 +1,519 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "de-st-0001"
+file  = "src/de/struct_.rs"
+lines = "1-15"
+title = "Structs — the largest generator, and two of it behind a feature"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+697 lines, the biggest file in `de/`, and roughly a third of it is the in-place
+twin. What is left is still the most-executed code path in the crate: every
+derived `Deserialize` for a named-field struct comes out of here.
+"""
+
+[[annotation]]
+id    = "de-st-0002"
+file  = "src/de/struct_.rs"
+lines = "16-38"
+title = "deserialize — one function for structs and three kinds of struct variant"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["lifetime-de"]
+body = """
+`StructForm` is the only thing separating a plain struct from a struct variant
+of an externally, internally or untagged enum. Everything below branches on it a
+handful of times and is otherwise shared.
+
+The `construct` block is the getter conversion again, identical to `tuple.rs`'s
+— the third copy of these five lines in the crate.
+"""
+
+[[annotation]]
+id    = "de-st-0003"
+file  = "src/de/struct_.rs"
+lines = "39-54"
+title = "…the path and the expecting message, per form"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "deserialize"
+emits_case = "struct_rename"
+emits = """
+                        "struct Point",
+"""
+body = """
+"struct Point" or "struct variant Shape::Circle". The three tagged forms share
+an arm in both matches, because at this level they differ only in what wraps
+them, not in how the fields are read.
+"""
+
+[[annotation]]
+id    = "de-st-0004"
+file  = "src/de/struct_.rs"
+lines = "55-69"
+title = "…the fields that get a slot, and the two exclusions"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Skipped fields and flattened fields are both left out, for different reasons.
+A skipped field is never read. A flattened field is not a *key* — its contents
+arrive under the keys of whatever it contains — so it has no entry in the field
+identifier enum either.
+
+The comment above the filter says exactly this. `field_i(i)` uses the index in
+the original list, so the generated `__field2` still corresponds to the third
+declared field even when the second was skipped.
+"""
+
+[[annotation]]
+id    = "de-st-0005"
+file  = "src/de/struct_.rs"
+lines = "70-96"
+title = "…visit_seq, which two forms do not get"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+A struct is normally readable from a sequence as well as a map — that is how a
+compact format sends one — but two cases cannot.
+
+An untagged struct variant is reached through `deserialize_any`, and accepting a
+sequence there would make `[1, 2]` ambiguous with a tuple variant. A flattened
+struct has no fixed field order at all, so position means nothing. Both return
+`None` and the method is simply absent from the generated visitor.
+"""
+
+[[annotation]]
+id    = "de-st-0006"
+file  = "src/de/struct_.rs"
+lines = "97-121"
+title = "…and the DeserializeSeed impl an externally tagged flattened variant needs"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+One narrow case with its own impl. An externally tagged struct variant that has
+a flattened field cannot use `struct_variant` — that method wants a field list,
+and flatten means there is not one — so it is read as a *newtype* variant whose
+payload is a map.
+
+`newtype_variant_seed` needs a `DeserializeSeed`, not a `Visitor`, so the same
+`__Visitor` type gets a second impl whose `deserialize` immediately calls
+`deserialize_map` on itself.
+"""
+
+[[annotation]]
+id    = "de-st-0007"
+file  = "src/de/struct_.rs"
+lines = "122-138"
+title = "…and FIELDS, absent when anything is flattened"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "deserialize"
+emits_case = "struct_rename"
+emits = """
+            const FIELDS: &'static [&'static str] = &["xCoord", "label"];
+"""
+body = """
+The list a format is given so it can report `unknown_field` against it. Built
+from `aliases`, so every accepted spelling appears.
+
+`None` under flatten, because there is no such thing as an unknown field then —
+anything unrecognized belongs to the flattened member. Emitting the constant
+would leave it unused.
+"""
+
+[[annotation]]
+id    = "de-st-0008"
+file  = "src/de/struct_.rs"
+lines = "139-162"
+title = "…and six ways to enter the same visitor"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "deserialize"
+emits_case = "struct_rename"
+emits = """
+            _serde::Deserializer::deserialize_struct(
+                __deserializer,
+                "Point",
+                FIELDS,
+                __Visitor {
+"""
+body = """
+`deserialize_struct` for the ordinary case, `deserialize_map` when flattened,
+`struct_variant` or `newtype_variant_seed` for an externally tagged variant, and
+`deserialize_any` for the internally tagged and untagged ones.
+
+`deserialize_any` is the expensive one and the reason those two representations
+do not work with non-self-describing formats: the generated code cannot tell the
+format what to expect, because it does not know yet.
+"""
+
+[[annotation]]
+id    = "de-st-0009"
+file  = "src/de/struct_.rs"
+lines = "163-198"
+title = "…and the template all of that lands in"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["marker-types", "lifetime-de"]
+emits_from = "deserialize"
+emits_case = "struct_rename"
+emits = """
+            struct __Visitor<'de> {
+                marker: _serde::__private229::PhantomData<Point>,
+                lifetime: _serde::__private229::PhantomData<&'de ()>,
+            }
+"""
+body = """
+Field visitor, struct visitor, optional seed impl, optional `FIELDS`, dispatch.
+Five interpolations, three of which are usually empty.
+"""
+
+[[annotation]]
+id    = "de-st-0010"
+file  = "src/de/struct_.rs"
+lines = "199-223"
+title = "deserialize_map — one Option slot per field"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "deserialize"
+emits_case = "struct_rename"
+emits = """
+                    let mut __field0: _serde::__private229::Option<i32> = _serde::__private229::None;
+                    let mut __field1: _serde::__private229::Option<Option<String>> = _serde::__private229::None;
+"""
+body = """
+The pattern that makes map deserialization work: every field gets a local
+`Option<T>` initialized to `None`, filled as keys arrive, and unwrapped at the
+end.
+
+`Option<Option<String>>` for an `Option<String>` field is not a mistake. The
+outer `Option` means "did this key appear", the inner one is the field's own
+type, and collapsing them would make a present `null` indistinguishable from an
+absent key.
+"""
+
+[[annotation]]
+id    = "de-st-0011"
+file  = "src/de/struct_.rs"
+lines = "224-235"
+title = "…and the buffer flattened fields collect into"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+A `Vec<Option<(Content, Content)>>` of key-value pairs that did not match a known
+field. Both halves are buffered because the flattened member has not been
+deserialized yet and will need the whole thing.
+
+`Option` around each pair so entries can be *taken* rather than removed — with
+two flattened fields, the first one consumes what it recognizes and leaves holes
+for the second.
+"""
+
+[[annotation]]
+id    = "de-st-0012"
+file  = "src/de/struct_.rs"
+lines = "236-275"
+title = "…one match arm per field, with the duplicate check"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "deserialize"
+emits_case = "struct_rename"
+emits = """
+                            __Field::__field0 => {
+                                if _serde::__private229::Option::is_some(&__field0) {
+                                    return _serde::__private229::Err(
+                                        <__A::Error as _serde::de::Error>::duplicate_field("xCoord"),
+                                    );
+                                }
+"""
+body = """
+The arm that runs when a key resolves to this field. The `is_some` test is the
+duplicate-key check, and it reports the *renamed* name, because that is what the
+input contained.
+
+The `deserialize_with` arm spells out its error handling instead of using `?`,
+for the same reason as elsewhere: it is a block expression being assigned, not a
+statement in a function that can return.
+"""
+
+[[annotation]]
+id    = "de-st-0013"
+file  = "src/de/struct_.rs"
+lines = "276-292"
+title = "…and what happens to a key nobody claimed"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Three possibilities, and they are mutually exclusive by construction. Under
+flatten, the key and its value are pushed into `__collect`. Under
+`deny_unknown_fields`, there is no arm at all — the field visitor already
+errored, because it had no `__ignore` variant to return. Otherwise the value is
+read into `IgnoredAny` and dropped.
+
+`IgnoredAny` reads and discards an arbitrarily nested value without allocating,
+which is what keeps ignoring an unknown field cheap.
+"""
+
+[[annotation]]
+id    = "de-st-0014"
+file  = "src/de/struct_.rs"
+lines = "293-312"
+title = "…the key loop, and the uninhabited case again"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "deserialize"
+emits_case = "struct_rename"
+emits = """
+                    while let _serde::__private229::Some(__key) = _serde::de::MapAccess::next_key::<
+                        __Field,
+                    >(&mut __map)? {
+"""
+body = """
+`while let Some(key) = next_key::<__Field>()` is the loop every derived struct
+runs. One call per key, and `__Field`'s own `Deserialize` impl is what turns the
+name into a variant.
+
+The `deny_unknown_fields && all_skipped` branch is the third appearance of the
+uninhabited-match trick: with every field skipped and unknown fields denied,
+`__Field` has no variants, so any key at all is an error and the only way to
+write the match is over a type that cannot be constructed. The same `FIXME` for
+`exhaustive_patterns` is here as in the externally tagged module.
+"""
+
+[[annotation]]
+id    = "de-st-0015"
+file  = "src/de/struct_.rs"
+lines = "313-326"
+title = "…and unwrapping each slot, with expr_is_missing behind it"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "deserialize"
+emits_case = "struct_rename"
+emits = """
+                    let __field0 = match __field0 {
+                        _serde::__private229::Some(__field0) => __field0,
+                        _serde::__private229::None => {
+                            _serde::__private229::de::missing_field("xCoord")?
+                        }
+                    };
+"""
+body = """
+The `Option<T>` becomes a `T` or takes whatever `expr_is_missing` decided —
+defaults, the container default, or an error. Shadowing the binding with its own
+name keeps the construction expression below simple.
+"""
+
+[[annotation]]
+id    = "de-st-0016"
+file  = "src/de/struct_.rs"
+lines = "327-346"
+title = "…and the flattened fields, read out of the buffer"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`FlatMapDeserializer` presents the collected key-value pairs as a map, and the
+flattened field's own `Deserialize` reads from it. That is the whole mechanism:
+flatten is not a wire-format feature, it is a buffer replayed as a map.
+
+It also explains the constraint people hit — the flattened type has to be
+something that can be deserialized *from a map*, which is why flattening a
+`Vec` does not work.
+"""
+
+[[annotation]]
+id    = "de-st-0017"
+file  = "src/de/struct_.rs"
+lines = "347-364"
+title = "…and deny_unknown_fields under flatten, which must run last"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+With flatten and `deny_unknown_fields` together, an unknown key cannot be
+detected when it arrives — it might belong to the flattened member. So the check
+runs *after* every flattened field has taken what it recognized, and anything
+still in the buffer is genuinely unknown.
+
+`content_as_str` because the leftover key may not be a string at all; a map with
+an integer key gets "unexpected map key" rather than a name.
+"""
+
+[[annotation]]
+id    = "de-st-0018"
+file  = "src/de/struct_.rs"
+lines = "365-392"
+title = "…the struct expression, and the container default"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Every field, including the skipped ones, which take their value from
+`expr_is_missing` directly rather than from a slot.
+
+The `let_default` block is the same one `deserialize_seq` has, and the comment
+about the unused-variable warning is upstream's in both places.
+"""
+
+[[annotation]]
+id    = "de-st-0019"
+file  = "src/de/struct_.rs"
+lines = "393-419"
+title = "…and the assembled body, in seven parts"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "deserialize"
+emits_case = "struct_rename"
+emits = """
+                    _serde::__private229::Ok(Point {
+                        x_coord: __field0,
+                        label: __field1,
+                    })
+"""
+body = """
+Slots, buffer, key loop, default, unwrap, flatten, unknown check, construct.
+Reading the template is the fastest way to understand the generated
+`visit_map` — it is the same eight lines every time, with four of them usually
+empty.
+"""
+
+[[annotation]]
+id    = "de-st-0020"
+file  = "src/de/struct_.rs"
+lines = "420-453"
+title = "deserialize_in_place — and the shape it declines"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+Returns `Option`, and `None` for anything flattened: filling a value in place
+requires knowing which field each key belongs to before reading it, and flatten
+does not.
+
+That `None` propagates through `de.rs`'s `?` and suppresses the whole method.
+"""
+
+[[annotation]]
+id    = "de-st-0021"
+file  = "src/de/struct_.rs"
+lines = "454-511"
+title = "…and the in-place visitor, holding a place instead of a marker"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["cfg", "lifetimes"]
+body = """
+The same substitution as `tuple.rs`: `place: &'place mut Self` where the
+by-value visitor has `marker: PhantomData<T>`, and `type Value = ()`.
+
+Both `visit_seq` and `visit_map` are present here, unlike the by-value path
+where `visit_seq` can be suppressed — the shapes this function accepts are
+exactly the shapes it declined to decline above.
+"""
+
+[[annotation]]
+id    = "de-st-0022"
+file  = "src/de/struct_.rs"
+lines = "512-540"
+title = "deserialize_map_in_place — booleans instead of Options"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+The difference that makes in-place worth having. The by-value path allocates an
+`Option<T>` per field to hold the value until the end; this one writes directly
+into the place and keeps a `bool` per field to record that it happened.
+
+For a struct of `String` fields, that is the difference between building N new
+allocations and reusing N existing ones.
+"""
+
+[[annotation]]
+id    = "de-st-0023"
+file  = "src/de/struct_.rs"
+lines = "541-578"
+title = "…and the arms, writing through InPlaceSeed"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+`next_value_seed(&mut __map, InPlaceSeed(&mut self.place.#member))` is the
+in-place read: the seed carries the destination, so the format writes into it.
+
+The `deserialize_with` arm cannot do that — the user's function returns a value —
+so it assigns. The flag is set after the read in both cases, which matters: a
+failed read must not mark the field as seen.
+"""
+
+[[annotation]]
+id    = "de-st-0024"
+file  = "src/de/struct_.rs"
+lines = "579-608"
+title = "…and the same ignored-key handling, minus flatten"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+Two cases instead of three, because flatten was refused at the top. Otherwise
+identical to the by-value version, including the uninhabited-match branch — the
+fourth and last appearance of that trick in the crate.
+"""
+
+[[annotation]]
+id    = "de-st-0025"
+file  = "src/de/struct_.rs"
+lines = "609-639"
+title = "…and the flag check, which sometimes must not assign"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+The most subtle block in the in-place path, and the comment says why: when
+`expr_is_missing` returns an expression that unconditionally *returns an error*,
+assigning it to `self.place.#member` would be assigning a value of type `!` and
+would not compile.
+
+That happens for exactly one combination — no field default, no container
+default, and a `deserialize_with` — which is the condition spelled out here. In
+that case the missing expression is emitted as a statement instead.
+"""
+
+[[annotation]]
+id    = "de-st-0026"
+file  = "src/de/struct_.rs"
+lines = "640-670"
+title = "…and the assembled in-place body"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+Flags, key loop, default, checks, `Ok(())`. Five parts against the by-value
+path's eight, because there is nothing to construct and nothing to collect.
+"""
+
+[[annotation]]
+id    = "de-st-0027"
+file  = "src/de/struct_.rs"
+lines = "671-697"
+title = "deserialize_field_identifier — three shapes of “everything else”"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "deserialize"
+emits_case = "struct_rename"
+emits = """
+            enum __Field {
+                __field0,
+                __field1,
+            }
+"""
+body = """
+The small function that decides what `__Field` does with a key it does not
+recognize, and it is worth reading last because every choice above depends on it.
+
+Under flatten, `__other(Content<'de>)` carries the key onward — which is where
+the lifetime parameter on the generated enum comes from. Under
+`deny_unknown_fields`, there is no extra variant and no fallthrough, so an
+unknown key fails inside the field visitor. Otherwise `__ignore` swallows it.
+
+Three lines of difference here produce three quite different generated bodies
+two hundred lines up.
+"""

@@ -1,0 +1,261 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "de-adj-0001"
+file  = "src/de/enum_adjacently.rs"
+lines = "1-17"
+title = "Adjacently tagged — the longest deserializer in the crate"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+324 lines to read a two-field map, and every one of them is about an ordering
+the wire does not guarantee. `tag` and `content` can arrive in either order, and
+the content cannot be read until the tag is known, so half this file is about
+what to do when they arrive the wrong way round.
+
+Compare the serialize side: 120 lines, and its only complication is a wrapper
+type. Writing is easier than reading, and this file is the sharpest illustration
+of that in the crate.
+"""
+
+[[annotation]]
+id    = "de-adj-0002"
+file  = "src/de/enum_adjacently.rs"
+lines = "18-47"
+title = "deserialize — the usual bindings, and one arm per variant"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+The arms match on the variant identifier and read the payload with
+`enum_untagged::deserialize_variant` — once the tag is known, the content is
+read exactly as an untagged variant would be. Three representations, one reading
+path.
+
+A `for` loop pushing into a `Vec` rather than an iterator chain, because the
+loop below it needs to set `missing_content_fallthrough` as a side effect and
+the two loops are deliberately kept the same shape.
+"""
+
+[[annotation]]
+id    = "de-adj-0003"
+file  = "src/de/enum_adjacently.rs"
+lines = "48-61"
+title = "…and the field visitor, chosen by deny_unknown_fields"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Two visitors, and the comment explains the choice exactly.
+`TagOrContentFieldVisitor` recognizes only the two known keys and errors on
+anything else; `TagContentOtherFieldVisitor` adds an `Other` case so unknown
+keys can be stepped over.
+
+Picking the type at expansion time rather than branching at runtime is the
+pattern the whole crate runs on, and here it means a `deny_unknown_fields` enum
+pays nothing for the skipping machinery it does not use.
+"""
+
+[[annotation]]
+id    = "de-adj-0004"
+file  = "src/de/enum_adjacently.rs"
+lines = "62-94"
+title = "missing_content — what a tag with no content may still produce"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+`{"t": "Tick"}` with no content field is legal for some variants and not others,
+and this loop works out which.
+
+A unit variant needs nothing, so it succeeds. A newtype variant without a custom
+function goes through `missing_field`, which — as on the struct side — tries to
+deserialize from a unit first, so `Option` payloads still work. Everything else
+falls through to a plain `missing_field` error.
+
+`missing_content_fallthrough` being assigned inside the loop and read after is
+the reason this is a loop and not a map: the `_ =>` arm exists only if at least
+one variant needed it.
+"""
+
+[[annotation]]
+id    = "de-adj-0005"
+file  = "src/de/enum_adjacently.rs"
+lines = "95-111"
+title = "…and next_key, which is reused four times"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`next_key` is bound once and interpolated into several templates below. Note it
+ends in `?` — it is an expression that can return early, spliced into positions
+where that is what should happen.
+
+Building reusable token streams and interpolating them into several places is
+how this file stays at 324 lines rather than a thousand. It is also why reading
+it linearly does not work: the bindings here appear inside the big template at
+the bottom.
+"""
+
+[[annotation]]
+id    = "de-adj-0006"
+file  = "src/de/enum_adjacently.rs"
+lines = "112-119"
+title = "…and the seed that turns a key into a variant"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`AdjacentlyTaggedEnumVariantSeed` reads the tag value and resolves it against
+`VARIANTS`, producing a `__Field`. It is a seed rather than a plain
+`next_value::<__Field>` because it carries `enum_name` and `variants` for the
+error message — an unknown tag should say which enum and list the alternatives.
+"""
+
+[[annotation]]
+id    = "de-adj-0007"
+file  = "src/de/enum_adjacently.rs"
+lines = "120-147"
+title = "next_relevant_key — stepping over keys nobody asked about"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+When unknown fields are allowed, this loop consumes them until it finds the tag,
+the content, or the end of the map. `IgnoredAny` is the type that reads a value
+and discards it without allocating, which is what makes stepping over an
+arbitrarily nested unknown value cheap.
+
+When they are denied, `next_relevant_key` is simply `next_key` and any
+unrecognized key errors inside the visitor. Two completely different generated
+bodies from one attribute, decided here.
+"""
+
+[[annotation]]
+id    = "de-adj-0008"
+file  = "src/de/enum_adjacently.rs"
+lines = "148-162"
+title = "visit_remaining_keys — the duplicate check that runs at the end"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+After both fields have been read, the map may still have keys. Anything that is
+the tag or the content again is a duplicate; `None` means a clean finish.
+
+With `deny_unknown_fields` on, this is also where an unknown trailing key
+errors, because `next_relevant_key` is the strict visitor and will not step over
+it. The comment says so.
+"""
+
+[[annotation]]
+id    = "de-adj-0009"
+file  = "src/de/enum_adjacently.rs"
+lines = "163-180"
+title = "finish_content_then_tag — the out-of-order case"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Content first, tag second: the content was buffered, the tag has now arrived, so
+the buffer is replayed through `ContentDeserializer` into the seed.
+
+This is the only place adjacent tagging buffers, and it only happens when the
+fields arrive in the unhelpful order. Tag-first costs nothing.
+
+`match #variant_from_map {}` for an enum with no readable variants is the same
+uninhabited-match trick the externally tagged module uses.
+"""
+
+[[annotation]]
+id    = "de-adj-0010"
+file  = "src/de/enum_adjacently.rs"
+lines = "181-206"
+title = "…__Seed, a DeserializeSeed carrying the already-known variant"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["marker-types", "lifetime-de"]
+body = """
+`DeserializeSeed` is the trait for "deserialize, given something I already
+know". Here the something is which variant to read.
+
+That is the whole reason it exists rather than a `Visitor`: `Deserialize` has no
+way to pass state in, and the variant has already been read from the tag field.
+Its `deserialize` is the `match` over `__Field` holding all the variant arms.
+"""
+
+[[annotation]]
+id    = "de-adj-0011"
+file  = "src/de/enum_adjacently.rs"
+lines = "207-225"
+title = "…and the visitor, which accepts a map"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["marker-types"]
+body = """
+The outer visitor. An adjacently tagged enum is presented to the format as a
+*struct* with two fields, which is why `deserialize_struct` is the entry call at
+the bottom and why `visit_map` is the main method.
+"""
+
+[[annotation]]
+id    = "de-adj-0012"
+file  = "src/de/enum_adjacently.rs"
+lines = "226-252"
+title = "…tag first: the easy path, fully commented upstream"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+The comments in this block are upstream's and are unusually good — read them
+rather than this annotation.
+
+What to take away: tag first means no buffering at all. The variant is known
+before the content is touched, so `next_value_seed` reads the payload directly
+into the right variant. Three of the four arms are error cases.
+"""
+
+[[annotation]]
+id    = "de-adj-0013"
+file  = "src/de/enum_adjacently.rs"
+lines = "253-278"
+title = "…and content first, which has to buffer"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+The content arrives before the tag that says how to interpret it, so it is read
+into serde's `Content` type and held. Only when the tag arrives can
+`finish_content_then_tag` replay it.
+
+This is the cost the representation carries and the reason adjacent tagging is
+not always cheaper than internal tagging: for input in the wrong order it
+buffers exactly as much.
+"""
+
+[[annotation]]
+id    = "de-adj-0014"
+file  = "src/de/enum_adjacently.rs"
+lines = "279-311"
+title = "…and visit_seq, because a two-field struct is also a two-element sequence"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Formats that write structs as sequences — anything self-describing enough to
+know the field order but not to write names — present this as two elements. The
+tag is element zero, the content element one.
+
+No buffering is possible or needed here: a sequence has an order, so the tag is
+always first.
+
+`invalid_length(1, &self)` passes the visitor itself as the expectation, which
+works because `Visitor` implements `Expected` through its `expecting` method.
+That is how the error message gets "adjacently tagged enum Event" without this
+code repeating the string.
+"""
+
+[[annotation]]
+id    = "de-adj-0015"
+file  = "src/de/enum_adjacently.rs"
+lines = "312-324"
+title = "…and FIELDS, which is the tag and the content"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Two names, and they are the *only* two keys this type ever accepts. Handing them
+to `deserialize_struct` is what lets a format report an unknown key against a
+list of exactly `["t", "c"]`.
+"""

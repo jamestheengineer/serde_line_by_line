@@ -1,0 +1,106 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "de-int-0001"
+file  = "src/de/enum_internally.rs"
+lines = "1-19"
+title = "Internally tagged — and the three modules it borrows from"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+The module doc names the attribute it implements. What the import list says is
+that this representation does not generate most of its own code: `struct_`,
+`enum_untagged` and `enum_` between them handle three of the four variant shapes,
+and this file contributes the tag extraction and the dispatch.
+"""
+
+[[annotation]]
+id    = "de-int-0002"
+file  = "src/de/enum_internally.rs"
+lines = "20-45"
+title = "deserialize — one arm per variant, keyed by the tag"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+The variant identifier enum comes from `enum_::prepare_enum_variant_enum`, and
+the arms match on it. Skipped variants are filtered out here rather than
+generating an arm that fails, which is the opposite of the serialize side —
+there, a skipped variant still needs a `match` arm for exhaustiveness; here,
+there is no exhaustive match to satisfy, just names that will not resolve.
+"""
+
+[[annotation]]
+id    = "de-int-0003"
+file  = "src/de/enum_internally.rs"
+lines = "46-63"
+title = "…and the buffering that internal tagging requires"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Four lines that explain why internally tagged enums cost what they do.
+
+`deserialize_any` is called *once*, with a `TaggedContentVisitor`, and it
+returns a pair: the tag, and **the entire rest of the input buffered into
+serde's private `Content` type**. Only then can the variant be chosen, because
+the tag can arrive anywhere in the map — nothing guarantees it comes first.
+
+Then `ContentDeserializer` replays that buffer into the chosen variant's
+deserializer. The whole payload is materialized in memory before any field of it
+is read, and no amount of cleverness in this file could avoid that: it is forced
+by the representation.
+
+Note `deserialize_any` rather than a typed hint. An internally tagged enum
+cannot tell the format what shape to expect, which is why the representation
+does not work with non-self-describing formats at all.
+"""
+
+[[annotation]]
+id    = "de-int-0004"
+file  = "src/de/enum_internally.rs"
+lines = "64-78"
+title = "deserialize_internally_tagged_variant — the custom-function path"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`deserialize_with` on a variant reads the payload with the user's function and
+then puts the result back into the variant with
+`unwrap_to_variant_closure(..., false)` — `false` because there is no
+`__DeserializeWith` wrapper here, the function returned the value directly.
+"""
+
+[[annotation]]
+id    = "de-int-0005"
+file  = "src/de/enum_internally.rs"
+lines = "79-94"
+title = "Unit variant — a visitor that accepts anything empty"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`InternallyTaggedUnitVisitor` accepts a map or a sequence with no entries left,
+which is what an internally tagged unit variant looks like after the tag has
+been taken out. It returns `()`; the variant is constructed on the next line.
+
+The `default` is the odd piece: a *unit* variant reached through
+`effective_style` may actually be a newtype variant whose field was skipped, and
+that field still needs a value. `variant.fields.first()` is how the two cases
+share one arm.
+"""
+
+[[annotation]]
+id    = "de-int-0006"
+file  = "src/de/enum_internally.rs"
+lines = "95-106"
+title = "…and three shapes handed to other modules"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Newtype goes to the untagged module's helper, struct to `struct_` with
+`StructForm::InternallyTagged`, and tuple is unreachable — there are no field
+names to merge a tag into, and `internals::check` says so first.
+
+Reading which module each shape is handed to is the fastest way to see how much
+of the four representations is genuinely shared: a struct variant's fields are
+read by exactly the same code whatever the enclosing representation, and only
+the framing differs.
+"""

@@ -1,0 +1,73 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "de-unit-0001"
+file  = "src/de/unit.rs"
+lines = "1-6"
+title = "The smallest module in the crate"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+Five imports for fifty-two lines. `unit.rs` generates the `Deserialize` body for
+`struct Unit;` and nothing else, and it is the right file to read first if you
+want the shape of every other one — the visitor, the `expecting` message and the
+entry call are all here, with none of the field machinery on top.
+"""
+
+[[annotation]]
+id    = "de-unit-0002"
+file  = "src/de/unit.rs"
+lines = "7-18"
+title = "deserialize — five bindings before a template"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["lifetime-de"]
+body = """
+`generics_with_de_lifetime` and `de_lifetime` appear at the top of every
+generator in this directory, because every one of them emits a visitor type
+carrying `'de`.
+
+`expecting` is built here and can be replaced wholesale by
+`#[serde(expecting = "...")]`. For a unit struct it reads "unit struct Unit",
+which is what a format prints when it was handed something else.
+"""
+
+[[annotation]]
+id    = "de-unit-0003"
+file  = "src/de/unit.rs"
+lines = "19-32"
+title = "…the visitor type, and the two PhantomData fields every one has"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["marker-types", "lifetime-de"]
+body = """
+`__Visitor` is the type the format calls back into. It holds no data — it cannot,
+there is nothing to hold yet — so both fields are markers.
+
+`marker` constrains the type parameters and `lifetime` constrains `'de`, which
+appears nowhere else in the struct. Every visitor in this directory has exactly
+this pair, for exactly these two reasons.
+
+`Visitor::expecting` is the method that produces the human half of every
+mismatch error serde reports. It is written as `Formatter::write_str(f, s)`
+rather than `f.write_str(s)`, like every other call in generated code.
+"""
+
+[[annotation]]
+id    = "de-unit-0004"
+file  = "src/de/unit.rs"
+lines = "33-52"
+title = "…one visit method, and the call that starts it all"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`visit_unit` is the only method overridden. Everything else `Visitor` offers
+keeps its default, which is to report a type error — so a unit struct handed a
+map fails with a message naming both.
+
+The last five lines are the shape every generator in this directory ends with:
+construct the visitor and hand it to a `Deserializer::deserialize_*` method. The
+method name is the *hint* — `deserialize_unit_struct` tells a self-describing
+format what to expect and lets a non-self-describing one know what to read.
+"""

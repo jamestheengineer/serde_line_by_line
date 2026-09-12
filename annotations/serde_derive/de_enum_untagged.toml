@@ -1,0 +1,123 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "de-unt-0001"
+file  = "src/de/enum_untagged.rs"
+lines = "1-20"
+title = "Untagged — no tag at all, and two modules to read shapes with"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+The representation with the least information on the wire and the most work to
+read it. Nothing identifies the variant, so deserialization is a sequence of
+attempts.
+"""
+
+[[annotation]]
+id    = "de-unt-0002"
+file  = "src/de/enum_untagged.rs"
+lines = "21-43"
+title = "deserialize — one attempt per variant, and an honest TODO"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["iterators", "closures"]
+body = """
+Each non-skipped variant becomes an expression that tries to read the whole
+input as that variant.
+
+The `TODO` above the message is upstream's and is worth reading in place: it
+says the failure message is poor, describes the heuristic TOML uses instead, and
+declines to adopt it. That is the shape of the known problem — by the time the
+last variant fails, the reasons the earlier ones failed have been discarded, so
+the error can only say "none of these matched".
+"""
+
+[[annotation]]
+id    = "de-unt-0003"
+file  = "src/de/enum_untagged.rs"
+lines = "44-59"
+title = "…buffer once, then re-run the buffer against each variant"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+The input is read once into `Content` and then replayed by
+`ContentRefDeserializer` for every attempt — by *reference*, because each
+attempt may need the whole thing again.
+
+`#first_attempt` is where a partly-tagged enum's tagged half is spliced in, from
+`enum_::deserialize`. The `#(...)*` repetition after it is the untagged
+attempts, each an `if let Ok(...) { return ... }`.
+
+`let private2 = private;` exists because `#private` is already interpolated
+inside the repetition and quote cannot use the same variable as both a repeating
+and a non-repeating interpolation. A one-line workaround for a real constraint
+of the macro.
+"""
+
+[[annotation]]
+id    = "de-unt-0004"
+file  = "src/de/enum_untagged.rs"
+lines = "60-75"
+title = "deserialize_variant — shared with adjacent tagging"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+The comment says it: adjacently tagged enums call this too, because once the tag
+has been read the content is deserialized exactly as an untagged variant would
+be. Four representations, three reading paths.
+"""
+
+[[annotation]]
+id    = "de-unt-0005"
+file  = "src/de/enum_untagged.rs"
+lines = "76-94"
+title = "Unit variant — UntaggedUnitVisitor, and an explicit match"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`UntaggedUnitVisitor` accepts unit or `None` and rejects everything else, which
+is how an untagged unit variant matches `null` and nothing more.
+
+The `match` with an explicit `Err` arm rather than `?` is because this is a
+`quote_expr!` — an expression, in a position where the `?` operator would need
+an enclosing function to return from. The fragment distinction, showing up in
+generated code.
+"""
+
+[[annotation]]
+id    = "de-unt-0006"
+file  = "src/de/enum_untagged.rs"
+lines = "95-110"
+title = "…and the three shapes, in the same order as everywhere else"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Newtype, tuple, struct — each handed to the module that reads that shape, with
+`TupleForm::Untagged` or `StructForm::Untagged` carrying the variant ident for
+the `expecting` message.
+
+Unlike internal tagging, tuple variants *are* allowed here: with no tag to
+place, a tuple variant is just a sequence.
+"""
+
+[[annotation]]
+id    = "de-unt-0007"
+file  = "src/de/enum_untagged.rs"
+lines = "111-135"
+title = "deserialize_newtype_variant — used by three representations"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Both comments above it are pointing at the same fact: this is the shared newtype
+reader, reached from untagged, internally tagged and adjacently tagged code.
+
+`Result::map(deserialize(...), Variant)` uses the variant constructor *as a
+function*, which is why the emitted code has no closure. A tuple-like variant's
+name is a function value, and passing it directly is both shorter and exactly
+what `map` wants.
+
+The `deserialize_with` arm binds `__value` with an explicit type annotation
+first. Without it, nothing in the expression would tell inference what the
+user's function is supposed to return.
+"""

@@ -1,0 +1,287 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "de-id-0001"
+file  = "src/de/identifier.rs"
+lines = "1-11"
+title = "Identifiers — turning a name on the wire into a variant"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["proc_macro2::Literal", "quote::ToTokens"]
+body = """
+The module doc names the two things this file builds, and they are the same
+machine: a struct's field names and an enum's variant names are both "a string
+arriving from the format that has to become one of N known values".
+
+`proc_macro2::Literal` is imported for exactly one purpose — byte-string
+literals, so the generated matcher can compare `b"xCoord"` without a UTF-8
+conversion.
+"""
+
+[[annotation]]
+id    = "de-id-0002"
+file  = "src/de/identifier.rs"
+lines = "12-27"
+title = "deserialize_custom — the user's own identifier enum"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`#[serde(field_identifier)]` and `variant_identifier` let a user write the
+identifier enum themselves instead of having one generated. This function
+handles that case; `deserialize_generated` below handles the generated one.
+
+The `unreachable!` for `Identifier::No` is safe because `de.rs` only routes here
+when the attribute is present — the `match` is turning a three-state enum into a
+bool the rest of the function uses.
+"""
+
+[[annotation]]
+id    = "de-id-0003"
+file  = "src/de/identifier.rs"
+lines = "28-61"
+title = "…and the last variant, which may be a catch-all"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["closures", "pattern-matching"]
+body = """
+Two ways for a user's identifier enum to accept names it does not list, and both
+are recognized by looking at the *last* variant — `check_identifier` has already
+guaranteed they can only be there.
+
+`#[serde(other)]` on a unit variant means "anything else is this". A newtype
+variant means "anything else is this, carrying the name", and the name is
+deserialized through `IdentifierDeserializer` so the payload can be a `String`,
+a `&str`, or anything else that reads from an identifier.
+
+The newtype case builds its fallthrough *twice*, once for an owned value and
+once wrapped in `de::Borrowed`. That is what lets a `&'de str` payload borrow
+from the input rather than allocating, and it is the reason `fallthrough` and
+`fallthrough_borrowed` are separate parameters everywhere below.
+"""
+
+[[annotation]]
+id    = "de-id-0004"
+file  = "src/de/identifier.rs"
+lines = "62-87"
+title = "…and the constant, which is absent when there is a catch-all"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`FIELDS` or `VARIANTS`, built from every alias of every ordinary variant.
+
+`None` when a fallthrough exists, and the reason is worth stating: the constant
+exists only to be named in an `unknown_field` or `unknown_variant` error, and a
+type with a catch-all never raises one. Emitting it would be an unused constant
+in the user's build.
+"""
+
+[[annotation]]
+id    = "de-id-0005"
+file  = "src/de/identifier.rs"
+lines = "88-123"
+title = "…the visitor, and deserialize_identifier as the hint"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["marker-types", "lifetime-de"]
+body = """
+The usual visitor shape, with the method bodies coming from the shared
+`deserialize_identifier` below.
+
+`Deserializer::deserialize_identifier` is the hint, and it is the one hint in
+serde's data model that exists purely for this: it tells the format "I am about
+to read a name", which lets a format that stores field names as indices hand
+over a `u64` instead of a string.
+"""
+
+[[annotation]]
+id    = "de-id-0006"
+file  = "src/de/identifier.rs"
+lines = "124-153"
+title = "deserialize_generated — the __Field enum every struct read needs"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["lifetime-de"]
+body = """
+The generated counterpart, and the one that actually runs for ordinary code. It
+emits `enum __Field { __field0, __field1, ... }`, its visitor, and its
+`Deserialize` impl.
+
+The conditional `<'de>` on the enum is for flattened structs only. When a struct
+has a flattened field, unrecognized keys are not errors — they are content to be
+collected and passed on — so `__Field` gains an `__other(Content<'de>)` variant,
+and a type parameterized by a lifetime needs to declare it.
+
+`!is_variant && has_flatten` because variant identifiers never collect: a
+variant name is never a key in a flattened map. The call site in `enum_.rs`
+passes `false` with a comment saying so.
+"""
+
+[[annotation]]
+id    = "de-id-0007"
+file  = "src/de/identifier.rs"
+lines = "154-184"
+title = "…and its three items, emitted together"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+The enum, a unit-struct visitor, and a `Deserialize` impl that hands the visitor
+to `deserialize_identifier`.
+
+`struct __FieldVisitor;` with no generics at all — unlike the custom path's,
+which carries the user's. A generated field enum is never generic, because the
+names it recognizes are fixed at expansion time.
+"""
+
+[[annotation]]
+id    = "de-id-0008"
+file  = "src/de/identifier.rs"
+lines = "185-219"
+title = "deserialize_identifier — the two matchers, str and bytes"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+The shared body builder for both paths, and the two mappings here are the heart
+of it: one `&str` arm per alias, and one `&[u8]` arm per alias.
+
+The byte version exists so a format holding raw bytes does not have to validate
+UTF-8 to look up a field name. `Literal::byte_string` is what makes the emitted
+pattern `b"xCoord"` rather than a string — the only use of `proc_macro2::Literal`
+in the file.
+
+`aliases` contains the canonical name as well as the `#[serde(alias)]` ones, as
+the comments say twice. Missing that would silently drop the real name.
+
+`let private2 = private;` is the same quote limitation the untagged module hits:
+a variable cannot be both a repeating and a non-repeating interpolation in one
+template.
+"""
+
+[[annotation]]
+id    = "de-id-0009"
+file  = "src/de/identifier.rs"
+lines = "220-233"
+title = "…the expecting string, and the lossy conversion for error messages"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+"field identifier" or "variant identifier" unless overridden — these are the
+strings that appear in "expected field identifier" errors.
+
+`bytes_to_str` is emitted only when the error path is actually reachable: it
+converts the unmatched bytes with `from_utf8_lossy` so the message can name
+them. With a fallthrough or content collection there is no error to format, so
+the conversion would be wasted work in the user's binary.
+"""
+
+[[annotation]]
+id    = "de-id-0010"
+file  = "src/de/identifier.rs"
+lines = "234-257"
+title = "…and four ways to wrap an unknown key as Content"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["lifetime-de", "borrowing"]
+body = """
+Only for the flatten path. An unrecognized key is not an error there — it is
+data, destined for the flattened field — so it is wrapped in serde's `Content`
+and carried in `__Field::__other`.
+
+Four variants because the *ownership* differs. A borrowed `&'de str` becomes
+`Content::Str` and points into the input; a transient `&str` must be copied into
+`Content::String`. Getting that pair right is what makes `flatten` zero-copy
+where the format allows it and correct where it does not.
+"""
+
+[[annotation]]
+id    = "de-id-0011"
+file  = "src/de/identifier.rs"
+lines = "258-272"
+title = "…and the fallthrough arm: unknown_field or unknown_variant"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Three sources, in order: a caller-supplied fallthrough, or one of the two
+standard errors naming the constant built earlier.
+
+`fallthrough_arm_tokens` is declared before the `if` and assigned inside it
+purely so the borrow outlives the expression. A small piece of borrow-checker
+choreography that reads oddly until you notice the function returns references
+into it.
+"""
+
+[[annotation]]
+id    = "de-id-0012"
+file  = "src/de/identifier.rs"
+lines = "273-366"
+title = "visit_other — thirteen methods, for flattened structs only"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["macro-repetition"]
+body = """
+Ninety-three lines of near-identical methods, and the repetition is the point:
+when a struct has a flattened field, a key can be *any* scalar the format
+supports, not just a string. An integer key in a flattened map has to survive to
+the flattened field, so every scalar visit method wraps its value in `Content`.
+
+This is the one place in the crate where the absence of `macro_rules!` really
+shows. `serde_core` would have written these thirteen with one macro and sixteen
+invocations; `serde_derive` writes them out, because they are being *emitted* as
+tokens rather than compiled, and a `macro_rules!` here would have to exist in
+the generated code rather than in this file.
+"""
+
+[[annotation]]
+id    = "de-id-0013"
+file  = "src/de/identifier.rs"
+lines = "367-404"
+title = "…and visit_u64, for formats that number their fields"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+The non-flatten alternative to the block above, and a much smaller one. A format
+that identifies fields by index calls `visit_u64`, and the generated match maps
+`0 => __field0` and so on, in declaration order.
+
+That is why field order in a struct is part of its wire format for some formats
+and not others: a self-describing format sends names, a compact one sends the
+index this match resolves.
+
+The error names its own bound — "field index 0 <= i < 2" — which is built here
+from the field count.
+"""
+
+[[annotation]]
+id    = "de-id-0014"
+file  = "src/de/identifier.rs"
+lines = "405-440"
+title = "visit_borrowed_str and visit_borrowed_bytes — the zero-copy pair"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["lifetime-de", "borrowing"]
+body = """
+Emitted only when something can actually use a borrow: a newtype catch-all whose
+payload may borrow, or the flatten path collecting `Content`.
+
+The bodies are the same matches as `visit_str` and `visit_bytes` — hence the two
+`clone()` calls on the iterators — but the argument is `&'de str`, tied to the
+input's lifetime, so the fallthrough can keep a reference instead of copying.
+
+Omitting them the rest of the time is not an optimization: `Visitor`'s defaults
+forward `visit_borrowed_str` to `visit_str`, so the behaviour is identical and
+the generated code is smaller.
+"""
+
+[[annotation]]
+id    = "de-id-0015"
+file  = "src/de/identifier.rs"
+lines = "441-477"
+title = "…and the assembled visitor body"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`expecting`, then the optional scalar methods, then `visit_str` and
+`visit_bytes`, then the optional borrowed pair. Everything conditional was
+decided above, so this template has no branches — which is what makes it
+readable against the expansion beside it.
+"""

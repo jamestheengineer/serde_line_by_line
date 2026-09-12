@@ -1,0 +1,1143 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "de-0001"
+file  = "src/de.rs"
+lines = "1-24"
+title = "Imports, and nine modules the serialize side does not have"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["proc_macro2::TokenStream", "quote::quote", "quote::ToTokens", "syn::punctuated::Punctuated", "syn::spanned::Spanned"]
+body = """
+The import list is `ser.rs`'s plus three things, and each addition is a
+deserialization problem the serialize side never meets.
+
+`std::collections::BTreeSet` holds the set of borrowed lifetimes, which has to
+be ordered so the generated impl header is deterministic. `std::ptr` is used for
+exactly one identity comparison. `quote::ToTokens` is imported because this file
+*implements* it — four times, for wrapper types that render generics in
+positions syn's own splitter does not produce.
+
+Then nine modules. `ser.rs` is 1,369 lines and generates everything itself;
+deserialization is 4,728 lines across eleven files, because reading is harder
+than writing. This file keeps the dispatch and the shared helpers and hands each
+shape to its own module.
+"""
+
+[[annotation]]
+id    = "de-0002"
+file  = "src/de.rs"
+lines = "25-35"
+title = "expand_derive_deserialize — the same opening, with a different check"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["result", "proc-macro-boundary"]
+glossary = ["syn::DeriveInput", "syn::Result"]
+body = """
+Line for line the twin of `expand_derive_serialize`: rewrite `Self`, open an
+error collector, parse the container, drain the errors.
+
+`Derive::Deserialize` is the one argument that differs, and it changes what
+`from_ast` validates — `skip_serializing` and `skip_deserializing` are different
+attributes, and only the relevant half is enforced. The preconditions checked
+below are entirely different too, which is why `precondition` here delegates to
+two functions and the serialize side's does its one check inline.
+"""
+
+[[annotation]]
+id    = "de-0003"
+file  = "src/de.rs"
+lines = "36-42"
+title = "…and the extra value: the `'de` lifetime"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["lifetimes", "lifetime-de"]
+body = """
+Four values become five. `generics_with_de_lifetime` returns *four* fragments
+where the serialize side needed three, because the impl header has a lifetime
+parameter the type does not: `impl<'de> Deserialize<'de> for Point`.
+
+`delife` is that lifetime as a token — and it is not always `'de`. When no field
+borrows from the input, it is `'static`, and the impl is
+`impl Deserialize<'static> for T`, which is a real simplification rather than a
+special case. `BorrowedLifetimes` below is what decides.
+"""
+
+[[annotation]]
+id    = "de-0004"
+file  = "src/de.rs"
+lines = "43-58"
+title = "The remote branch — an associated function returning the remote type"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+As on the serialize side, a remote impl cannot be a trait impl, so this emits an
+inherent `deserialize` returning `#remote #ty_generics` rather than `Self`.
+
+The signature is otherwise identical to the trait method's, including the `'de`
+bound on `__D`, so `#[serde(with = "...")]` can call it in the place a trait
+method would have been called.
+"""
+
+[[annotation]]
+id    = "de-0005"
+file  = "src/de.rs"
+lines = "59-76"
+title = "The ordinary branch — and the optional second method"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["lifetime-de", "generic-params"]
+emits_from = "deserialize"
+emits_case = "struct_rename"
+emits = """
+    impl<'de> _serde::Deserialize<'de> for Point {
+        fn deserialize<__D>(
+            __deserializer: __D,
+        ) -> _serde::__private229::Result<Self, __D::Error>
+        where
+            __D: _serde::Deserializer<'de>,
+        {
+"""
+body = """
+The impl every derived `Deserialize` is. Note where `#delife` appears twice: on
+the trait, `Deserialize<'de>`, and on the bound, `__D: Deserializer<'de>`. Those
+have to be the same lifetime or the borrowed data has nothing to borrow from.
+
+`#fn_deserialize_in_place` is the one structural difference from the serialize
+side. It is an entire extra method, usually absent — it splices to nothing when
+the feature is off or the shape does not support it — and it exists so a caller
+can reuse an allocation instead of building a fresh value.
+"""
+
+[[annotation]]
+id    = "de-0006"
+file  = "src/de.rs"
+lines = "77-83"
+title = "…wrapped in the same anonymous const"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Identical to the serialize side, and for the same three reasons: it scopes the
+`_serde` alias, it hides the helper types this expansion generates — `__Field`,
+`__FieldVisitor`, `__Visitor`, and there are many more here than on the other
+side — and it is legal wherever an item is.
+"""
+
+[[annotation]]
+id    = "de-0007"
+file  = "src/de.rs"
+lines = "84-88"
+title = "precondition — two checks, both about things that cannot be read"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+Two lines, because deserialization has two ways to be impossible that
+serialization does not. Both are about the *input*: you can always describe a
+value you already have, and you cannot always construct one.
+"""
+
+[[annotation]]
+id    = "de-0008"
+file  = "src/de.rs"
+lines = "89-101"
+title = "precondition_sized — a trailing slice cannot be built"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["sized-bound"]
+body = """
+`struct S { header: u32, rest: [u8] }` is a legal unsized type and you can
+borrow one, but you cannot return one by value — and `Deserialize::deserialize`
+returns `Self`.
+
+The check looks only at the *last* field, because that is the only position a
+dynamically sized type may occupy. `ungroup` strips invisible token groups that
+macro expansion can leave around a type, which is the kind of detail that makes
+a check like this work when the type came from another macro.
+"""
+
+[[annotation]]
+id    = "de-0009"
+file  = "src/de.rs"
+lines = "102-115"
+title = "precondition_no_de_lifetime — the name collision with no hygiene"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["lifetimes", "lifetime-de"]
+body = """
+If the user's type already has a lifetime parameter called `'de`, the generated
+`impl<'de> Deserialize<'de> for S<'de>` means something the user did not intend,
+and there is no hygiene for lifetime parameters to save it.
+
+So it is rejected, with the error spanned on their `'de`. The check runs only
+when something actually borrows — a type whose impl uses `'static` has no `'de`
+to collide with, and rejecting it would be a rule with no reason behind it.
+"""
+
+[[annotation]]
+id    = "de-0010"
+file  = "src/de.rs"
+lines = "116-143"
+title = "Parameters — the serialize side's, minus one field and plus two"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::Ident", "syn::Path", "syn::Generics"]
+body = """
+`self_var` is gone: there is no value to read from, only one to build.
+
+`local` is new and is the user's own type name, kept separate from `this_type`
+because the generated `__Visitor` is named after the local type even for a
+remote derive. `borrowed` is the other addition, and it is the one that decides
+whether the impl header carries a `'de` at all.
+
+`has_getter` means the remote type has private fields reached through
+`#[serde(getter)]`, which forces the deserialized value through an `Into`
+conversion rather than being constructed directly.
+"""
+
+[[annotation]]
+id    = "de-0011"
+file  = "src/de.rs"
+lines = "144-164"
+title = "Parameters::new — and an order that is not arbitrary"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+`borrowed_lifetimes` runs before `build_generics`, and has to: the inferred
+`Deserialize<'de>` bound needs the lifetime, and the lifetime is `'static` or
+`'de` depending on what the fields borrow. Swapping the two lines would produce
+bounds mentioning a lifetime that the impl header does not declare.
+"""
+
+[[annotation]]
+id    = "de-0012"
+file  = "src/de.rs"
+lines = "165-170"
+title = "type_name — the same last-segment rule"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+The name a `Deserializer` is told, and the one that appears in `expecting`
+messages. Last segment, for the same reason as on the serialize side: a remote
+type should present under its own name.
+"""
+
+[[annotation]]
+id    = "de-0013"
+file  = "src/de.rs"
+lines = "171-188"
+title = "generics_with_de_lifetime — four fragments, two of them home-made"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["lifetimes", "generic-params"]
+glossary = ["syn::TypeGenerics", "syn::WhereClause", "syn::Generics"]
+body = """
+syn's `split_for_impl` gives three fragments of the generics as they are. This
+impl needs a fourth thing: the same generics *with `'de` prepended* in two
+different positions, and syn has no way to ask for that.
+
+So `DeImplGenerics` and `DeTypeGenerics` are wrapper types with hand-written
+`ToTokens` impls, defined at the bottom of this file. They are returned here
+instead of `impl_generics`, which is dropped on the floor — the `_` in the
+destructuring — because the impl header must declare `'de` and the type must
+not.
+"""
+
+[[annotation]]
+id    = "de-0014"
+file  = "src/de.rs"
+lines = "189-199"
+title = "build_generics — the same first three passes"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["where-clauses", "generic-params"]
+body = """
+Defaults off, then per-field and per-variant `#[serde(bound)]` predicates. The
+only difference from the serialize side is which attribute is read —
+`de_bound` rather than `ser_bound` — which is why both functions take the
+accessor as a function pointer rather than branching inside `bound`.
+"""
+
+[[annotation]]
+id    = "de-0015"
+file  = "src/de.rs"
+lines = "200-229"
+title = "…and three inferred bounds where serialization needs one"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["where-clauses", "generic-params"]
+glossary = ["syn::parse_quote"]
+body = """
+The container's own `bound` still replaces inference entirely. What is different
+is the `None` arm, which adds up to three kinds of bound instead of one.
+
+`#[serde(default)]` on the container needs `Self: Default`, added by
+`with_self_bound`. Then `T: Deserialize<'de>` for each parameter in a field that
+will actually be read — note `#delife` interpolated into the `parse_quote!`, so
+the bound says `Deserialize<'static>` for a type that borrows nothing. Then
+`T: Default` for each parameter in a field carrying its own `#[serde(default)]`,
+because that field is constructed rather than read.
+
+Three separate walks over the fields, each with its own predicate. They are not
+merged because a parameter can qualify for two of them and the bounds are
+different.
+"""
+
+[[annotation]]
+id    = "de-0016"
+file  = "src/de.rs"
+lines = "230-246"
+title = "needs_deserialize_bound — the serialize predicate, renamed"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["where-clauses"]
+body = """
+Structurally identical to `needs_serialize_bound`, reading the deserialize half
+of the same four attributes. The comment above it is upstream's and says the
+same thing this annotation would.
+"""
+
+[[annotation]]
+id    = "de-0017"
+file  = "src/de.rs"
+lines = "247-256"
+title = "requires_default — and why `default = \"path\"` is excluded"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+Only bare `#[serde(default)]` requires a `T: Default` bound. `default = "path"`
+names a function that produces the value, and that function's return type is
+already the field's type — requiring `Default` as well would reject types that
+have a perfectly good constructor and no `Default` impl.
+
+The `if let ... true else false` spelling rather than `matches!` is the kind of
+thing an MSRV floor leaves behind in a codebase.
+"""
+
+[[annotation]]
+id    = "de-0018"
+file  = "src/de.rs"
+lines = "257-282"
+title = "BorrowedLifetimes — the enum, and the two lifetimes it yields"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["lifetimes", "lifetime-de"]
+body = """
+Two states, and the distinction runs through the whole file. `Borrowed` carries
+the set of the user's lifetimes that fields borrow from the input; `Static`
+means nothing does. A `BTreeSet` rather than a `Vec`, because these become
+bounds in a generated impl header and the order has to be stable — two
+compilations of the same input must produce the same tokens.
+
+`de_lifetime` is the lifetime the `Deserialize` impl is parameterized by, and
+when nothing borrows it is literally `'static`. The generated impl is then
+`impl Deserialize<'static> for T`, which is exactly right: such a type can be
+built from any deserializer, with no relationship to the input's lifetime.
+
+`de_lifetime_param` is the same lifetime as a *declaration* — `'de: 'a + 'b`,
+with the borrowed set as its bounds — for the impl header. The two are separate
+functions because bounds belong only on the declaration; repeating them at every
+use would not compile. `None` for the static case is the signal used everywhere
+downstream: no parameter to declare, so nothing is prepended to the generics.
+"""
+
+[[annotation]]
+id    = "de-0019"
+file  = "src/de.rs"
+lines = "283-305"
+title = "borrowed_lifetimes — where `impl<'de: 'a>` comes from"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["lifetimes", "lifetime-de", "borrowing"]
+body = """
+The comment above this function is the clearest statement of zero-copy
+deserialization's type-level shape in the crate, and it is worth reading in
+place rather than paraphrased.
+
+The mechanism: collect every lifetime any non-skipped field borrows from the
+input, and make `'de` outlive all of them. A field holding `&'a str` taken from
+the input requires the input to live at least as long as `'a`, and
+`impl<'de: 'a, 'a> Deserialize<'de> for S<'a>` is how that is said.
+
+The `'static` special case is not an optimization. `'de: 'static` would be a
+strictly stronger requirement than `'static` and would reject callers that ought
+to work, so when anything borrows `'static` the impl drops `'de` entirely.
+"""
+
+[[annotation]]
+id    = "de-0020"
+file  = "src/de.rs"
+lines = "306-331"
+title = "deserialize_body — the serialize fork, plus identifiers"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+The same three container attributes take precedence — `transparent`, `from`,
+`try_from` — and then the shape decides, exactly as on the serialize side.
+
+What is new is the fourth test. `#[serde(field_identifier)]` and
+`variant_identifier` mark a type used to *name* a field or variant while
+reading, and those are rejected outright on the serialize side. Here they are a
+whole separate code path, `identifier::deserialize_custom`, because naming is
+half of what deserialization does.
+
+`Style::Tuple` and `Style::Newtype` share an arm here and do not on the
+serialize side: reading a sequence of one and a sequence of many is the same
+loop, while writing them reaches two different `Serializer` methods.
+"""
+
+[[annotation]]
+id    = "de-0021"
+file  = "src/de.rs"
+lines = "332-349"
+title = "deserialize_in_place_body — five ways to opt out"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "feature-unification"]
+body = """
+`deserialize_in_place` fills an existing value instead of returning a new one,
+which lets a caller reuse allocations. It is behind a cargo feature and unstable,
+and this function's job is mostly to decide not to generate it.
+
+The five conditions are all cases where there is no existing value to fill
+usefully: a transparent or converted type is built from something else entirely,
+an identifier is a name rather than a value, and a type whose every field goes
+through `deserialize_with` has nothing this crate can write into.
+
+`assert!(!params.has_getter)` is a note to a future maintainer rather than a
+runtime check: remote derives never reach here, and if that ever changes the
+assert says which assumption broke.
+"""
+
+[[annotation]]
+id    = "de-0022"
+file  = "src/de.rs"
+lines = "350-364"
+title = "…and the dispatch, which supports two shapes out of five"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Structs and tuples only. Enums return `None` because filling an existing value
+in place means knowing it is already the right variant, and unit structs have
+nothing to fill.
+
+`struct_::deserialize_in_place(...)?` uses `?` on an `Option` inside a function
+returning `Option<Stmts>` — the struct module can also decline, for a shape it
+cannot handle, and that decision propagates without a branch here.
+"""
+
+[[annotation]]
+id    = "de-0023"
+file  = "src/de.rs"
+lines = "365-376"
+title = "…and the method, which is an entire extra item"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["lifetime-de"]
+body = """
+`&mut Self` as a second parameter, `()` as the success value. Everything the
+caller wanted is written through the place.
+
+This is the only method in the generated impl whose presence is conditional, and
+it is spliced as `#fn_deserialize_in_place` into the impl block far above —
+which works because `quote!` interpolating `None` produces nothing at all.
+"""
+
+[[annotation]]
+id    = "de-0024"
+file  = "src/de.rs"
+lines = "377-381"
+title = "…and the twin that returns None"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+The feature-off half. Two functions with one name and opposite `cfg`s, rather
+than one function with a `cfg` inside it: the parameters are unused in this
+version, which is why they are underscore-prefixed here and not above.
+"""
+
+[[annotation]]
+id    = "de-0025"
+file  = "src/de.rs"
+lines = "382-399"
+title = "deserialize_transparent — read the one field, build the whole struct"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+The mirror of the serialize side, and the asymmetry is instructive. Serializing
+transparently means reading one field and ignoring the rest. Deserializing means
+reading one field and then having to produce values for *all* the others.
+
+The `path` match is the familiar shape: the user's function, or
+`Deserialize::deserialize` spanned on the field.
+"""
+
+[[annotation]]
+id    = "de-0026"
+file  = "src/de.rs"
+lines = "400-417"
+title = "…and the other fields, which have to come from somewhere"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+Each non-transparent field gets a value with no input to read it from. Three
+sources, in order: its own `#[serde(default)]`, a named default function, or —
+failing both — `PhantomData`.
+
+That last arm is not a fallback so much as a statement about what
+`#[serde(transparent)]` permits: `internals::check` only allows the attribute
+when every other field is either defaultable or a `PhantomData`, so by the time
+codegen runs the `Default::None` arm can only be a marker.
+
+`ptr::eq` to find the transparent field again. Comparing by address is exact
+where comparing by name would be ambiguous for a tuple struct and comparing by
+index would need the index threaded down.
+"""
+
+[[annotation]]
+id    = "de-0027"
+file  = "src/de.rs"
+lines = "418-424"
+title = "…and the block: map the Result, build the value"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`Result::map` called as a free function rather than as a method, like every
+other call in generated code, so an inherent method of the same name on some
+concrete type cannot intercept it.
+"""
+
+[[annotation]]
+id    = "de-0028"
+file  = "src/de.rs"
+lines = "425-433"
+title = "deserialize_from — read the other type, convert infallibly"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`#[serde(from = "T")]` reads a `T` and calls `From::from`. Six lines, and the
+whole implementation is that the conversion cannot fail.
+
+The turbofish-free `<#type_from as _serde::Deserialize>::deserialize` spelling
+is qualified-path syntax rather than a method call for the same interception
+reason as everywhere else.
+"""
+
+[[annotation]]
+id    = "de-0029"
+file  = "src/de.rs"
+lines = "434-442"
+title = "deserialize_try_from — and where a conversion error becomes a serde error"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["result", "custom-errors"]
+body = """
+`and_then` instead of `map`, and `map_err(de::Error::custom)` is the joint: the
+user's `TryFrom` error is turned into the *format's* error type by
+`Error::custom`, which every serde error type must provide.
+
+That one call is why `#[serde(try_from)]` works with every format without the
+user's error type knowing anything about serde.
+"""
+
+[[annotation]]
+id    = "de-0030"
+file  = "src/de.rs"
+lines = "443-450"
+title = "TupleForm — three contexts a sequence can be read in"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+A tuple struct, an externally tagged tuple variant, or an untagged one. The two
+variant forms carry the variant's ident because the generated `expecting`
+message names it — the reader of an error should be told which variant failed,
+not just that a tuple did.
+"""
+
+[[annotation]]
+id    = "de-0031"
+file  = "src/de.rs"
+lines = "451-471"
+title = "deserialize_seq — the expecting message, built at expansion time"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "deserialize"
+emits_case = "struct_rename"
+emits = """
+                                    &"struct Point with 2 elements",
+"""
+body = """
+Every sequence read in this crate goes through this function, and the first
+thing it builds is the error message for when the sequence is too short.
+
+The count is of *deserialized* fields, not all of them: a skipped field is not
+read from the input, so it must not be counted in "with 2 elements" or the
+message would be a lie. The singular case is spelled out separately because
+"with 1 elements" is the kind of detail readers notice and authors do not.
+
+`cattrs.expecting()` lets `#[serde(expecting = "...")]` replace the whole thing,
+which is the only way to get a domain-specific message out of a derived impl.
+"""
+
+[[annotation]]
+id    = "de-0032"
+file  = "src/de.rs"
+lines = "472-509"
+title = "…one `let __fieldN` per field, and what a short sequence does"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["closures", "iterators"]
+emits_from = "deserialize"
+emits_case = "struct_rename"
+emits = """
+                    let __field0 = match _serde::de::SeqAccess::next_element::<
+                        i32,
+                    >(&mut __seq)? {
+                        _serde::__private229::Some(__value) => __value,
+                        _serde::__private229::None => {
+"""
+body = """
+The loop that produces the body. Each field becomes exactly one `let`, named
+`__field0` upward by position — including skipped fields, which get their
+default value and never touch the sequence.
+
+`index_in_seq` is deliberately *not* the loop index. It counts only fields that
+are read, so the `invalid_length(index, ...)` error reports the position in the
+input rather than the position in the struct. Those differ the moment a skipped
+field appears before a read one, and getting it wrong produces an error message
+that points at the wrong element.
+
+The `deserialize_with` arm wraps the field type in a generated
+`__DeserializeWith` and unwraps `__wrap.value` afterwards. That wrapper exists
+so the user's function cannot see serde's internal state — the comment on
+`wrap_deserialize_with` below says so directly.
+"""
+
+[[annotation]]
+id    = "de-0033"
+file  = "src/de.rs"
+lines = "510-528"
+title = "…the value, built from the bindings"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "deserialize"
+emits_case = "struct_rename"
+emits = """
+                    _serde::__private229::Ok(Point {
+                        x_coord: __field0,
+                        label: __field1,
+                    })
+"""
+body = """
+Named fields or positional, decided by `is_struct`. Both spellings interpolate
+the same `#vars`, which is why `vars` was cloned rather than consumed above.
+
+The `has_getter` branch is the remote-with-private-fields case: the generated
+code builds the *local* placeholder struct and then converts it with `Into`,
+because the remote type's fields cannot be written directly.
+"""
+
+[[annotation]]
+id    = "de-0034"
+file  = "src/de.rs"
+lines = "529-546"
+title = "…and the container default, bound once before the fields"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`#[serde(default)]` on the container means every missing field falls back to the
+corresponding field of one default value, so that value is constructed once and
+bound as `__default` before any field is read.
+
+The `Default::None` arm emits nothing *deliberately*, and the comment says why:
+binding an unused `__default` would warn in the user's build.
+
+`quote_spanned!(path.span()=> ...)` on the named-function arm is the same
+diagnostic care as elsewhere — a `default = "f"` whose `f` returns the wrong
+type reports under the attribute.
+"""
+
+[[annotation]]
+id    = "de-0035"
+file  = "src/de.rs"
+lines = "547-553"
+title = "…and the block, in three lines"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Default, fields, `Ok(value)`. Everything conditional was resolved above, so the
+template itself has no branches.
+"""
+
+[[annotation]]
+id    = "de-0036"
+file  = "src/de.rs"
+lines = "554-571"
+title = "deserialize_seq_in_place — the same message, for the in-place path"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+Feature-gated twin of `deserialize_seq`, and the first eighteen lines are
+identical. The duplication is real and is the cost of the in-place path being
+optional: sharing the `expecting` construction would mean a function with a flag,
+and the two bodies diverge completely a few lines down.
+"""
+
+[[annotation]]
+id    = "de-0037"
+file  = "src/de.rs"
+lines = "572-592"
+title = "…writing through `self.place` instead of binding"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+The difference that makes this a separate function. Where `deserialize_seq`
+produced `let __field0 = ...`, this produces `self.place.x = ...`, and a skipped
+field is an assignment rather than a binding.
+
+`next_element_seed` with `InPlaceSeed` is the in-place mechanism proper: the
+seed carries `&mut` the destination, so the format writes into the existing
+value rather than constructing one and moving it.
+"""
+
+[[annotation]]
+id    = "de-0038"
+file  = "src/de.rs"
+lines = "593-615"
+title = "…and the deserialize_with arm, which cannot be in-place"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+A field with a custom function gets the value back by return, so there is
+nothing to seed: the code reads the wrapper, assigns, and handles the error arm
+explicitly because it is inside a block rather than an expression where `?`
+would do.
+
+That explicit `Err(__err) => return Err(__err)` is the shape `?` desugars to,
+written out because the surrounding `match` is a statement.
+"""
+
+[[annotation]]
+id    = "de-0039"
+file  = "src/de.rs"
+lines = "616-635"
+title = "…and the default, typed concretely rather than as Self::Value"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+One real difference from `deserialize_seq`'s version: the annotation is
+`#this_type #ty_generics` rather than `Self::Value`. There is no visitor in
+scope here to have a `Value` associated type, so the type has to be named.
+"""
+
+[[annotation]]
+id    = "de-0040"
+file  = "src/de.rs"
+lines = "636-642"
+title = "…and `Ok(())`"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+The in-place method returns nothing. Everything it produced went through
+`self.place`.
+"""
+
+[[annotation]]
+id    = "de-0041"
+file  = "src/de.rs"
+lines = "643-652"
+title = "StructForm — four contexts, one more than the tuple side"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+Struct, externally tagged, internally tagged, untagged. The tuple side has three
+because an internally tagged tuple variant cannot exist — there are no field
+names to put a tag among — and the missing variant here is the type system
+recording that.
+"""
+
+[[annotation]]
+id    = "de-0042"
+file  = "src/de.rs"
+lines = "653-661"
+title = "FieldWithAliases, and field_i — the name every generated binding uses"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+`field_i(3)` is `__field3`, and it is `pub(crate)` because `ser.rs` imports it:
+both halves have to agree on what a positional field is called, since a
+`serialize_with` wrapper generated by one is destructured by the other.
+
+`FieldWithAliases` pairs a generated `__FieldN` ident with the set of input
+names that map to it — `#[serde(alias)]` is what makes that a set rather than a
+single name.
+"""
+
+[[annotation]]
+id    = "de-0043"
+file  = "src/de.rs"
+lines = "662-681"
+title = "wrap_deserialize_with — and the sentence above it that explains everything"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["lifetime-de", "generic-params"]
+body = """
+The doc comment is the whole rationale: the wrapper exists "to prevent it from
+accessing the internal `Deserialize` state". A user's `deserialize_with`
+function receives a `Deserializer` and nothing else — not the partially built
+struct, not the field map, not the visitor.
+
+The trick is that the function is called from inside a generated type's *own*
+`Deserialize` impl, so the only thing in scope at the call site is the
+deserializer that was handed in.
+
+`quote_spanned!(deserialize_with.span()=> ...)` again puts a signature mismatch
+under the attribute the user wrote.
+"""
+
+[[annotation]]
+id    = "de-0044"
+file  = "src/de.rs"
+lines = "682-709"
+title = "…and the wrapper type, with two PhantomData fields"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["marker-types", "lifetime-de"]
+body = """
+Two markers, not one, and they are doing different jobs. `phantom` constrains
+the type parameters, exactly as the serialize side's wrappers do. `lifetime:
+PhantomData<&'de ()>` constrains `'de`, which appears nowhere else in the struct
+— without it, the impl would be generic over a lifetime the type does not use,
+which does not compile.
+
+`__DeserializeWith` is returned together with the type to name it by, because
+the caller has to both emit the definition and mention the type. Returning a
+pair rather than one stream is what lets the caller put the definition inside a
+block and the mention in a turbofish.
+"""
+
+[[annotation]]
+id    = "de-0045"
+file  = "src/de.rs"
+lines = "710-717"
+title = "wrap_deserialize_field_with — the field-shaped call"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+One line of body. The general function takes the value type as tokens because
+the variant version passes a tuple of types; a field just passes its own.
+"""
+
+[[annotation]]
+id    = "de-0046"
+file  = "src/de.rs"
+lines = "718-740"
+title = "unwrap_to_variant_closure — turning a payload back into a variant"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["closures"]
+body = """
+Deserializing an enum payload gives you the *contents* of a variant. This
+generates the closure that puts them back in the variant, and it is used by
+every tagged representation.
+
+`with_wrapper` distinguishes the two callers: one has a `__DeserializeWith`
+whose `.value` holds the payload, the other has a bare tuple. The `arg` in the
+second case carries an explicit type annotation, `__wrap: (T, U)`, because
+nothing at the call site would let inference find it.
+"""
+
+[[annotation]]
+id    = "de-0047"
+file  = "src/de.rs"
+lines = "741-765"
+title = "…and five shapes, one of which is not the general case"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "closures"]
+body = """
+Four styles, five arms — struct variants are split by field count.
+
+The single-field struct variant is special because the payload is the field's
+value directly rather than a one-element tuple, so it is `{ member: __wrap }`
+and not `{ member: __wrap.0 }`. That asymmetry comes from how the payload was
+read, not from a choice made here, and a reader who wonders why the two struct
+arms differ will find the answer in the newtype-variant reading path.
+"""
+
+[[annotation]]
+id    = "de-0048"
+file  = "src/de.rs"
+lines = "766-807"
+title = "expr_is_missing — four answers to “the field was not there”"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "deserialize"
+emits_case = "struct_rename"
+emits = """
+                            _serde::__private229::Default::default()
+"""
+body = """
+Called wherever a field was absent from the input. Four sources are tried in a
+fixed order, and the order is the attribute precedence.
+
+The field's own bare `#[serde(default)]` becomes `Default::default()` spanned on
+the field, so a type without a `Default` impl reports at the field rather than at
+the derive. A named `default = "f"` becomes `f()`, spanned on the path.
+
+Then the container's default: `__default.#member`, the field taken out of the
+one default value bound earlier rather than defaulted independently. That is the
+difference between `#[serde(default)]` on a container and on every field — the
+container form gives you the fields of a single coherent default value.
+
+With no default anywhere it is an error, and which error depends on whether the
+field has a `deserialize_with`. The plain path calls
+`private::de::missing_field`, which is not merely an error constructor: it tries
+to deserialize the field from a unit first, so `Option<T>` and anything else
+that accepts unit still succeeds. That is why a missing `Option` field works
+without `#[serde(default)]`. The `deserialize_with` path cannot do that — the
+user's function may not accept a unit — so it returns `Error::missing_field`
+outright. A subtle difference in behaviour, decided here, that most users meet
+as "why does my `Option` field need a default now".
+
+The emitted `missing_field("xCoord")` carries the *renamed* name, because that
+is what the reader of the error was supposed to have written.
+"""
+
+[[annotation]]
+id    = "de-0049"
+file  = "src/de.rs"
+lines = "808-829"
+title = "expr_is_missing_seq — the same ladder, for positional reads"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+The sequence counterpart, with one structural difference: it takes an optional
+`assign_to` prefix, so the same expression can be used as a value or as the
+right-hand side of an assignment into `self.place`. That is how the in-place
+path reuses it.
+"""
+
+[[annotation]]
+id    = "de-0050"
+file  = "src/de.rs"
+lines = "830-840"
+title = "…ending in invalid_length rather than missing_field"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["custom-errors"]
+emits_from = "deserialize"
+emits_case = "struct_rename"
+emits = """
+                                _serde::de::Error::invalid_length(
+                                    0usize,
+                                    &"struct Point with 2 elements",
+                                ),
+"""
+body = """
+A sequence that ran out does not have a missing *field*, it has the wrong
+length, and the index reported is `index_in_seq` — the position among fields
+that are actually read.
+
+The message is the `expecting` string built at the top of `deserialize_seq`,
+which is why that construction and this error had to agree about not counting
+skipped fields.
+"""
+
+[[annotation]]
+id    = "de-0051"
+file  = "src/de.rs"
+lines = "841-847"
+title = "effective_style — the same substitution, for skip_deserializing"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+Character for character the serialize side's function with one attribute
+changed. A newtype variant whose only field is skipped has no payload to read,
+so it is treated as a unit variant.
+"""
+
+[[annotation]]
+id    = "de-0052"
+file  = "src/de.rs"
+lines = "848-855"
+title = "has_flatten — asked once per shape, answered here"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+`flatten() && !skip_deserializing()`, the same conjunction the serialize side
+inlines. It is a named function here because four modules ask it, and each of
+them changes shape completely depending on the answer.
+"""
+
+[[annotation]]
+id    = "de-0053"
+file  = "src/de.rs"
+lines = "856-859"
+title = "DeImplGenerics — a newtype over Parameters, and its in-place twin"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+Two tuple structs holding a borrowed `Parameters`. They exist only to hang
+`ToTokens` impls on, which is how a type with no data of its own becomes a
+rendering rule.
+"""
+
+[[annotation]]
+id    = "de-0054"
+file  = "src/de.rs"
+lines = "860-873"
+title = "…and the impl that prepends `'de` to the impl header"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["lifetimes", "lifetime-de"]
+glossary = ["quote::ToTokens", "syn::GenericParam"]
+body = """
+Fourteen lines, and they are the reason this wrapper exists. syn's
+`split_for_impl` renders the generics it was given; there is no way to ask it
+for "these generics, plus a lifetime in front". So the params are cloned, `'de`
+is chained onto the front, and *then* the result is split.
+
+Prepended rather than appended, because `impl<'de, T>` is the conventional
+order and generated code that reads unlike hand-written code is harder to debug.
+
+When nothing borrows, `de_lifetime_param()` is `None` and this renders the
+generics unchanged — which is how `impl Deserialize<'static> for T` comes out
+with no lifetime parameter at all.
+"""
+
+[[annotation]]
+id    = "de-0055"
+file  = "src/de.rs"
+lines = "874-908"
+title = "InPlaceImplGenerics — two lifetimes, and a bound on every parameter"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["cfg", "lifetimes"]
+glossary = ["syn::GenericParam", "syn::TypeParamBound"]
+body = """
+The in-place method's header needs `'place` as well as `'de`, and every existing
+parameter has to outlive `'place` because the place is a `&'place mut Self`.
+
+So this walks every parameter adding the bound — lifetimes get
+`'a: 'place`, type parameters get `T: 'place`, const parameters get nothing —
+and then prepends `'place` and `'de` in that order, so the final header reads
+`impl<'de, 'place, ...>`.
+
+This is the most intricate generics manipulation in the crate, and it is behind
+a feature flag that is off by default. That is a fair summary of why
+`deserialize_in_place` has never stabilized.
+"""
+
+[[annotation]]
+id    = "de-0056"
+file  = "src/de.rs"
+lines = "909-915"
+title = "…and the conversion between them"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+`DeImplGenerics::in_place` takes the wrapper by value and hands back the
+in-place one over the same `Parameters`. Consuming rather than borrowing so a
+caller cannot accidentally render both headers from one binding.
+"""
+
+[[annotation]]
+id    = "de-0057"
+file  = "src/de.rs"
+lines = "916-919"
+title = "DeTypeGenerics — the same pair, for type position"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+The type-position counterparts. Separate types rather than a flag on the impl
+ones, because rendering `<'de, T>` where `<'de: 'a, T: Deserialize<'de>>` is
+wanted is a compile error in the generated code and a confusing one.
+"""
+
+[[annotation]]
+id    = "de-0058"
+file  = "src/de.rs"
+lines = "920-941"
+title = "de_type_generics_to_tokens — `'de` again, this time without bounds"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["lifetimes"]
+glossary = ["syn::LifetimeParam", "syn::punctuated::Punctuated"]
+body = """
+The type-position version of the prepend, and the one difference from the impl
+version is the whole point: `bounds: Punctuated::new()`. A lifetime is declared
+with its bounds and *used* without them, and writing `Foo<'de: 'a>` in type
+position does not parse.
+
+Shared by both type-generics wrappers as a free function rather than duplicated,
+because unlike the impl side they differ only in what was prepended before this
+runs.
+"""
+
+[[annotation]]
+id    = "de-0059"
+file  = "src/de.rs"
+lines = "942-947"
+title = "…and the trivial impl over it"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["quote::ToTokens"]
+body = """
+Clone the generics, hand them to the shared function. The clone is unavoidable:
+`ToTokens::to_tokens` takes `&self` and the function rewrites what it is given.
+"""
+
+[[annotation]]
+id    = "de-0060"
+file  = "src/de.rs"
+lines = "948-960"
+title = "InPlaceTypeGenerics — `'place` first, then the shared path"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["cfg", "lifetimes"]
+body = """
+Prepend `'place`, then let the shared function prepend `'de` in front of it.
+Two prepends produce `<'de, 'place, ...>`, matching the order the impl header
+declares them in — and the two orders have to agree or the generated type does
+not name the type the impl defined.
+"""
+
+[[annotation]]
+id    = "de-0061"
+file  = "src/de.rs"
+lines = "961-967"
+title = "…and its conversion"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+The type-position twin of `DeImplGenerics::in_place`, for the same reason.
+"""
+
+[[annotation]]
+id    = "de-0062"
+file  = "src/de.rs"
+lines = "968-976"
+title = "place_lifetime — `'place`, constructed rather than parsed"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["cfg", "lifetimes"]
+glossary = ["syn::LifetimeParam"]
+body = """
+Built as a `syn::LifetimeParam` value rather than with `parse_quote!`, because
+it is assembled into a `Generics` rather than spliced into a template — and the
+callers need to push bounds onto it, which a parsed token stream would not
+allow.
+"""

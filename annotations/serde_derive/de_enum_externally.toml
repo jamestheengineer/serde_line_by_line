@@ -1,0 +1,195 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "de-ext-0001"
+file  = "src/de/enum_externally.rs"
+lines = "1-21"
+title = "Externally tagged — the default, and the only one that does not buffer"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+The representation you get with no attributes, and the cheap one to read: the
+format's own `EnumAccess` hands over the variant name and then the payload, in
+order, with no buffering anywhere.
+
+The module doc's `ignore` block is an empty attribute list on purpose — the
+point being that this is what a plain `enum` compiles to.
+"""
+
+[[annotation]]
+id    = "de-ext-0002"
+file  = "src/de/enum_externally.rs"
+lines = "22-38"
+title = "deserialize — the usual bindings, plus the variant identifier"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["lifetime-de"]
+body = """
+`prepare_enum_variant_enum` is shared with the other tagged representations and
+produces two things: the `__Field` enum with its visitor, and the `VARIANTS`
+constant used in error messages.
+
+`expecting` is "enum Name", the shortest of the four representations' messages,
+because an externally tagged enum can fail in only one way at this level: the
+input was not an enum-shaped thing at all.
+"""
+
+[[annotation]]
+id    = "de-ext-0003"
+file  = "src/de/enum_externally.rs"
+lines = "39-55"
+title = "…one arm per variant, matching on a pair"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+The arm pattern is `Ok((__Field::__fieldN, __variant))`, not a bare variant:
+`EnumAccess::variant` returns the identifier *and* a `VariantAccess` for reading
+the payload, and both halves are bound here.
+
+Skipped variants are filtered out rather than given a failing arm. There is no
+exhaustiveness to satisfy — the `Err` arm below catches everything that did not
+match.
+"""
+
+[[annotation]]
+id    = "de-ext-0004"
+file  = "src/de/enum_externally.rs"
+lines = "56-78"
+title = "…and the empty-enum case, which needs a match on the never type"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+`enum Impossible {}` is a real thing people write, and so is an enum with every
+variant skipped. Either way there is no arm to generate, and a `match` with no
+arms over a value whose type has no variants is how Rust spells "this cannot
+happen".
+
+`match __impossible {}` is exactly that, and it type-checks because `__Field`
+for such an enum is itself uninhabited. The `FIXME` above names the cleaner
+spelling that `feature(exhaustive_patterns)` would allow and is not stable —
+worth reading as a snapshot of what this code is waiting for.
+"""
+
+[[annotation]]
+id    = "de-ext-0005"
+file  = "src/de/enum_externally.rs"
+lines = "79-105"
+title = "…the visitor, whose one method is visit_enum"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["marker-types", "lifetime-de"]
+body = """
+The same visitor shape as everywhere else, with `visit_enum` as the only
+override. `__A: EnumAccess<'de>` rather than `SeqAccess` or `MapAccess`: an
+externally tagged enum is a distinct thing in serde's data model, not a map with
+one key.
+
+That is the whole reason this representation is cheap. The format knows it is
+reading an enum and can present the variant name without materializing the
+payload first.
+"""
+
+[[annotation]]
+id    = "de-ext-0006"
+file  = "src/de/enum_externally.rs"
+lines = "106-116"
+title = "…and deserialize_enum, told the variant names up front"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`VARIANTS` is passed to the format, which is what lets a format validate a
+variant name itself or report an `unknown_variant` error listing the
+alternatives. Compare `deserialize_struct`, which is handed `FIELDS` for the
+same reason.
+"""
+
+[[annotation]]
+id    = "de-ext-0007"
+file  = "src/de/enum_externally.rs"
+lines = "117-131"
+title = "deserialize_externally_tagged_variant — the custom-function path"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+A variant with `deserialize_with` is read as a *newtype variant* whose payload is
+the generated `__DeserializeWith` wrapper, whatever shape the variant actually
+has. `unwrap_to_variant_closure(..., true)` then unpacks `.value` back into the
+real variant.
+
+`true` here against `false` in the internally tagged and untagged modules, and
+the difference is exactly whether a wrapper is in play.
+"""
+
+[[annotation]]
+id    = "de-ext-0008"
+file  = "src/de/enum_externally.rs"
+lines = "132-161"
+title = "…and the four shapes, each through VariantAccess"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+`VariantAccess` has one method per shape — `unit_variant`, `newtype_variant`,
+`tuple_variant`, `struct_variant` — and the four arms reach them either directly
+or through the shared tuple and struct modules.
+
+Note this matches on `variant.style` rather than `effective_style`, unlike every
+other representation. A newtype variant whose field is skipped is handled a few
+lines down by `deserialize_externally_tagged_newtype_variant` instead, because
+it still has to call `unit_variant` to consume the payload slot — the format is
+expecting one.
+"""
+
+[[annotation]]
+id    = "de-ext-0009"
+file  = "src/de/enum_externally.rs"
+lines = "162-176"
+title = "wrap_deserialize_variant_with — all the fields as one tuple type"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+The variant's field types become a tuple type, and that tuple is what the
+wrapper holds. A three-field tuple variant with `deserialize_with` reads as a
+newtype variant containing `(A, B, C)`.
+
+Returning three token streams rather than two — the wrapper, its type, and the
+unwrapping closure — because the caller needs all three in different positions
+of one template.
+"""
+
+[[annotation]]
+id    = "de-ext-0010"
+file  = "src/de/enum_externally.rs"
+lines = "177-192"
+title = "…and the skipped newtype field, which still consumes its slot"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+This is why the match above uses `variant.style`. `Enum::V(#[serde(skip)] T)` is
+read as a *unit* variant — `unit_variant(__variant)?` — because that is the call
+that tells the format's `VariantAccess` there is no payload to hand over. Then
+the field is filled from its default.
+
+Getting this wrong would leave the format waiting for a value nobody asked for,
+which is the kind of bug that shows up as a mysterious trailing-data error three
+layers away.
+"""
+
+[[annotation]]
+id    = "de-ext-0011"
+file  = "src/de/enum_externally.rs"
+lines = "193-213"
+title = "…and the ordinary newtype variant, read two ways"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`newtype_variant::<T>` with the field's span, or the wrapper version with the
+`.value` unwrapped in a closure.
+
+The plain arm passes the variant constructor to `Result::map` as a function
+value; the wrapper arm needs a closure because it has to reach through `.value`
+first. Same pattern as the untagged module's newtype reader, one indirection
+deeper.
+"""
