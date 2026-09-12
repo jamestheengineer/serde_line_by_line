@@ -1,0 +1,56 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "int-sym-0001"
+file  = "src/internals/symbol.rs"
+lines = "1-6"
+title = "Symbol — a `&'static str` that can be compared to an Ident"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::Ident", "syn::Path"]
+body = """
+A one-field newtype over a string literal. Its whole reason to exist is the
+`PartialEq` impls at the bottom of the file: with them, an attribute parser can
+write `if path == RENAME` instead of `if path.is_ident("rename")`, and a typo
+becomes a compile error rather than an attribute that silently never matches.
+"""
+
+[[annotation]]
+id    = "int-sym-0002"
+file  = "src/internals/symbol.rs"
+lines = "7-42"
+title = "…and the thirty-five names that are the whole `#[serde(...)]` surface"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+This is the attribute vocabulary in one screen, and it is worth reading as a
+list rather than as code. Everything `#[serde(...)]` accepts is here, and
+anything not here is rejected by `attr.rs` with an "unknown serde attribute"
+error.
+
+Note what is *not* separate: there is one `RENAME` and one `WITH`, because
+`rename = "x"` and `rename(serialize = "x", deserialize = "y")` are the same
+attribute parsed two ways. The per-direction forms are nested inside, not
+listed here.
+"""
+
+[[annotation]]
+id    = "int-sym-0003"
+file  = "src/internals/symbol.rs"
+lines = "43-71"
+title = "…and four PartialEq impls, so comparison reads like English"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::Ident", "syn::Path"]
+body = """
+Four impls rather than one, because the parser holds identifiers sometimes by
+value and sometimes by reference, and `&Ident == SYMBOL` does not follow from
+`Ident == SYMBOL` in Rust's coherence rules.
+
+The `Path` impls use `is_ident`, which is a real check rather than a
+convenience: `foo::rename` must not match `RENAME`.
+
+`Display` is there so an error message can name the attribute without the call
+site reaching into the tuple field.
+"""

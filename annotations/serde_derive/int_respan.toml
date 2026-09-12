@@ -1,0 +1,35 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "int-res-0001"
+file  = "src/internals/respan.rs"
+lines = "1-8"
+title = "respan — rewriting every span in a token stream"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["proc_macro2::TokenStream", "proc_macro2::Span"]
+body = """
+Sixteen lines, one job: take a token stream and make every token claim a
+different source location.
+
+It is used when a token stream built from one place has to report errors at
+another — `replace_receiver` rewriting `Self` is the caller. Without it, an
+error about the rewritten type would point at wherever the replacement was
+constructed, which is nowhere the user can see.
+"""
+
+[[annotation]]
+id    = "int-res-0002"
+file  = "src/internals/respan.rs"
+lines = "9-16"
+title = "…and the recursion through groups"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["proc_macro2::Group", "proc_macro2::TokenTree"]
+body = """
+`set_span` on a `Group` sets the span of its delimiters and nothing inside, so
+the contents have to be rebuilt recursively. Missing that is the classic
+respan bug: an error inside a parenthesized type still points at the old
+location and nobody can work out why.
+"""

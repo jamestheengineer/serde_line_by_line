@@ -1,0 +1,154 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "int-ast-0001"
+file  = "src/internals/ast.rs"
+lines = "1-7"
+title = "ast — serde's own model of the input"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+"A Serde ast, parsed from the Syn ast and ready to generate Rust code." The
+whole point is the second half: syn's tree describes Rust, and this one
+describes what serde needs to know, which is a much smaller thing.
+"""
+
+[[annotation]]
+id    = "int-ast-0002"
+file  = "src/internals/ast.rs"
+lines = "8-59"
+title = "Container, Data, Variant, Field — serde's model, narrower than syn's"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::DeriveInput", "syn::Generics", "syn::Data"]
+body = """
+Five types, and every one is smaller than the syn type it corresponds to.
+
+`syn::Data` has three variants; `Data` has two, because unions are rejected
+before this is built. That is the shape of the whole module: every case that
+survives parsing is a case codegen must handle.
+
+`Style` is the normalization the rest of the crate depends on. syn distinguishes
+named, unnamed and unit fields; serde distinguishes *newtype* from tuple as
+well, because a one-field tuple struct has its own place in the data model. That
+single extra variant is why `serialize_body` has five arms rather than four, and
+why a newtype struct can be unwrapped on the wire.
+
+`original` is kept on the container, the variant and the field so an error can
+be spanned on the user's own tokens. `Field::member` is a `syn::Member`, so a
+named field and a positional one are the same type and `self.#member` works for
+both.
+"""
+
+[[annotation]]
+id    = "int-ast-0003"
+file  = "src/internals/ast.rs"
+lines = "60-84"
+title = "from_ast — parse the attributes, then the body, and reject unions"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+The order is attributes first, because the container's `default` reaches every
+field's parser and the container's rename rules reach every variant's.
+
+Unions are the one shape refused outright. `return None` rather than an error
+value — the caller checks the `Ctxt` — so the error has already been recorded
+and the `None` only says "nothing further to do".
+"""
+
+[[annotation]]
+id    = "int-ast-0004"
+file  = "src/internals/ast.rs"
+lines = "85-105"
+title = "…and where rename_all is actually applied"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+This is the answer to "when does `rename_all` happen", and it is here, once,
+after all parsing: the container's rule is applied to variants, and the
+variant's own rule (falling back to the container's `rename_all_fields`) to that
+variant's fields.
+
+Three levels of precedence in one expression: a field's explicit `rename` wins
+because `rename_by_rules` does not overwrite one, then the variant's
+`rename_all`, then the container's `rename_all_fields`.
+
+For a struct there is only one level, which is why the two arms look so
+different for what is nominally the same operation.
+"""
+
+[[annotation]]
+id    = "int-ast-0005"
+file  = "src/internals/ast.rs"
+lines = "106-132"
+title = "…and check, called last, from inside the constructor"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["trait-objects", "iterators"]
+body = """
+`check::check` runs here rather than at the call site, so no caller can forget
+it. It takes `&mut` because it may *rewrite* attributes, not only validate them
+— which is a surprise worth knowing before reading `check.rs`.
+
+`all_fields` returns a boxed trait object because the two arms have different
+iterator types. One of the ten `dyn` uses in the crate, and it is here because
+the alternative — an enum of two iterator types — would be more code than the
+allocation saves in a compile-time-only path.
+"""
+
+[[annotation]]
+id    = "int-ast-0006"
+file  = "src/internals/ast.rs"
+lines = "133-173"
+title = "enum_from_ast — and the ordering rule for untagged variants"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+Every variant is parsed, then one global rule is enforced: `#[serde(untagged)]`
+variants must come last.
+
+The reason is in `enum_::deserialize`, which splits the list at the first
+untagged variant and tries the tagged half first. An untagged variant in the
+middle would make that split lose variants, and the check here is what lets that
+code assume a clean split.
+
+`rposition` finds the last *tagged* variant and everything before it is
+checked — so an enum with no tagged variants at all passes trivially, which is
+correct.
+"""
+
+[[annotation]]
+id    = "int-ast-0007"
+file  = "src/internals/ast.rs"
+lines = "174-197"
+title = "struct_from_ast — where Newtype is separated from Tuple"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::Fields"]
+body = """
+Four lines of real content: an unnamed-field list of length one is `Newtype`,
+any other length is `Tuple`. That is the entire definition of the distinction
+the rest of the crate leans on.
+
+`Style::Unit` produces an empty field vector rather than `None`, so every
+downstream `for field in fields` works without a special case.
+"""
+
+[[annotation]]
+id    = "int-ast-0008"
+file  = "src/internals/ast.rs"
+lines = "198-225"
+title = "fields_from_ast — and the index that becomes `.0`"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::Member", "syn::punctuated::Punctuated"]
+body = """
+`Member::Unnamed(dst_fields.len().into())` numbers positional fields by their
+position in the *output* vector, which is the same as the input because nothing
+is filtered here.
+
+A `for` loop with `push` rather than a `map`, because `dst_fields.len()` is read
+while building — the index is the loop counter, obtained from the vector being
+built rather than from `enumerate`.
+"""

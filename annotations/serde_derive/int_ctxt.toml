@@ -1,0 +1,70 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "int-ctxt-0001"
+file  = "src/internals/ctxt.rs"
+lines = "1-27"
+title = "Ctxt — an error collector that panics if you ignore it"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["interior-mutability"]
+body = """
+The doc comment states the contract and it is unusual enough to be worth
+stopping on: **dropping this object panics**. Not returning an error, not
+warning — panicking, in a proc macro, which surfaces as an internal compiler
+error message.
+
+That is deliberate. A `Ctxt` with unreported errors means the macro accepted
+something invalid and generated code for it, and the failure that follows would
+be an incomprehensible type error in generated code. Panicking makes the bug
+the macro author's problem instead of the user's.
+
+`RefCell<Option<Vec<Error>>>` and the comment says why: `None` after checking,
+so a second `check` or a drop after one can tell the difference between
+"checked" and "never had errors".
+
+`new` is separate from `Default` because the doc comment on it repeats the
+warning: an empty context still panics on drop.
+"""
+
+[[annotation]]
+id    = "int-ctxt-0002"
+file  = "src/internals/ctxt.rs"
+lines = "28-44"
+title = "…and two ways to add an error, one of them deliberately un-generic"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["interior-mutability", "monomorphization"]
+body = """
+`error_spanned_by` is generic over the tokenizable thing to point at, and the
+comment on the `push` explains the shape: `into_token_stream()` is called at the
+call site so `syn::Error::new_spanned` is only instantiated once rather than
+once per argument type.
+
+That is a real cost in a proc macro — every instantiation is compile time paid
+by every downstream crate — and it is the kind of thing that only shows up in
+build-time profiles.
+
+`RefCell` rather than `&mut self` because the context is shared: `from_ast`,
+the attribute parsers and `check` all hold `&Ctxt` at once.
+"""
+
+[[annotation]]
+id    = "int-ctxt-0003"
+file  = "src/internals/ctxt.rs"
+lines = "45-67"
+title = "…and check, which folds every error into one"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["custom-errors"]
+body = """
+`Error::combine` is syn's way of carrying several diagnostics in one value, and
+the compiler renders each separately. That is how a struct with four bad
+attributes produces four underlined spans from a function that returns a single
+`Result`.
+
+`take()` is what sets the `Option` to `None` and disarms the `Drop`. The panic
+guard checks `!thread::panicking()` first, because panicking during an unwind
+aborts the process and would replace a useful error with nothing at all.
+"""

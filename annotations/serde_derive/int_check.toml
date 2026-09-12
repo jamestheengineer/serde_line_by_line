@@ -1,0 +1,315 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "int-chk-0001"
+file  = "src/internals/check.rs"
+lines = "1-20"
+title = "check — ten cross-cutting rules, and the line that says what belongs here"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+The comment above `check` is the file's charter: these are the checks that
+*require looking at more than one attrs object*. Anything decidable from a
+single attribute is rejected during parsing, in `attr.rs`, which is why this
+file is 477 lines rather than two thousand.
+
+Ten functions, run unconditionally and in order, all of them accumulating into
+`Ctxt` rather than returning. A container with problems in six of these reports
+six errors.
+"""
+
+[[annotation]]
+id    = "int-chk-0002"
+file  = "src/internals/check.rs"
+lines = "21-53"
+title = "check_default_on_tuple — and the reason it is a rule at all"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+The six-line comment is the whole justification and is worth reading before the
+code. A tuple field's default is only reached when the sequence ran out at that
+point — so if field 2 has a default and field 3 does not, an input with two
+elements fails on field 3 anyway, and the default on field 2 was a lie.
+
+Requiring all subsequent fields to have defaults makes the failure impossible.
+The error names the earlier field's index, which is what makes it actionable.
+
+Skipped fields are excluded because they get an implicit default, and counting
+them would reject correct code.
+"""
+
+[[annotation]]
+id    = "int-chk-0003"
+file  = "src/internals/check.rs"
+lines = "54-75"
+title = "check_remote_generic — generics on one side or the other, never both"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["generic-params"]
+body = """
+The comment shows both legal forms, and they mean different things: the
+placeholder carries the generics and stands for the remote type at every
+instantiation, or the remote path carries them and the placeholder covers one
+concrete instantiation.
+
+Both at once is not a stricter version of either — it is ambiguous, because
+there would be two sets of parameters with no rule saying which the impl is
+generic over. The error tells the user which one to delete.
+"""
+
+[[annotation]]
+id    = "int-chk-0004"
+file  = "src/internals/check.rs"
+lines = "76-98"
+title = "check_getter — remote structs only"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+A getter reads a private field of a remote type, so it only makes sense where
+there is a remote type and a field to get. Enums have no fields at the
+container level and are refused outright.
+
+This is the check behind `ser.rs`'s `unreachable!("getter is only allowed for
+remote impls")` — the codegen assumes what this function enforces.
+"""
+
+[[annotation]]
+id    = "int-chk-0005"
+file  = "src/internals/check.rs"
+lines = "99-137"
+title = "check_flatten — flatten needs names, so two shapes are refused"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+Tuple and newtype structs have no field names, and flatten's whole mechanism is
+merging *keys* into the enclosing map. There is nothing to merge.
+
+The check walks variants as well as struct fields, so a tuple *variant* with a
+flattened field is caught too. `tuple.rs`'s `assert!(!has_flatten(fields))` is
+the downstream assumption this makes safe.
+"""
+
+[[annotation]]
+id    = "int-chk-0006"
+file  = "src/internals/check.rs"
+lines = "138-149"
+title = "check_identifier — the three-page match, and its contract"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+The comment states three separate rules, and the function below enforces all of
+them with a single `match` on a four-tuple. Reading the comment first is
+strongly advised: the tuple arms are exhaustive over combinations that mostly
+cannot occur, and the ones that can are not obvious from the patterns.
+"""
+
+[[annotation]]
+id    = "int-chk-0007"
+file  = "src/internals/check.rs"
+lines = "150-196"
+title = "…matching on (style, identifier, other, tag) — the four error arms"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+A four-tuple match where each arm is a rule. `#[serde(other)]` is refused on a
+variant identifier, refused on an untagged enum, required to be last, and
+required to be a unit variant — four arms, in that order, and the order is the
+precedence: the most specific refusal reports first.
+
+This is the pattern-matching idiom that makes the function readable at all.
+Writing it as nested `if`s would need the same number of conditions in a shape
+where the compiler could not check that every combination is handled.
+"""
+
+[[annotation]]
+id    = "int-chk-0008"
+file  = "src/internals/check.rs"
+lines = "197-222"
+title = "…and the newtype catch-all, which must also be last"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+The one arm that permits a non-unit variant in an identifier enum: a
+`field_identifier`'s last variant may be a newtype, and it becomes the implicit
+"other" case carrying the unrecognized name.
+
+`identifier.rs` reads exactly this shape when it builds `fallthrough` and
+`fallthrough_borrowed` — so this arm and that code are two halves of one
+feature, three files apart.
+"""
+
+[[annotation]]
+id    = "int-chk-0009"
+file  = "src/internals/check.rs"
+lines = "223-268"
+title = "check_variant_skip_attrs — serialize_with takes the whole variant"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+`#[serde(serialize_with)]` on a variant hands every field to the user's
+function, so a per-field `skip_serializing` inside it cannot be honoured — the
+function decides what to write, and this crate has no say.
+
+Rather than silently ignoring the field attribute, it is an error, and the
+message names both the variant and the field. Three separate combinations are
+checked on the serialize side, and the messages are spelled out in full rather
+than generated, which is why this function is forty-five lines of `format!`.
+"""
+
+[[annotation]]
+id    = "int-chk-0010"
+file  = "src/internals/check.rs"
+lines = "269-296"
+title = "…and the deserialize half, which has one fewer case"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+The same rule for `deserialize_with`, minus the `skip_serializing_if` case,
+which has no deserialize counterpart.
+
+`member_message` is called inside the loop here and outside it on the serialize
+side — a small asymmetry with no consequence, and the sort of thing worth
+noticing only because it shows the two halves were written at different times.
+"""
+
+[[annotation]]
+id    = "int-chk-0011"
+file  = "src/internals/check.rs"
+lines = "297-317"
+title = "check_internal_tag_field_name_conflict — the tag cannot be a field name"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["closures"]
+body = """
+The comment gives both halves of the reason: on the way out it would write the
+same key twice, and on the way in there would be no way to tell which one the
+value belonged to.
+
+The closure exists so the error is written once and called from two places
+below, and it captures `cx` and `tag` rather than taking them as arguments.
+"""
+
+[[annotation]]
+id    = "int-chk-0012"
+file  = "src/internals/check.rs"
+lines = "318-349"
+title = "…and the walk, which checks both directions separately"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+Only struct variants can conflict — a tuple or unit variant has no field names
+— and an untagged variant is skipped, because it carries no tag.
+
+The serialize and deserialize names are checked independently, and the
+deserialize side checks every *alias*. A field aliased to the tag name is the
+same collision arriving through a different door, and missing it would produce
+an enum that serializes fine and cannot be read back.
+"""
+
+[[annotation]]
+id    = "int-chk-0013"
+file  = "src/internals/check.rs"
+lines = "350-368"
+title = "check_adjacent_tag_conflict — two keys, and they must differ"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+Fifteen lines for the obvious case. `#[serde(tag = "t", content = "t")]` would
+emit a struct with the same key twice, which no format can represent.
+
+"for the same reason" in the comment points back at the function above, which is
+the right way to write this: the rule is one rule about duplicate keys, applied
+to two representations.
+"""
+
+[[annotation]]
+id    = "int-chk-0014"
+file  = "src/internals/check.rs"
+lines = "369-395"
+title = "check_transparent — three attributes it cannot be combined with"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+`from`, `try_from` and `into` all replace the type's representation with another
+type's, and `transparent` replaces it with a field's. Two replacements are not a
+composition, they are a contradiction, so all three combinations are refused.
+
+Each is reported separately rather than short-circuiting, so a type with two of
+them gets both messages.
+"""
+
+[[annotation]]
+id    = "int-chk-0015"
+file  = "src/internals/check.rs"
+lines = "396-413"
+title = "…and the two shapes that have nothing to be transparent about"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+An enum has no single field to stand in for it, and a unit struct has no field
+at all. Both return early, because everything below assumes a field list.
+
+This is one of the two places `check` takes `&mut Container` — it is about to
+mutate a field's attributes a few lines down — and the borrow is taken here.
+"""
+
+[[annotation]]
+id    = "int-chk-0016"
+file  = "src/internals/check.rs"
+lines = "414-447"
+title = "…and the mutation: mark_transparent, which is not a check at all"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+The surprise in this file. `check` does not only validate — here it *writes*,
+calling `mark_transparent()` on the one eligible field, and `ser.rs` and `de.rs`
+later find that field by asking `attrs.transparent()`.
+
+The alternative would be re-deriving which field is transparent in both
+generators, with the same three-condition rule in three places. Doing it once
+and recording the answer is better, but it means `check.rs` is misnamed and the
+`&mut Container` in its signature is the only warning.
+
+The two error messages for "no eligible field" differ by direction, and the
+difference is real: a defaulted field is fine to skip when writing and not when
+reading.
+"""
+
+[[annotation]]
+id    = "int-chk-0017"
+file  = "src/internals/check.rs"
+lines = "448-469"
+title = "…and what makes a field eligible"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::Member", "syn::Type"]
+body = """
+`PhantomData` is excluded by name, which is a string comparison against the last
+path segment — there is no way to resolve it properly in a proc macro, and a
+user type actually called `PhantomData` would be misread. That is a known and
+accepted limitation of every derive macro that reasons about types.
+
+`ungroup` is here for the macro-generated case: a `PhantomData` arriving inside
+an invisible group would otherwise slip past.
+
+The two derive arms differ by one condition, and it is the one the error
+messages above already announced.
+"""
+
+[[annotation]]
+id    = "int-chk-0018"
+file  = "src/internals/check.rs"
+lines = "470-477"
+title = "check_from_and_try_from — the last eight lines"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+`from` and `try_from` both say "read some other type and convert", one
+infallibly and one not. Having both leaves no rule for which to use.
+
+Takes `&mut Container` and never mutates it — the signature follows `check`'s
+own, which has to be `&mut` for `check_transparent`.
+"""

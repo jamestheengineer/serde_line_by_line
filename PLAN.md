@@ -596,7 +596,7 @@ exactly the lie §11 refused to tell about the walk.
 | **R1 — Two coverage sources** ✅ | `Pin::primary` retires; `Store`, `manifest.toml` and `coverage.json` become per-source; D12 | 0 | `cargo xtask coverage` reports `serde_core` 12,037/12,037 **and** `serde_derive` 0/8,975 without error; every existing gate still fires on the first source; a role no gate knows is still a build failure |
 | **R2 — Vertical slice: `ser.rs`** ✅ | The densest codegen file, 1,369 lines and 76 `quote!` blocks, and the one the narrative already walks | 96 | `ser.rs` at 100%; the `codegen` kind proven in the renderer; an annotation's `emits` checked against a real expansion at annotation granularity (D10); its narrative steps retargeted |
 | **R3 — The rest of codegen** ✅ | `de.rs`, then `de/struct_.rs`, `de/tuple.rs`, `de/unit.rs`, `de/identifier.rs`, and the four enum representations | 165 | codegen at 100%; the four representations read as four variations, not four transcripts |
-| **R4 — `internals/`** | `attr.rs` (1,818 lines, the attribute DSL), `check.rs`, `ast.rs`, `case.rs`, `name.rs`, `symbol.rs`, `ctxt.rs`, `respan.rs`, `mod.rs` | ~108 | the `#[serde(...)]` surface is claimed, including what upstream rejects and why |
+| **R4 — `internals/`** ✅ | `attr.rs` (1,818 lines, the attribute DSL), `check.rs`, `ast.rs`, `case.rs`, `name.rs`, `symbol.rs`, `ctxt.rs`, `respan.rs`, `mod.rs` | 102 | the `#[serde(...)]` surface is claimed, including what upstream rejects and why |
 | **R5 — Plumbing** | `bound.rs`, `receiver.rs`, `pretend.rs`, `lib.rs`, `fragment.rs`, `deprecated.rs`, `this.rs`, `dummy.rs` | ~56 | **every line of `serde_derive` claimed**; all 28 files in its manifest; the gate hard-fails on regression; all 85 narrative steps name a containing annotation |
 | **R6 — Course units** | 6–8 new units: proc-macro basics, `TokenStream` and spans, hygiene, `syn`'s AST, `quote!` interpolation, the attribute DSL, codegen for the four enum representations; the cross-crate prereq DAG | — | the course track spans both crates, walkable start to finish, D8's forward-reference check enforcing across sources |
 | **R7 — Ship** | Navigation for four reference file-trees' worth of pages, the restated promise, `README` | — | both reference tracks reachable and each honest about what it claims |
@@ -688,6 +688,30 @@ nine files complete turned on 19 gate errors, and 18 of the 19 steps already sat
 inside a single annotation — one pair had to merge. R2's five-out-of-thirteen
 was the vertical slice finding the boundaries; R3 suggests the boundaries are
 now roughly right.
+
+### What R4 shipped
+
+`internals/` is complete: 9 files, 3,015 lines, 102 annotations.
+`serde_derive` is at 86.3%, with only the eight plumbing files left.
+
+**The density risk the scope doc flagged did not materialize, and the reason is
+the opposite of what was feared.** It projected `internals/` at 28 lines per
+annotation and warned the estimate could reach 580 if `attr.rs` "refuses to take
+large spans". `attr.rs` took the *largest* spans in the project — 56 annotations
+over 1,818 lines, 32.5 each — because it is three several-hundred-line
+`if`/`else` chains over attribute names, and the interesting content is the
+group an attribute belongs to rather than the individual branch.
+`#[serde(from)]`, `try_from`, `into` and `remote` are one annotation, not four,
+because what is worth saying is that all four parse a string into a type so a
+malformed one fails under the attribute.
+
+Carried forward, the track lands near **~420**, which holds R3's revision rather
+than moving it again.
+
+**The ratchet held at R3's ratio.** Nine more files complete, 29 gate errors,
+and four steps did not fit: one annotation pair merged, one boundary shifted,
+and two steps whose cited range had drifted past the arm they describe were
+narrowed to it.
 
 R3–R5 are pure content throughput and can be reordered freely, with one
 exception: `internals/attr.rs` is the density risk the scope doc flagged

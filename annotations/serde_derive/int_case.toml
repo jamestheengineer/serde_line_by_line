@@ -1,0 +1,108 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "int-case-0001"
+file  = "src/internals/case.rs"
+lines = "1-32"
+title = "RenameRule — the eight styles `rename_all` accepts"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+The module doc states the direction, and it matters: the rule converts *from*
+Rust style *to* the source's style. `my_field` to `myField`, never the reverse
+— deserialization matches against the converted name rather than converting the
+input back.
+
+Eight rules plus `None`. Every one is applied at expansion time, so none of this
+code exists in the generated output.
+"""
+
+[[annotation]]
+id    = "int-case-0002"
+file  = "src/internals/case.rs"
+lines = "33-55"
+title = "…the table, and the parse that reads it"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+A slice of pairs rather than a match, because the same table produces the error
+message listing valid values at the bottom of the file. One place to add a rule.
+
+Linear search over eight entries, run once per `rename_all` attribute at compile
+time — the kind of thing where a `HashMap` would be strictly worse.
+"""
+
+[[annotation]]
+id    = "int-case-0003"
+file  = "src/internals/case.rs"
+lines = "56-80"
+title = "apply_to_variant — from PascalCase, which is where variants start"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+Variants are assumed to be `PascalCase`, so `PascalCase` is a no-op and every
+other rule converts away from it. `SnakeCase` is the one with real logic —
+insert an underscore before each interior uppercase letter — and three other
+rules are defined in terms of it.
+
+`to_ascii_lowercase` rather than `to_lowercase` throughout: non-ASCII
+identifiers exist, and doing Unicode case folding here would produce names that
+do not round-trip. The restriction is deliberate and is why a variant named with
+non-ASCII letters is left alone by these rules.
+"""
+
+[[annotation]]
+id    = "int-case-0004"
+file  = "src/internals/case.rs"
+lines = "81-118"
+title = "apply_to_field — from snake_case, which is where fields start"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+The mirror image: fields are assumed `snake_case`, so `None`, `LowerCase` and
+`SnakeCase` are all no-ops and `PascalCase` is the one with the loop.
+
+Reading the two functions side by side is the clearest statement of why serde
+needs both. `very_tasty` and `VeryTasty` are the same name in two conventions,
+and which conversion applies depends entirely on which side of the language the
+name came from.
+
+`or` is the precedence helper: a variant's own `rename_all` wins over the
+container's, and this is how that is spelled at the call site in `ast.rs`.
+"""
+
+[[annotation]]
+id    = "int-case-0005"
+file  = "src/internals/case.rs"
+lines = "119-138"
+title = "ParseError — an error that lists every valid answer"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["custom-errors"]
+body = """
+Borrows the unknown string rather than owning it, because the error is formatted
+and discarded inside one `from_ast` call.
+
+The `Display` impl walks `RENAME_RULES` to list the alternatives, which is why
+that table is a slice: adding a rename rule updates the parser and the error
+message together, and there is no second list to forget.
+"""
+
+[[annotation]]
+id    = "int-case-0006"
+file  = "src/internals/case.rs"
+lines = "139-200"
+title = "…and the two tests, which are the specification"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+Sixty lines of test for a hundred lines of code, and they are the only unit
+tests in `serde_derive`. Every rule is asserted against four inputs each for
+variants and fields.
+
+`Z42` is the interesting row: digits are not letters, so `z42` stays `z42` under
+`SnakeCase` rather than becoming `z_42`. That behaviour is not obvious from the
+implementation and would be easy to "fix" into a breaking change — which is what
+the test is there to prevent.
+"""

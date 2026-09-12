@@ -1,0 +1,38 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "int-mod-0001"
+file  = "src/internals/mod.rs"
+lines = "1-16"
+title = "internals — the module boundary between parsing and generating"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+Three modules public, six private, and the split is the design. `ast`, `attr`
+and `name` are the vocabulary `ser.rs` and `de.rs` speak; `case`, `check`,
+`ctxt`, `receiver`, `respan` and `symbol` are how that vocabulary is built and
+validated, and no code generator touches them.
+
+`Ctxt` and `replace_receiver` are re-exported so callers do not have to name the
+private modules they live in.
+"""
+
+[[annotation]]
+id    = "int-mod-0002"
+file  = "src/internals/mod.rs"
+lines = "17-28"
+title = "Derive, and the one-function detour every type check needs"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::Type"]
+body = """
+`Derive` tells `check` which half of the attributes to validate — a
+`skip_serializing` on a `Deserialize`-only derive is not an error.
+
+`ungroup` strips `Type::Group` wrappers, which syn produces when a type arrived
+through another macro's expansion. Without it, a check like "is this last field
+a slice" silently fails for a type written by a macro, because the slice is
+inside an invisible group. Four lines, and every structural type test in the
+crate goes through them.
+"""

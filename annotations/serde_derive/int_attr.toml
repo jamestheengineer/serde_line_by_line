@@ -1,0 +1,999 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "int-attr-0001"
+file  = "src/internals/attr.rs"
+lines = "1-22"
+title = "attr — the whole `#[serde(...)]` surface, and the rule it follows"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::meta::ParseNestedMeta", "syn::parse::ParseStream", "syn::punctuated::Punctuated", "proc_macro2::TokenStream"]
+body = """
+1,818 lines, one job: turn `#[serde(...)]` into three structs. The module
+comment states the contract that shapes every line below, and it is the same one
+`Ctxt` exists for — **none of these functions return a `Result`**. A bad
+attribute is recorded and then ignored, so a crate with twenty mistakes reports
+twenty errors in one build.
+
+Three entry points, one per level of the input: container, variant, field. Each
+is a several-hundred-line `if`/`else` chain over the names in `symbol.rs`, and
+almost everything else in this file exists to serve them.
+"""
+
+[[annotation]]
+id    = "int-attr-0002"
+file  = "src/internals/attr.rs"
+lines = "23-51"
+title = "Attr — a slot that reports its own duplicates"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["quote::ToTokens"]
+body = """
+Every attribute is accumulated into one of these, and the duplicate check lives
+in `set` rather than at 60 call sites. Writing `#[serde(rename = "a", rename =
+"b")]` produces "duplicate serde attribute `rename`" spanned on the second one,
+and nothing downstream has to know that happened.
+
+`tokens` is kept alongside the value so the *other* half of a conflict can be
+reported too — `decide_tag` uses that to underline both `untagged` and `tag`
+when they are combined.
+
+`name: Symbol` is why the message can say which attribute without a string
+being passed in at the error site.
+"""
+
+[[annotation]]
+id    = "int-attr-0003"
+file  = "src/internals/attr.rs"
+lines = "52-75"
+title = "…and four more ways to fill it, each with a different meaning"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+`set_opt` for a parser that may have produced nothing, `set_if_none` for a value
+the crate itself is supplying rather than the user — `skip_deserializing`
+implying a default, and the `Cow` borrowing rules, both far below — and two
+getters, one of which hands back the tokens.
+
+`set_if_none` deliberately does not report a duplicate. It is the crate filling
+in a default, and complaining that the user already set it would be backwards.
+"""
+
+[[annotation]]
+id    = "int-attr-0004"
+file  = "src/internals/attr.rs"
+lines = "76-91"
+title = "BoolAttr — presence, with the same duplicate check"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+A newtype over `Attr<()>`. `#[serde(transparent)]` has no value, but it can
+still be written twice, and wrapping the general type rather than using a plain
+`bool` is what keeps that error.
+"""
+
+[[annotation]]
+id    = "int-attr-0005"
+file  = "src/internals/attr.rs"
+lines = "92-131"
+title = "VecAttr — for the attributes that may repeat, and the ones that may not"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+`#[serde(alias)]` may appear any number of times, so its values accumulate.
+`rename(serialize = ..., deserialize = ...)` may not, and `at_most_one` is where
+that is enforced after the fact.
+
+`first_dup_tokens` is captured when the *second* value arrives, which is the
+token to underline: the first occurrence is not the mistake.
+
+Two getters with different contracts — `get` for the repeating case, and
+`at_most_one` for the single-valued one that shares the plumbing.
+"""
+
+[[annotation]]
+id    = "int-attr-0006"
+file  = "src/internals/attr.rs"
+lines = "132-136"
+title = "unraw — `r#type` is the field named `type`"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::Ident"]
+body = """
+A raw identifier is a Rust escaping mechanism, not part of the name. A field
+written `r#type` should appear on the wire as `type`, and this three-line
+function is the only thing that makes that true.
+
+Applied to the container's ident and to every field's, but not to variants,
+which are `PascalCase` by convention and rarely collide with keywords.
+"""
+
+[[annotation]]
+id    = "int-attr-0007"
+file  = "src/internals/attr.rs"
+lines = "137-153"
+title = "RenameAllRules — one rule per direction, and how they compose"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+`rename_all` can differ between serialization and deserialization, so it is a
+pair everywhere.
+
+`or` is the precedence combinator: `self` wins per direction unless it is
+`None`. `ast.rs` uses it to let a variant's `rename_all` override the
+container's `rename_all_fields`, and doing it per direction rather than
+wholesale means the two halves can come from different levels.
+"""
+
+[[annotation]]
+id    = "int-attr-0008"
+file  = "src/internals/attr.rs"
+lines = "154-176"
+title = "Container — eighteen fields, and every one is an attribute"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::Type", "syn::Path", "syn::WherePredicate"]
+body = """
+The parsed form of everything `#[serde(...)]` can say about a struct or enum.
+Reading it as a list is the fastest inventory of the container-level surface —
+and every field here is read by `ser.rs` or `de.rs` through an accessor, never
+directly.
+
+`is_packed` and `non_exhaustive` are the two that are *not* serde attributes:
+they come from `#[repr(packed)]` and `#[non_exhaustive]`, scanned for separately
+because they change what the generated code may do.
+"""
+
+[[annotation]]
+id    = "int-attr-0009"
+file  = "src/internals/attr.rs"
+lines = "177-207"
+title = "TagType — the four representations, with their JSON beside them"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+The doc comments are the best short explanation of the four representations in
+the crate, and each carries the JSON it produces. Worth reading here rather than
+reconstructing from the four `de/enum_*.rs` modules.
+
+`None` for untagged is an unfortunate name — it means "no tag", not "no value" —
+and reading `TagType::None` as "the untagged representation" saves confusion
+later.
+"""
+
+[[annotation]]
+id    = "int-attr-0010"
+file  = "src/internals/attr.rs"
+lines = "208-234"
+title = "Identifier — and the rules stated in its doc comments"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+`Field` and `Variant` differ in exactly one permitted shape, and the doc
+comments say which: a field identifier may have a newtype catch-all as its last
+variant; a variant identifier may not. `check_identifier` enforces both, and
+`identifier.rs` reads the distinction again when generating.
+
+`is_some` is behind the in-place feature because nothing else needs it — a
+`cfg` on a method rather than on a type, which is the finest granularity this
+crate uses.
+"""
+
+[[annotation]]
+id    = "int-attr-0011"
+file  = "src/internals/attr.rs"
+lines = "235-261"
+title = "Container::from_ast — twenty-two accumulators, declared up front"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+One `Attr` or `BoolAttr` per attribute, all created before parsing starts. Note
+the pairs: `ser_name` and `de_name` are both `Attr::none(cx, RENAME)`, because
+one attribute name can fill two slots.
+
+`non_exhaustive` is a plain `bool` rather than a `BoolAttr`, because it is not a
+serde attribute and writing it twice is Rust's problem rather than serde's.
+"""
+
+[[annotation]]
+id    = "int-attr-0012"
+file  = "src/internals/attr.rs"
+lines = "262-275"
+title = "…the loop, and the two things it skips"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::Attribute", "syn::Meta"]
+body = """
+Every attribute on the item is examined. A non-`serde` one is checked for
+`#[non_exhaustive]` and otherwise ignored — which is how serde coexists with
+every other derive macro's attributes.
+
+An empty `#[serde()]` is skipped explicitly. `parse_nested_meta` would report it
+as a parse error, and an empty attribute list is harmless.
+
+`parse_nested_meta` with a closure is syn's modern attribute API; the errors it
+returns go into `Ctxt` rather than being propagated, which is the whole point.
+"""
+
+[[annotation]]
+id    = "int-attr-0013"
+file  = "src/internals/attr.rs"
+lines = "276-302"
+title = "…rename and rename_all, the two that come in two forms"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::meta::ParseNestedMeta", "syn::LitStr"]
+body = """
+`rename = "x"` and `rename(serialize = "x", deserialize = "y")` are the same
+attribute, and `get_renames` handles both — which is why almost every branch in
+this chain is two lines rather than twenty.
+
+The `one_name` peek before `RENAME_ALL` is a nicety with a real effect: for
+`rename_all = "nope"`, the same bad string would otherwise produce two identical
+errors, one per direction. Peeking for `=` suppresses the second.
+"""
+
+[[annotation]]
+id    = "int-attr-0014"
+file  = "src/internals/attr.rs"
+lines = "303-340"
+title = "…and rename_all_fields, which only applies to enums"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+`rename_all_fields` sets the rule for the fields *inside* every variant, and is
+meaningless on a struct — where `rename_all` already means that. The error says
+so.
+
+The structure repeats the block above exactly, including the `one_name` peek.
+Two near-identical thirty-line blocks rather than a helper, which is the
+character of this whole function.
+"""
+
+[[annotation]]
+id    = "int-attr-0015"
+file  = "src/internals/attr.rs"
+lines = "341-392"
+title = "…transparent, deny_unknown_fields, and default"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+Two flags and the first attribute with real branching. `default` takes three
+forms — absent, bare, or `= "path"` — and they become the three variants of
+`Default` far below.
+
+`meta.input.peek(Token![=])` distinguishes `default` from `default = "..."`
+without committing to a parse, which is the pattern used for every attribute
+that is optionally valued.
+"""
+
+[[annotation]]
+id    = "int-attr-0016"
+file  = "src/internals/attr.rs"
+lines = "393-413"
+title = "…bound, which parses actual Rust, and untagged"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::WherePredicate"]
+body = """
+`bound = "T: Serialize"` contains a where-predicate list, and it is parsed here
+as Rust rather than carried as a string — so a malformed bound is a syntax error
+under the attribute rather than a mystery in generated code.
+
+`untagged` is a flag whose meaning is decided later: `decide_tag` combines it
+with `tag` and `content`, because the three are only meaningful together.
+"""
+
+[[annotation]]
+id    = "int-attr-0017"
+file  = "src/internals/attr.rs"
+lines = "414-452"
+title = "…tag and content, both stored raw"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+Both are stored as plain strings and neither is validated here. Their
+interactions are all cross-cutting — with each other, with `untagged`, with
+variant shapes, with field names — so every check is deferred to `decide_tag`
+and `check.rs`.
+
+This is the module comment's rule in action: simple checks when parsing,
+cross-cutting ones later.
+"""
+
+[[annotation]]
+id    = "int-attr-0018"
+file  = "src/internals/attr.rs"
+lines = "453-476"
+title = "…from, try_from, into, remote — four attributes that name a type"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::Type", "syn::Path"]
+body = """
+Each parses a string into a `syn::Type` or `syn::Path`, so `from = "Vec<u8"`
+fails with a syntax error rather than producing a broken impl.
+
+`remote` is a `Path` and the other three are `Type`, and the difference matters:
+a remote type is named, while `from` and `into` can be any type expression.
+"""
+
+[[annotation]]
+id    = "int-attr-0019"
+file  = "src/internals/attr.rs"
+lines = "477-504"
+title = "…the last four, and the error for a name nobody knows"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+`field_identifier`, `variant_identifier`, `crate`, `expecting` — then the
+`else` that catches everything else.
+
+The unknown-attribute message reconstructs the path from tokens and strips
+spaces, so `#[serde(rename_alll)]` reports the name the user actually wrote.
+That is the one error in this function returned through `Err` rather than pushed
+into `Ctxt`, because it aborts parsing of that attribute list rather than the
+build.
+"""
+
+[[annotation]]
+id    = "int-attr-0020"
+file  = "src/internals/attr.rs"
+lines = "505-518"
+title = "…and a second pass, looking for `repr(packed)`"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::parse::ParseStream", "proc_macro2::TokenTree"]
+body = """
+A separate loop over the same attributes, scanning `#[repr(...)]` for the word
+`packed` anywhere in it. `repr(C, packed)` and `repr(packed(2))` both count.
+
+It matters because a field of a packed struct cannot be borrowed, which changes
+what `get_member` may emit on the serialize side. A token scan rather than a
+parse, because `repr`'s grammar is not serde's to model and getting it slightly
+wrong here is better than rejecting a valid `repr`.
+
+`let _ =` on the result: a `repr` this cannot parse is not serde's error to
+report.
+"""
+
+[[annotation]]
+id    = "int-attr-0021"
+file  = "src/internals/attr.rs"
+lines = "519-546"
+title = "…and the struct, assembled with every default in one place"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+Every `unwrap_or` in the file is here. An unset `rename_all` becomes
+`RenameRule::None`, an unset `default` becomes `Default::None`, and so on — so
+no downstream reader ever handles an `Option` that only means "not written".
+
+`decide_tag` and `decide_identifier` are called here rather than during parsing,
+because both need to see several accumulators at once.
+"""
+
+[[annotation]]
+id    = "int-attr-0022"
+file  = "src/internals/attr.rs"
+lines = "547-621"
+title = "…and seventy-five lines of accessors"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+Eighteen getters, each two lines. They exist so `ser.rs` and `de.rs` read
+attributes through a method rather than a field, which keeps every field of
+`Container` private and lets one of them — `name` — return a computed view.
+
+Worth skimming as a list rather than reading: it is the same inventory as the
+struct definition, in the same order.
+"""
+
+[[annotation]]
+id    = "int-attr-0023"
+file  = "src/internals/attr.rs"
+lines = "622-681"
+title = "decide_tag — eight combinations of three attributes"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+`untagged`, `tag` and `content` are parsed independently and only make sense
+together, so the decision is one `match` over all eight combinations of present
+and absent.
+
+Four are errors, and each reports on *every* token involved — both `untagged`
+and `tag` get underlined when they conflict, which is why `Attr` kept the tokens
+around. The error arms all return `TagType::External` with a comment saying it
+does not matter; the build is already failing.
+
+The internal-tag arm carries a check of its own: tuple variants cannot be
+internally tagged, and it is caught here rather than in `check.rs` because this
+is where the tag type is decided. `break` after the first, because one message
+about the shape is enough.
+"""
+
+[[annotation]]
+id    = "int-attr-0024"
+file  = "src/internals/attr.rs"
+lines = "682-726"
+title = "decide_identifier — the same shape, over data kind as well"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+glossary = ["syn::DataStruct", "syn::DataUnion"]
+body = """
+Eight arms again, this time over the data kind and two flags. Both identifier
+attributes at once is an error; either one on a struct or a union is an error
+naming that keyword's token, so the message underlines `struct` rather than the
+whole item.
+
+`Identifier::No` is returned from every error arm, so nothing downstream sees a
+half-set state.
+"""
+[[annotation]]
+id    = "int-attr-0025"
+file  = "src/internals/attr.rs"
+lines = "727-746"
+title = "Variant — eleven fields, and the one that is a struct of its own"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+Fewer than `Container` has, because most container attributes have no meaning on
+one variant.
+
+`BorrowAttribute` is the only nested type: `#[serde(borrow)]` on a variant
+carries both the path it was written on and an optional explicit lifetime list,
+and the pair is needed together far below.
+"""
+
+[[annotation]]
+id    = "int-attr-0026"
+file  = "src/internals/attr.rs"
+lines = "747-775"
+title = "Variant::from_ast — twelve accumulators, and one of them is a Vec"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+`de_aliases` is a `VecAttr` where the container's equivalent was absent
+entirely: a container has no aliases, because nothing looks a container up by
+name.
+"""
+
+[[annotation]]
+id    = "int-attr-0027"
+file  = "src/internals/attr.rs"
+lines = "776-810"
+title = "…rename, alias, and rename_all"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+`get_multiple_renames` rather than `get_renames`: on a variant, the
+deserialize side may be given more than once, because `alias` and `rename` feed
+the same set.
+
+The `alias` branch is two lines because of that — it inserts into the same
+`de_aliases` the rename branch fills.
+"""
+
+[[annotation]]
+id    = "int-attr-0028"
+file  = "src/internals/attr.rs"
+lines = "811-829"
+title = "…skip, and the two halves it expands to"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+`skip` sets both `skip_serializing` and `skip_deserializing`, and the two
+specific forms are also accepted separately. Three attributes, two flags, and
+the expansion happens here rather than being re-derived at every read site.
+
+`other` is the `#[serde(other)]` marker, stored raw — every rule about where it
+may appear is in `check_identifier`.
+"""
+
+[[annotation]]
+id    = "int-attr-0029"
+file  = "src/internals/attr.rs"
+lines = "830-855"
+title = "…with, which is two attributes in one"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::ExprPath"]
+body = """
+`#[serde(with = "module")]` expands to `serialize_with = "module::serialize"`
+and `deserialize_with = "module::deserialize"`, and this is where the two paths
+are built by appending a segment.
+
+That is the whole of `with`: it is not a third mechanism, it is a convention for
+naming two functions. Reading this makes the module layout every
+`with = "..."` expects obvious.
+"""
+
+[[annotation]]
+id    = "int-attr-0030"
+file  = "src/internals/attr.rs"
+lines = "856-879"
+title = "…and borrow, which on a variant means the newtype field"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["lifetimes"]
+glossary = ["syn::Lifetime"]
+body = """
+`#[serde(borrow)]` on a variant applies to its single field, and it is stored
+rather than resolved because the field list is not available here — the
+`Variant` is parsed before its fields.
+
+The optional lifetime list is parsed now, when the tokens are in hand, and
+checked against the field's actual lifetimes later.
+"""
+
+[[annotation]]
+id    = "int-attr-0031"
+file  = "src/internals/attr.rs"
+lines = "880-916"
+title = "…untagged, the unknown-attribute error, and the borrow resolution"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+The per-variant `untagged` — different from the container's, and the reason
+`enum_::deserialize` splits the variant list.
+
+The tail is where the stored `borrow` is finally applied: the variant's single
+field is found, its lifetimes collected, and the attribute's explicit list
+validated against them. A lifetime named in `borrow(...)` that the field does
+not have is an error naming both.
+"""
+
+[[annotation]]
+id    = "int-attr-0032"
+file  = "src/internals/attr.rs"
+lines = "917-977"
+title = "…rename_by_rules, and the accessors"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+`rename_by_rules` is the method `ast.rs` calls to apply the container's
+`rename_all`, and the important line is the guard: it only renames a name that
+was **not explicitly renamed**. That is how `#[serde(rename = "X")]` survives a
+container-level `rename_all`, and the `serialize_renamed` flag from
+`name.rs` is what makes the distinction possible.
+
+The aliases are updated alongside the deserialize name, so a rule applied to a
+variant reaches everything that variant answers to.
+"""
+
+[[annotation]]
+id    = "int-attr-0033"
+file  = "src/internals/attr.rs"
+lines = "978-1012"
+title = "Field, and Default — the three states a missing field can be in"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::ExprPath"]
+body = """
+Thirteen fields, and `Default` is the one worth reading closely: absent, bare,
+or a named function, and those three are the ladder `expr_is_missing` walks.
+
+`transparent` is a field here but not an attribute — nothing parses it. It is
+set by `check.rs` after the fact, and `mark_transparent` far below is the only
+writer.
+"""
+
+[[annotation]]
+id    = "int-attr-0034"
+file  = "src/internals/attr.rs"
+lines = "1013-1074"
+title = "Field::from_ast — fourteen accumulators, and the raw identifier"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+The longest of the three, and the only one that takes the field's *index* — a
+tuple field has no name, so its wire name is its position as a string.
+
+`unraw` is applied to a named field here, which is where `r#type` becomes
+`type`.
+
+`container_default` is passed in because a field's own default handling depends
+on whether the container has one, and that is decided at the bottom of this
+function.
+"""
+
+[[annotation]]
+id    = "int-attr-0035"
+file  = "src/internals/attr.rs"
+lines = "1075-1098"
+title = "…rename, alias, and default"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+The same three-form handling as a variant's. `default` is the one with the extra
+branch: bare, or `= "path"`, and the path is parsed as an expression path so a
+generic function like `Vec::new` works.
+"""
+
+[[annotation]]
+id    = "int-attr-0036"
+file  = "src/internals/attr.rs"
+lines = "1099-1113"
+title = "…the three skips, and skip_serializing_if"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+`skip`, `skip_serializing`, `skip_deserializing` — the same expansion as on a
+variant — and then the one attribute with no variant counterpart.
+
+`skip_serializing_if` names a predicate run per value, which is why it produces
+an `if` in generated code rather than a decision made here.
+"""
+
+[[annotation]]
+id    = "int-attr-0037"
+file  = "src/internals/attr.rs"
+lines = "1114-1145"
+title = "…serialize_with, deserialize_with, with, and bound"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+`with` expands to the other two exactly as it does on a variant, by appending
+`::serialize` and `::deserialize` to the module path.
+
+The duplicate detection means `#[serde(with = "m", serialize_with = "f")]`
+reports rather than silently preferring one — the expansion goes through the
+same `Attr::set` the explicit form uses.
+"""
+
+[[annotation]]
+id    = "int-attr-0038"
+file  = "src/internals/attr.rs"
+lines = "1146-1167"
+title = "…and borrow, which on a field is resolved immediately"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["lifetimes", "borrowing"]
+body = """
+Unlike the variant case, the field's type is in hand, so the lifetimes are
+collected and validated here: `borrow` with no lifetimes in the type is an
+error, and an explicitly listed lifetime the type does not have is an error
+naming it.
+
+`borrowable_lifetimes` is the function doing that, and the message it produces —
+"field `x` has no lifetimes to borrow" — is the one people meet when they put
+`borrow` on a `String`.
+"""
+
+[[annotation]]
+id    = "int-attr-0039"
+file  = "src/internals/attr.rs"
+lines = "1168-1187"
+title = "…getter, flatten, and the end of the chain"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+The last two attributes, both stored raw with every rule about them in
+`check.rs` — `getter` requires `remote`, `flatten` forbids tuple and newtype
+structs.
+
+The unknown-attribute error is the field-level twin of the container's, naming
+"field attribute" so the message says which level was wrong.
+"""
+
+[[annotation]]
+id    = "int-attr-0040"
+file  = "src/internals/attr.rs"
+lines = "1188-1194"
+title = "…and the implicit default that skip_deserializing carries"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+Seven lines with a real consequence: a skipped field gets `Default::default()`
+unless something else supplies a value. Without this, `#[serde(skip)]` would be
+a compile error on every type, because the generated constructor would have
+nothing to put in the field.
+
+`set_if_none` rather than `set`, so a field with both `skip` and an explicit
+`default = "..."` keeps the explicit one — and gets no duplicate-attribute
+error for a value it did not write.
+"""
+
+[[annotation]]
+id    = "int-attr-0041"
+file  = "src/internals/attr.rs"
+lines = "1195-1245"
+title = "…and the Cow special case, which is the whole of zero-copy borrowing"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["lifetimes", "borrowing", "lifetime-de"]
+body = """
+Fifty lines, and the comment above them is the clearest statement in the crate
+of what `#[serde(borrow)]` actually does.
+
+`Cow<'a, str>` has a blanket `Deserialize` impl that never borrows — it cannot,
+because `Cow` must work for owned data too. So `borrow` on a `Cow` field does
+not change the impl; it **substitutes a different deserialize function**,
+`private::de::borrow_cow_str`, which produces the borrowed variant.
+
+`set_if_none`, so an explicit `deserialize_with` still wins.
+
+The `else` branch is the case needing no attribute at all: `&str` and `&[u8]`
+can only ever borrow, so their lifetimes are collected whether or not anyone
+asked.
+"""
+
+[[annotation]]
+id    = "int-attr-0042"
+file  = "src/internals/attr.rs"
+lines = "1246-1263"
+title = "…and the Field, assembled"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+Same shape as the container's constructor. `transparent: false` is the one field
+not derived from an attribute — `check.rs` sets it later, and starting from
+`false` is what makes `mark_transparent` a one-way switch.
+"""
+
+[[annotation]]
+id    = "int-attr-0043"
+file  = "src/internals/attr.rs"
+lines = "1264-1340"
+title = "…the field accessors, and the one mutator in the file"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+Seventeen getters, and `mark_transparent`, which is the only `&mut self` method
+on any of the three attribute types.
+
+Its existence is the reason `check::check` takes `&mut Container`, four files
+away. A getter list is a dull thing to read, but this one line in the middle of
+it explains a signature that otherwise looks like an oversight.
+"""
+[[annotation]]
+id    = "int-attr-0044"
+file  = "src/internals/attr.rs"
+lines = "1341-1385"
+title = "get_ser_and_de — why every attribute accepts two forms for free"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["closures", "generic-params"]
+glossary = ["syn::meta::ParseNestedMeta", "syn::Token"]
+body = """
+The function behind `rename`, `rename_all`, `bound` and `alias` all accepting
+both `attr = "x"` and `attr(serialize = "x", deserialize = "y")`.
+
+`lookahead1` peeks for `=` or `(` and branches; the `=` case inserts the same
+value into both directions, cloning it. Generic over the inner parser `f`, so
+the same logic serves string literals and where-predicates.
+
+The `else` returns `lookahead.error()`, which is syn's accumulated "expected one
+of" message — so `rename: "x"` reports the two things that would have worked
+rather than a generic parse failure.
+"""
+
+[[annotation]]
+id    = "int-attr-0045"
+file  = "src/internals/attr.rs"
+lines = "1386-1410"
+title = "…and the three thin wrappers over it"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::LitStr", "syn::WherePredicate"]
+body = """
+`get_renames` and `get_where_predicates` collapse both sides with
+`at_most_one`; `get_multiple_renames` keeps the deserialize side as a `Vec`,
+which is the only difference between `rename` on a container and on a variant.
+
+Three functions, each four lines, and between them they are the reason the
+attribute chains above are readable.
+"""
+
+[[annotation]]
+id    = "int-attr-0046"
+file  = "src/internals/attr.rs"
+lines = "1411-1454"
+title = "get_lit_str — unwrapping groups, and rejecting a suffix"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::Expr", "syn::ExprLit", "syn::Lit", "syn::LitStr"]
+body = """
+The workhorse: pull a string literal out of an attribute value.
+
+The `while let Expr::Group` loop is the same invisible-group problem `ungroup`
+solves for types — a literal arriving through another macro is wrapped, and
+matching `Expr::Lit` directly would fail for it.
+
+The suffix check catches `rename = "foo"bar`, which parses as a literal with a
+suffix and would otherwise be silently accepted with the suffix discarded.
+
+`Ok(None)` after recording an error, not `Err`: this is the module comment's
+rule again — keep going, collect everything.
+"""
+
+[[annotation]]
+id    = "int-attr-0047"
+file  = "src/internals/attr.rs"
+lines = "1455-1496"
+title = "parse_lit_into_path and parse_lit_into_expr_path"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::Path", "syn::ExprPath"]
+body = """
+Both take the string a `get_lit_str` produced and parse it as Rust, and both
+call `respan` on the result — which is what makes an error inside
+`with = "my::module"` point at the string the user wrote rather than at the
+macro.
+
+Two functions because a `Path` and an `ExprPath` are different types in syn, and
+the difference matters at the interpolation site: an `ExprPath` can appear where
+a function value is expected.
+"""
+
+[[annotation]]
+id    = "int-attr-0048"
+file  = "src/internals/attr.rs"
+lines = "1497-1540"
+title = "…where-predicates and types, parsed the same way"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::WherePredicate", "syn::Type", "syn::punctuated::Punctuated"]
+body = """
+`bound = "T: Serialize + Clone"` is parsed as a punctuated list of predicates,
+and `from = "Vec<u8>"` as a type. Both go through `parse_with` on the literal,
+so the span of every token in the result points inside the user's string.
+
+That is the mechanism behind serde's best diagnostics on these attributes: the
+compiler underlines the offending part of the string, not the whole attribute.
+"""
+
+[[annotation]]
+id    = "int-attr-0049"
+file  = "src/internals/attr.rs"
+lines = "1541-1578"
+title = "parse_lit_into_lifetimes — `borrow(\"'a + 'b\")`"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["lifetimes"]
+glossary = ["syn::Lifetime", "syn::Token"]
+body = """
+A hand-written `+`-separated parser, because syn has no punctuated-lifetime
+type to reach for.
+
+Two errors it can raise beyond a parse failure: a duplicate lifetime in the
+list, and an empty list — `borrow("")` is almost certainly a mistake, and
+accepting it would silently mean "borrow nothing".
+"""
+
+[[annotation]]
+id    = "int-attr-0050"
+file  = "src/internals/attr.rs"
+lines = "1579-1608"
+title = "is_implicitly_borrowed, and the comment on is_cow that admits its limits"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["borrowing"]
+body = """
+`&str`, `&[u8]`, and `Option` of either: types that can only ever borrow, so no
+attribute is needed.
+
+The twenty-line comment above `is_cow` is the honest part and is worth reading
+in full. It states, with examples, that this test has both false negatives — a
+`Cow` imported under another name is missed — and false positives — a local type
+called `str` is matched.
+
+A proc macro cannot resolve names; it sees tokens. Every type test in every
+derive macro has this limitation, and most of them do not say so.
+"""
+
+[[annotation]]
+id    = "int-attr-0051"
+file  = "src/internals/attr.rs"
+lines = "1609-1676"
+title = "is_cow and is_option — matching a shape, one segment at a time"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::PathArguments", "syn::GenericArgument", "syn::AngleBracketedGenericArguments"]
+body = """
+Both walk the same path: last segment, check the name, check the angle-bracketed
+arguments, check the element. `is_cow` wants two arguments with the second
+matching; `is_option` wants one.
+
+Written out twice rather than abstracted, and the structure is nearly identical —
+which is what happens when the abstraction would need a description of "which
+argument" as a parameter and save nothing.
+"""
+
+[[annotation]]
+id    = "int-attr-0052"
+file  = "src/internals/attr.rs"
+lines = "1677-1694"
+title = "…is_reference, is_str, is_slice_u8"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::Type"]
+body = """
+Three small predicates composed into the two above. `is_str` is a primitive-type
+check by name; `is_slice_u8` is a slice whose element is the primitive `u8`.
+
+Passing predicates as `fn` pointers rather than closures keeps these functions
+non-generic, which matters for compile time in a proc macro that is built by
+every downstream crate.
+"""
+
+[[annotation]]
+id    = "int-attr-0053"
+file  = "src/internals/attr.rs"
+lines = "1695-1715"
+title = "…and is_primitive_path, which accepts three spellings"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::Path", "syn::PathSegment"]
+body = """
+`str`, `std::primitive::str` and `core::primitive::str` all count. The
+`primitive` module exists precisely so a shadowed primitive name can still be
+reached, and accepting only the bare form would break exactly the code that
+worked around the problem properly.
+
+Still a token comparison, with the same limits the `is_cow` comment described.
+"""
+
+[[annotation]]
+id    = "int-attr-0054"
+file  = "src/internals/attr.rs"
+lines = "1716-1731"
+title = "borrowable_lifetimes — and the error people actually see"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["lifetimes", "result"]
+body = """
+Collect the type's lifetimes; if there are none, report "field `x` has no
+lifetimes to borrow" and fail.
+
+`Result<_, ()>` rather than an `Option` — the unit error carries nothing because
+the message is already in `Ctxt`, and the caller only needs to know to stop.
+"""
+
+[[annotation]]
+id    = "int-attr-0055"
+file  = "src/internals/attr.rs"
+lines = "1732-1798"
+title = "collect_lifetimes — every lifetime a type mentions, structurally"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["lifetimes", "pattern-matching"]
+glossary = ["syn::Type", "syn::GenericArgument", "syn::QSelf"]
+body = """
+Sixty-seven lines of recursion over `syn::Type`, and the interesting arms are
+the last few.
+
+`Type::Path` descends into generic arguments *and* into a qualified self type,
+so `<Foo<'a> as Trait>::Assoc` is covered. `Type::Macro` cannot be parsed at all
+— the macro has not expanded — so it falls back to scanning raw tokens.
+
+The `cfg_attr(all(test, exhaustive), deny(non_exhaustive_omitted_patterns))`
+attribute on the match is upstream's own guard: syn's `Type` is
+`#[non_exhaustive]`, and that lint makes a new variant a *test* failure rather
+than something silently swallowed by the `_` arm. A neat answer to the problem
+of exhaustively matching a type you do not own.
+"""
+
+[[annotation]]
+id    = "int-attr-0056"
+file  = "src/internals/attr.rs"
+lines = "1799-1818"
+title = "…and the token scan for types inside a macro"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["lifetimes"]
+glossary = ["proc_macro2::TokenTree", "proc_macro2::Spacing", "syn::Lifetime"]
+body = """
+The fallback, and the last twenty lines of the file: walk raw tokens looking for
+an apostrophe punct joined to an identifier, which is how a lifetime is spelled
+at the token level.
+
+`Spacing::Joint` is the whole check — `'a` has no space between the apostrophe
+and the name, and a `'` followed by a space is something else. Getting that
+wrong would collect lifetimes from character literals.
+
+Recursing into groups, because `mac!(Foo<'a>)` nests.
+"""
