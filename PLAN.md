@@ -594,7 +594,7 @@ exactly the lie §11 refused to tell about the walk.
 | phase | scope | annots | exit criteria |
 |---|---|---:|---|
 | **R1 — Two coverage sources** ✅ | `Pin::primary` retires; `Store`, `manifest.toml` and `coverage.json` become per-source; D12 | 0 | `cargo xtask coverage` reports `serde_core` 12,037/12,037 **and** `serde_derive` 0/8,975 without error; every existing gate still fires on the first source; a role no gate knows is still a build failure |
-| **R2 — Vertical slice: `ser.rs`** | The densest codegen file, 1,369 lines and 76 `quote!` blocks, and the one the narrative already walks | ~98 | `ser.rs` at 100%; the `codegen` kind proven in the renderer; an annotation's `emits` checked against a real expansion at annotation granularity (D10); its narrative steps retargeted |
+| **R2 — Vertical slice: `ser.rs`** ✅ | The densest codegen file, 1,369 lines and 76 `quote!` blocks, and the one the narrative already walks | 96 | `ser.rs` at 100%; the `codegen` kind proven in the renderer; an annotation's `emits` checked against a real expansion at annotation granularity (D10); its narrative steps retargeted |
 | **R3 — The rest of codegen** | `de.rs`, then `de/struct_.rs`, `de/tuple.rs`, `de/unit.rs`, `de/identifier.rs`, and the four enum representations | ~240 | codegen at 100%; the four representations read as four variations, not four transcripts |
 | **R4 — `internals/`** | `attr.rs` (1,818 lines, the attribute DSL), `check.rs`, `ast.rs`, `case.rs`, `name.rs`, `symbol.rs`, `ctxt.rs`, `respan.rs`, `mod.rs` | ~108 | the `#[serde(...)]` surface is claimed, including what upstream rejects and why |
 | **R5 — Plumbing** | `bound.rs`, `receiver.rs`, `pretend.rs`, `lib.rs`, `fragment.rs`, `deprecated.rs`, `this.rs`, `dummy.rs` | ~56 | **every line of `serde_derive` claimed**; all 28 files in its manifest; the gate hard-fails on regression; all 85 narrative steps name a containing annotation |
@@ -628,6 +628,37 @@ against real content *before* 400 more annotations are committed to a shape
 that might be wrong. `ser.rs` is the right file for it because the narrative
 already walks it, so R2 is also the first retargeting and will find whatever
 the conversion above actually costs.
+
+### What R2 shipped
+
+96 annotations, 1,369 lines, `src/ser.rs` declared complete. Four things came
+out of doing it that R3 through R5 inherit.
+
+**The `codegen` kind, and what it renders.** 79 of the 96 are `codegen`; the
+other 17 are `plumbing`. 25 of them carry an `emits` claim, which is D10's
+mechanism moved from the narrative onto a reference-track annotation: the store
+holds a *locator*, `cargo site` finds it in a real expansion and renders the
+expansion's bytes, and the page does not build if `serde_derive` stops emitting
+it. Both tracks now read one expansion cache, so they cannot disagree about what
+the crate emits.
+
+**Two more committed cases.** `enum_externally_tagged` reaches all four arms of
+`effective_style` in one input, and `enum_adjacently_tagged` is the one shape
+whose `Serialize` side generates a helper type. Between them they took the file
+from "most of these annotations cannot show their output" to a quarter that can.
+
+**The estimate held, slightly under.** 96 against the projected 98, at 14.3
+lines each against the projected 14. That is one file, and `internals/attr.rs`
+is still the density risk — but the compression this file did *not* get is the
+one the scope doc predicted, so there is no reason yet to move the 502.
+
+**The narrative converted, and the ratchet worked.** Declaring `ser.rs` complete
+turned exactly 13 gate errors on, one per step citing the file, and each was
+fixed by naming the annotation it lands in. Five of the thirteen did not fit
+inside any single annotation, which is the useful signal: four were annotation
+boundaries drawn too finely for a stop the walk had already justified as one
+idea, and they were merged; one was a step whose prose had outgrown what it
+cited, and it was rewritten. R3 through R5 should expect the same ratio.
 
 R3–R5 are pure content throughput and can be reordered freely, with one
 exception: `internals/attr.rs` is the density risk the scope doc flagged

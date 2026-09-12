@@ -19,8 +19,8 @@ answers the question most readers actually arrive with — **what does
 through `serde_derive` and running the expansion in the browser.
 
 > **Status: live. Three tracks complete, and a fourth thing under way** — the
-> reference track now covers a second crate, `serde_derive`, at 0 of 8,975
-> lines (PLAN.md §12).
+> reference track now covers a second crate, `serde_derive`, at 1,369 of 8,975
+> lines with `src/ser.rs` complete (PLAN.md §12).
 >
 > **Reference** — every line of `serde_core` is annotated: all 19 files at
 > 100%, listed in `annotations/serde_core/manifest.toml`, so the gate hard-fails

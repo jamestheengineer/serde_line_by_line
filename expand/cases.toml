@@ -86,3 +86,33 @@ This is worth a case of its own because it is the same code path: a derive that
 fails still returns tokens, and the tokens are an error the compiler will
 report at the right span. Nothing on this page invents an error message.
 """
+
+[[case]]
+name = "enum_externally_tagged"
+title = "An externally tagged enum, all four shapes"
+body = """
+The default representation, and the one input here that reaches all four arms
+of `effective_style`. A unit variant becomes `serialize_unit_variant`, a
+newtype `serialize_newtype_variant`, a tuple `serialize_tuple_variant` with a
+field count, and a struct variant `serialize_struct_variant` — four different
+`Serializer` methods for what looks in the source like one enum.
+
+The variant index is a literal in every one of them. Nothing counts variants at
+runtime; `serialize_variant` is called with `variant_index` already known,
+which is why a format that writes the index rather than the name costs nothing
+extra.
+"""
+
+[[case]]
+name = "enum_adjacently_tagged"
+title = "An adjacently tagged enum"
+body = """
+`tag` and `content` put the discriminant and the payload in two named fields of
+one struct, and that is the shape whose `Serialize` side generates a helper
+type. The payload has to be serialized as a single value, so `serde_derive`
+emits a private `__AdjacentlyTagged` struct holding references to the variant's
+fields, implements `Serialize` for it, and passes it as the content field.
+
+It is the clearest example in the crate of generated code that is not a
+rewriting of the input: nothing in `Event` corresponds to `__AdjacentlyTagged`.
+"""

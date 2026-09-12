@@ -22,6 +22,22 @@
       <div class="elided">&hellip; {{ b.hidden_lines }} more lines</div>
     {%- endif %}
     </div>
+    {# What this span emits, sliced out of a real expansion at build time. The
+       claim is not stored; if serde_derive stopped emitting it, this page
+       would not build (D10). #}
+    {% for e in b.emits %}
+    <div class="emits">
+      <div class="codehead">
+        <span class="range">emits &middot; {{ e.derive }} of <code>{{ e.case }}</code></span>
+        <span class="origin">{{ e.range_label }} of the expansion</span>
+      </div>
+      <div class="src">
+      {%- for line in e.code %}
+        <div class="ln" data-n="{{ line.number }}"><span class="num">{{ line.number }}</span><code>{{ line.html|safe }}</code></div>
+      {%- endfor %}
+      </div>
+    </div>
+    {% endfor %}
   </div>
   <div class="note">
     {% if b.annotated %}

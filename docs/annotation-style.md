@@ -13,9 +13,42 @@ than in most projects, because the reader meets these back to back for hours.
 | `macro-use` | 1–3 sentences | What this instance produces, and a `macro_def` link to its definition. Never re-explain the macro. |
 | `impl` | 60–150 words | Focus on what is surprising about *this* impl. |
 | `plumbing` / `cfg-gate` | 40–120 words | Short. Say what it is for and move on. |
+| `codegen` | 60–200 words | A `quote!` block, or the function assembling one. Say what comes out and why that shape — and carry an `emits` claim wherever a committed expansion shows it. |
 
 A span of more than ~40 lines usually means the annotation is doing too much.
 Split it.
+
+## Writing `codegen` annotations
+
+`serde_derive` has 2 `macro_rules!` and 271 `quote!` invocations, so the
+`macro-def` / `macro-use` compression that carried `serde_core` does not exist
+there (PLAN.md §12). What takes its place is showing the output.
+
+- **Carry an `emits` claim whenever a committed case shows the code.** Set
+  `emits`, `emits_from` and `emits_case`. The claim is a *locator*, not stored
+  output: `cargo site` finds it in a real expansion and renders the expansion's
+  bytes, so the page does not build if `serde_derive` stops emitting it (D10).
+  Quote the shortest run of lines that makes the point.
+- **Do not paraphrase the emitted code in prose.** It is on the page. Say why
+  it has that shape, what would break otherwise, and which decision upstream
+  produced it.
+- **Name the expansion-time / run-time line.** The most valuable sentence in
+  most of these is which half of a decision happened in the macro. A reader who
+  has internalized that `rename_all` leaves no trace in the output has learned
+  the thing the track exists to teach.
+- **A `codegen` annotation that emits nothing is fine.** Most representations
+  have no committed case, and inventing one to decorate an annotation is worse
+  than leaving the claim off.
+
+To see what a case expands to, with line numbers to write the claim against:
+
+```
+cargo run -p expand --example dump -- struct_rename serialize
+```
+
+Adding a case is a `.rs` file in `expand/cases/`, a `[[case]]` in
+`expand/cases.toml`, and `cargo test -p expand -- --ignored` to regenerate the
+committed transcript. Read the transcript diff before committing it.
 
 ## Voice
 
@@ -104,6 +137,9 @@ reader finds the other 723 places `'de` shows up.
 - [ ] Every non-obvious claim has an example or a verified reference
 - [ ] The file reads end to end without assuming anything not yet introduced,
       or explicitly links forward when it must
+- [ ] Every narrative step citing the file names a containing annotation. Once
+      the file is `complete` the gate requires it, and the walk links there
+      rather than explaining the same lines twice.
 - [ ] Add it to `complete` in `annotations/<crate>/manifest.toml` — this makes future
       gaps a hard CI failure
 

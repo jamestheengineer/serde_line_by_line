@@ -166,6 +166,8 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
         });
     }
 
+    let cases = expand_case_names(repo)?;
+
     // 3. Identity and cross-reference integrity, over every store at once.
     //    Annotation ids are one namespace across the project: the narrative
     //    names them without saying which crate, and a prereq may cross.
@@ -228,6 +230,50 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
                     ));
                 }
             }
+            // `emits` is D10's mechanism on a reference-track annotation: the
+            // claim is not stored output, it is a locator into a real
+            // expansion, and the site generator slices it there. What is
+            // checkable here is the bookkeeping — the gate has no business
+            // compiling `serde_derive` to find out whether a claim still
+            // holds, and `cargo site` is a CI gate and a pre-push gate, so a
+            // stale claim fails either way.
+            match (&a.emits, a.emits_from, &a.emits_case) {
+                (Some(_), None, _) => diag.error(format!(
+                    "{}: has emits but no emits_from — which half of the expansion?",
+                    a.id
+                )),
+                (Some(_), _, None) => diag.error(format!(
+                    "{}: has emits but no emits_case — which input to expand?",
+                    a.id
+                )),
+                (None, from, case) => {
+                    if from.is_some() || case.is_some() {
+                        diag.error(format!(
+                            "{}: has emits_from or emits_case but no emits",
+                            a.id
+                        ));
+                    }
+                }
+                (Some(_), Some(_), Some(case)) => {
+                    if !cases.contains(case) {
+                        diag.error(format!(
+                            "{}: emits_case {case:?} is not a file in expand/cases/",
+                            a.id
+                        ));
+                    }
+                    // Only a `codegen` annotation may claim output. The kind is
+                    // what tells a reader the block below is generated rather
+                    // than quoted, and an `impl` annotation that emits would
+                    // render the code with no label saying where it came from.
+                    if a.kind != Kind::Codegen {
+                        diag.error(format!(
+                            "{}: kind {:?} claims emitted code; only codegen may",
+                            a.id, a.kind
+                        ));
+                    }
+                }
+            }
+
             // A macro-use annotation is only cheap because it links back to the
             // macro-def that explains it. Without that link it is just an
             // unexplained span, and the renderer has nothing to collapse it
@@ -285,7 +331,7 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
 
     // 7. The narrative track, which is now an ordering over both annotated
     //    stores rather than a walk of an unclaimed one (PLAN.md §12).
-    let narrative = check_narrative(repo, &by_id, &glossary, &mut diag)?;
+    let narrative = check_narrative(repo, &by_id, &glossary, &cases, &mut diag)?;
 
     let report = Report {
         sources,
@@ -682,14 +728,13 @@ fn check_narrative(
     repo: &Path,
     by_id: &HashMap<&str, &Annotation>,
     glossary: &HashSet<String>,
+    cases: &HashSet<String>,
     diag: &mut Diagnostics,
 ) -> Result<Vec<NarrativeUnitReport>> {
     let units = slbl_core::read_narrative(repo)?;
     if units.is_empty() {
         return Ok(Vec::new());
     }
-
-    let cases = expand_case_names(repo)?;
 
     // Position in the walk, for the forward-reference check. Steps are numbered
     // across units rather than within them, because the walk is one sequence.

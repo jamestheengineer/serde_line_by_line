@@ -1,0 +1,1897 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "ser-0001"
+file  = "src/ser.rs"
+lines = "1-12"
+title = "What a code generator imports"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["proc_macro2::Span", "proc_macro2::TokenStream", "quote::quote", "quote::quote_spanned", "syn::spanned::Spanned", "syn::Ident", "syn::Index", "syn::Member", "syn::parse_quote"]
+body = """
+Read the import list as a table of contents. Three of these lines are the whole
+reason this crate is different from the one it generates calls into.
+
+`proc_macro2::TokenStream` is the currency: everything this file builds and
+returns is a stream of tokens, never a string and never an AST it constructs by
+hand. `quote` and `quote_spanned` are how a token stream gets written — you
+will see 76 of them in this file. `syn::spanned::Spanned` is how a span gets
+taken off an input token so an error about generated code points at the user's
+source instead of at nothing.
+
+Everything under `crate::` is the division of labour. `internals::ast` holds
+the shape of the input after parsing, `internals::attr` the `#[serde(...)]`
+attributes after validation, `bound` the generic-bound inference, `fragment`
+the expression-versus-block distinction that runs through every function here.
+This file does none of those jobs. It decides what code to emit.
+"""
+
+[[annotation]]
+id    = "ser-0002"
+file  = "src/ser.rs"
+lines = "13-28"
+title = "expand_derive_serialize — the pipeline, and the five values it builds"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["proc-macro-boundary", "result"]
+glossary = ["syn::DeriveInput", "syn::Result"]
+body = """
+This is where `#[derive(Serialize)]` arrives, and it is worth reading as two
+halves: six lines that refuse to continue, then five bindings the rest of the
+function interpolates.
+
+`replace_receiver` rewrites `Self` in the input to the concrete type name,
+because the generated code lives inside a different `impl` than the one the user
+wrote and `Self` there would mean something else. `Container::from_ast` parses
+the `#[serde(...)]` attributes and normalizes the shape; it returns `None` when
+that failed, and the `let ... else` returns the accumulated errors rather than a
+single one.
+
+That accumulation is the thing to notice. `Ctxt` collects every error instead of
+bailing at the first, so a struct with four bad attributes reports four
+problems. `ctxt.check()?` is where they are drained, and it is called twice —
+once inside the `else`, once after `precondition` — because a `Ctxt` dropped
+with unchecked errors panics on purpose.
+
+Then the five values. `params` carries everything about the target type that
+codegen needs. `split_for_impl` turns one `Generics` into the three fragments an
+impl header needs, which are genuinely different: the impl side carries bounds,
+the type side does not, and the where clause is separate again. And `body` is a
+`Fragment` — either an expression or a block — wrapped in `Stmts` to say "render
+this as statements". That distinction exists because an expression can be the
+tail of a function and a block cannot be spliced into one, and getting it wrong
+produces code that does not compile rather than code that misbehaves.
+"""
+
+[[annotation]]
+id    = "ser-0003"
+file  = "src/ser.rs"
+lines = "29-45"
+title = "The remote branch — an inherent fn, not a trait impl"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["proc-macro-boundary", "visibility"]
+body = """
+`#[serde(remote = "...")]` exists for a type you do not own, and it cannot
+produce `impl Serialize for ThatType` because that impl would be an orphan.
+
+So this branch emits an inherent `impl` on *your* placeholder type with a
+`serialize` function of the same shape, taking the remote type by reference as
+`__self` rather than `&self`. You then point `#[serde(with = "Placeholder")]`
+at it from a field. The generated signature is deliberately identical to the
+trait method's, so the call site does not care which it got.
+
+`#vis` is the user's own visibility, copied through. `pretend_used` is the odd
+one: it emits code that touches every field so the compiler stops warning about
+fields the remote definition never reads.
+"""
+
+[[annotation]]
+id    = "ser-0004"
+file  = "src/ser.rs"
+lines = "46-58"
+title = "The ordinary branch — the impl this whole crate exists to write"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["generic-params", "where-clauses", "associated-types"]
+emits_from = "serialize"
+emits_case = "struct_rename"
+emits = """
+    impl _serde::Serialize for Point {
+        fn serialize<__S>(
+            &self,
+            __serializer: __S,
+        ) -> _serde::__private229::Result<__S::Ok, __S::Error>
+        where
+            __S: _serde::Serializer,
+        {
+"""
+body = """
+Thirteen lines, and every `#` is a hole. What comes out is on the right.
+
+Four things are worth reading off the template rather than the output.
+`__S` is the type parameter name, double-underscored so it cannot collide with
+a parameter the user wrote — there is no hygiene for generic parameters in a
+derive macro, so the convention has to do the work. `_serde` is the crate alias
+established outside this block, so the impl works whether or not the user has
+`serde` in scope under that name. `#private` is a versioned module path, which
+is how serde keeps a genuinely private API private across releases. And
+`#allow_deprecated` is there so deriving on a deprecated type does not warn at
+the derive site.
+
+The return type is `Result<__S::Ok, __S::Error>` — both associated types of the
+format's `Serializer`, not of the data. That is the shape decision this file
+inherits from `serde_core` and never gets to make.
+"""
+
+[[annotation]]
+id    = "ser-0005"
+file  = "src/ser.rs"
+lines = "59-65"
+title = "wrap_in_const — why the output starts with `const _: () = {`"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["modules", "macro-hygiene"]
+emits_from = "serialize"
+emits_case = "struct_rename"
+emits = """
+const _: () = {
+    #[allow(unused_extern_crates, clippy::useless_attribute)]
+    extern crate serde as _serde;
+"""
+body = """
+The impl is wrapped in an anonymous `const` block, and that wrapper is doing
+three jobs at once.
+
+It scopes the `extern crate serde as _serde;` so the alias exists for the
+generated code and nowhere else — this is the substitute for macro hygiene that
+a derive macro does not get. It keeps the helper types the expansion sometimes
+emits (`__SerializeWith`, `__AdjacentlyTagged`) out of the user's namespace. And
+because a `const _` item can appear anywhere an item can, the expansion is legal
+inside a function body as well as at module scope.
+
+`custom_serde_path` is what `#[serde(crate = "...")]` feeds, for the case where
+serde has been re-exported under another name.
+"""
+
+[[annotation]]
+id    = "ser-0006"
+file  = "src/ser.rs"
+lines = "66-77"
+title = "precondition — two attributes that only make sense when deserializing"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+`#[serde(field_identifier)]` and `#[serde(variant_identifier)]` mark a type used
+to *name* a field or variant while deserializing. There is nothing to serialize
+about them, so this reports an error rather than generating something useless.
+
+`error_spanned_by(cont.original, ...)` is the pattern to notice: the span comes
+from the user's own item, so the message lands under their type rather than at
+the macro call. That is the whole reason `original` is kept on `Container`.
+"""
+
+[[annotation]]
+id    = "ser-0007"
+file  = "src/ser.rs"
+lines = "78-101"
+title = "Parameters — the six facts the templates interpolate"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::Ident", "syn::Path", "syn::Generics"]
+body = """
+Everything downstream reads from this struct, so it is worth knowing what each
+field decides.
+
+`self_var` is `self` or `__self`, and it is a field rather than a constant
+because the remote branch generates a free function whose receiver has another
+name. `this_type` and `this_value` are the same path in the two positions Rust
+spells differently — `Foo<T>` in type position, `Foo::<T>` in expression
+position — and keeping both avoids threading turbofish decisions through a
+dozen functions.
+
+`generics` is not the input's generics: it is the inferred set, after bounds
+have been added. `is_packed` exists because a field of a `repr(packed)` struct
+cannot be borrowed, which changes what `get_member` may emit.
+"""
+
+[[annotation]]
+id    = "ser-0008"
+file  = "src/ser.rs"
+lines = "102-125"
+title = "Parameters::new — where the remote decision cascades from"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+One attribute drives two fields. `remote()` being present makes `self_var`
+`__self`, and the same fact reaches `this_type` and `this_value` through
+`this::this_type` and `this::this_value`, which return the remote path instead
+of the local ident.
+
+`build_generics` is called here rather than lazily, which matters: the bound
+inference walks every field of the container, and doing it once at construction
+means the rest of the file can treat `params.generics` as a plain value.
+"""
+
+[[annotation]]
+id    = "ser-0009"
+file  = "src/ser.rs"
+lines = "126-132"
+title = "type_name — the last path segment, as a string"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+The name a `Serializer` is told, and the name that appears in error messages.
+It is the *last* segment deliberately: for a remote type `some::other::Crate`,
+the format should be told `Crate`, because that is what the wire format of the
+original type would have said.
+"""
+
+[[annotation]]
+id    = "ser-0010"
+file  = "src/ser.rs"
+lines = "133-154"
+title = "build_generics — four transformations, in an order that matters"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["generic-params", "where-clauses"]
+glossary = ["syn::Generics", "syn::parse_quote"]
+body = """
+The generics on the emitted impl are the input's, put through four passes.
+
+Defaults come off first, because `struct Foo<T = u32>` has a default in its
+definition and repeating it on the impl is a syntax error. Then per-field and
+per-variant `#[serde(bound = "...")]` predicates are added. Then the container's
+own `bound` attribute, if present, *replaces* inference entirely — that is the
+escape hatch, and the `match` is where it is honoured.
+
+Only in the `None` arm does inference run: `with_bound` adds `T: Serialize` for
+each type parameter that appears in a field type that will actually be
+serialized. `needs_serialize_bound` is the predicate deciding "actually".
+"""
+
+[[annotation]]
+id    = "ser-0011"
+file  = "src/ser.rs"
+lines = "155-170"
+title = "needs_serialize_bound — four ways for a field to opt out"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["where-clauses", "closures"]
+body = """
+A field contributes a `T: Serialize` bound unless it is skipped, serialized by
+someone else's function, carries its own bound, or belongs to a variant that
+does any of those three.
+
+The reason this predicate exists at all is that the naive rule — bound every
+type parameter — generates impls that do not compile for types serde never
+touches. `PhantomData<T>` is the standard example: `T` appears in a field type,
+`T: Serialize` gets required, and a user with a non-`Serialize` marker type is
+stuck writing `#[serde(bound = "")]` to undo it.
+
+`variant.map_or(true, ...)` reads as "if there is no variant, nothing at the
+variant level objects".
+"""
+
+[[annotation]]
+id    = "ser-0012"
+file  = "src/ser.rs"
+lines = "171-190"
+title = "serialize_body — the fork that picks one of seven shapes"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+Every `Serialize` body in existence comes out of this `match`, and the order of
+the three levels is the precedence the attributes have.
+
+`transparent` wins over everything: the struct disappears and its one field is
+serialized in its place. `into` comes next: the value is cloned, converted, and
+the conversion target is serialized instead. Only if neither is set does the
+shape of the data decide, and `Style` has been normalized by this point so a
+one-field tuple struct is `Newtype` rather than `Tuple`.
+
+Each arm returns a `Fragment`, not a `TokenStream`. Some of these bodies are a
+single expression and some are a block of statements ending in one, and the
+caller needs to know which — that is `Fragment`'s entire job.
+"""
+
+[[annotation]]
+id    = "ser-0013"
+file  = "src/ser.rs"
+lines = "191-208"
+title = "serialize_transparent — find the one field that is not skipped"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+`#[serde(transparent)]` means the wrapper does not exist on the wire. The
+validation that exactly one field is transparent happened in `internals::check`,
+which is why the `unwrap` here is safe and the `unreachable!` for enums is not
+a shortcut — `transparent` on an enum is rejected before this runs.
+
+The `path` match is the pattern this file uses everywhere for
+`#[serde(serialize_with = "...")]`: if the user named a function, call it; if
+not, call `Serialize::serialize` with the *field's own span* attached.
+`quote_spanned` is what makes a type error in the generated call point at the
+field, and it is the difference between a usable error message and
+"expected Serialize, found Foo" with no location.
+"""
+
+[[annotation]]
+id    = "ser-0014"
+file  = "src/ser.rs"
+lines = "209-213"
+title = "…and the body, which is one call and no wrapper"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`quote_block!` rather than `quote_expr!`, even though the content is a single
+expression: `serialize_transparent` may be called where statements are expected.
+The `Fragment` distinction is carried in the macro name, so the choice is
+visible at every site that makes it.
+"""
+
+[[annotation]]
+id    = "ser-0015"
+file  = "src/ser.rs"
+lines = "214-222"
+title = "serialize_into — clone, convert, delegate"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["ownership"]
+body = """
+`#[serde(into = "T")]` serializes a converted copy. The generated code clones
+first, which is the cost the attribute quietly carries: `Into::into` takes
+ownership, and `serialize` only has `&self`.
+
+Both `Into` and `Clone` are named through `_serde::#private` rather than
+directly. That is not paranoia about the prelude — it is so the generated code
+works in `no_std` and under a user who has shadowed `Into`.
+"""
+
+[[annotation]]
+id    = "ser-0016"
+file  = "src/ser.rs"
+lines = "223-230"
+title = "serialize_unit_struct — the smallest thing this crate emits"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+One call, one literal. `serialize_name()` is the name after `rename` and
+`rename_all` have been applied, which is the pattern to internalize early:
+renaming is resolved at expansion time, so no renaming machinery survives into
+the generated code. What the format sees is a string literal that was computed
+by the macro.
+"""
+
+[[annotation]]
+id    = "ser-0017"
+file  = "src/ser.rs"
+lines = "231-249"
+title = "serialize_newtype_struct — index 0, by hand"
+kind  = "codegen"
+tracks = ["reference"]
+glossary = ["syn::Index", "syn::Member"]
+body = """
+A newtype struct has exactly one field and it is `.0`, so the `Member` is built
+here rather than read off the field — `get_member` needs one, and there is no
+named member to pass.
+
+`Span::call_site()` on the index is the deliberate choice: this token did not
+come from the user's source, so pointing an error at a synthetic location is
+better than pointing it at an unrelated one.
+"""
+
+[[annotation]]
+id    = "ser-0018"
+file  = "src/ser.rs"
+lines = "250-256"
+title = "…and the call, spanned on the field"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "serialize"
+emits_case = "tuple_struct"
+emits = """
+            _serde::Serializer::serialize_newtype_struct(__serializer, "Meters", &self.0)
+"""
+body = """
+`quote_spanned!(span=> ...)` puts the *function path* under the field's span, not
+the whole call. That is finer than it looks: if the field type is not
+`Serialize`, the trait-bound error is reported at the function being called with
+it, and the span makes that the field the user wrote.
+"""
+
+[[annotation]]
+id    = "ser-0019"
+file  = "src/ser.rs"
+lines = "257-274"
+title = "serialize_tuple_struct — the visitor first, then the length"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+The per-field statements are generated before anything else, by
+`serialize_tuple_struct_visitor`, and passed `false` for `is_enum` — that flag
+decides whether fields are read out of `self` or out of pattern bindings.
+
+`peekable` plus `mut_if` is a small piece of care with a real payoff: if every
+field is skipped, `__serde_state` is never mutated, and emitting `let mut`
+anyway would produce an unused-mut warning in the user's build for code they
+did not write.
+"""
+
+[[annotation]]
+id    = "ser-0020"
+file  = "src/ser.rs"
+lines = "275-288"
+title = "The field count, folded into an arithmetic expression"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["iterators", "closures"]
+body = """
+A self-describing format wants the element count before the elements, and
+`skip_serializing_if` is a runtime predicate, so the count cannot be a constant.
+
+What is emitted instead is a sum: `0 + 1 + if is_empty(&self.x) { 0 } else { 1 }`.
+`fold` builds it left to right, and every term is either the literal `1` or a
+conditional. The expression is evaluated once, at the top of the generated
+function, before any field is written.
+
+This is the clearest small example of the rule that governs the whole file:
+anything knowable at expansion time becomes a literal, and anything that is not
+becomes emitted code.
+"""
+
+[[annotation]]
+id    = "ser-0021"
+file  = "src/ser.rs"
+lines = "289-295"
+title = "…and the three-part block every sequence shape produces"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Open, write each element, end. `#(#serialize_stmts)*` is quote's repetition
+syntax splicing a `Vec<TokenStream>` in sequence, and it is how a variable
+number of fields becomes a fixed-shape block.
+
+`?` is in the generated code, not in this file's control flow. Errors from a
+half-written sequence propagate out of the user's `serialize`, which is why the
+state value has to be returned to `end` rather than dropped.
+"""
+
+[[annotation]]
+id    = "ser-0022"
+file  = "src/ser.rs"
+lines = "296-314"
+title = "serialize_struct — an assertion, and the fork that flatten forces"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+An assertion and a fork.
+
+`serialize_struct` takes a `usize` length, but every self-describing format
+ultimately writes that count into something narrower. The assert draws the line
+at `u32::MAX` and fails the *build* with the type's name rather than emitting
+code that would truncate. A struct with four billion fields is not a real case;
+the assertion is here because the alternative failure is silent.
+
+The fork is the one that matters. `#[serde(flatten)]` on any non-skipped field
+switches the container from `serialize_struct` to `serialize_map`, and the
+reason is arithmetic: a flattened field contributes an unknown number of
+entries, so the length passed to `serialize_struct` cannot be computed. A map
+may be serialized with `None` for its length, and self-describing formats accept
+that. It is a real cost — a format that needs the count up front, like some
+binary encodings, cannot represent a flattened struct at all.
+"""
+
+[[annotation]]
+id    = "ser-0023"
+file  = "src/ser.rs"
+lines = "315-327"
+title = "serialize_struct_tag_field — the tag, for internally tagged structs"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "serialize"
+emits_case = "enum_internally_tagged"
+emits = """
+                    _serde::ser::SerializeStruct::serialize_field(
+                        &mut __serde_state,
+                        "type",
+                        "circle",
+                    )?;
+"""
+body = """
+An internally tagged representation writes the discriminant as an ordinary
+field, first. This emits that write, or nothing at all for every other tag type.
+
+The `_ => quote! {}` arm is what the caller tests with `is_empty()` — an empty
+token stream is the signal for "no tag field", and it doubles as the value
+spliced into the template. Returning `Option<TokenStream>` would need the caller
+to unwrap it at the splice site for no gain.
+"""
+
+[[annotation]]
+id    = "ser-0024"
+file  = "src/ser.rs"
+lines = "328-340"
+title = "serialize_struct_as_struct — the ordinary path, and the tag test"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+The common case, and the one the `struct_rename` expansion shows. Fields become
+statements via `serialize_struct_visitor`, and the tag field — usually empty —
+is generated separately because it must be written before them.
+
+`tag_field_exists` is computed from the token stream being non-empty, and it is
+about to be used in two places that both matter: whether `__serde_state` needs
+`mut`, and the *starting value* of the length expression.
+"""
+
+[[annotation]]
+id    = "ser-0025"
+file  = "src/ser.rs"
+lines = "341-360"
+title = "The length, starting from `false as usize`"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "serialize"
+emits_case = "struct_rename"
+emits = """
+                false as usize + 1 + if Option::is_none(&self.label) { 0 } else { 1 },
+"""
+body = """
+The fold starts at `#tag_field_exists as usize`, and `tag_field_exists` is a
+Rust `bool` being interpolated into generated code — so it arrives as the
+literal `false` or `true`, and the emitted expression opens with
+`false as usize`.
+
+It looks like sloppy output. It is the cheapest correct thing: the alternative
+is branching in this file to emit `0` or `1`, and `false as usize` is folded by
+the compiler before it costs anything at runtime. Seeing it in a real expansion
+is how most readers first notice that the generated length is an expression
+rather than a number.
+"""
+
+[[annotation]]
+id    = "ser-0026"
+file  = "src/ser.rs"
+lines = "361-368"
+title = "…and the block: open, tag, fields, end"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "serialize"
+emits_case = "struct_rename"
+emits = """
+            let mut __serde_state = _serde::Serializer::serialize_struct(
+                __serializer,
+                "Point",
+                false as usize + 1 + if Option::is_none(&self.label) { 0 } else { 1 },
+            )?;
+"""
+body = """
+Four interpolations and the shape is fixed. `#tag_field` is usually empty and
+splices to nothing, which is why there is no conditional here — an empty token
+stream costs an interpolation, not a branch.
+"""
+
+[[annotation]]
+id    = "ser-0027"
+file  = "src/ser.rs"
+lines = "369-386"
+title = "serialize_struct_as_map — the same fields, without a length"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+The flatten path. It is the struct path with two things removed: there is no
+length expression, and `SerializeMap` replaces `SerializeStruct` throughout.
+
+`StructTrait::SerializeMap` is passed to the visitor, and that is what turns
+each field's write from `serialize_field(state, key, value)` into
+`serialize_entry(state, key, value)`. The field statements are otherwise
+identical, which is the payoff for routing all of them through one function.
+"""
+
+[[annotation]]
+id    = "ser-0028"
+file  = "src/ser.rs"
+lines = "387-394"
+title = "…and `None` where the length would be"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`serialize_map(__serializer, None)` is the admission that the size is not
+knowable. A format that can cope writes the entries and closes; one that cannot
+returns an error from `serialize_map` itself, which is the earliest point it
+could.
+"""
+
+[[annotation]]
+id    = "ser-0029"
+file  = "src/ser.rs"
+lines = "395-420"
+title = "serialize_enum — one arm per variant, and the remote escape hatch"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["iterators", "pattern-matching"]
+emits_from = "serialize"
+emits_case = "enum_untagged"
+emits = """
+            match *self {
+                Value::Number(ref __field0) => {
+                    _serde::Serialize::serialize(__field0, __serializer)
+                }
+"""
+body = """
+An enum's `Serialize` body is a `match` over `*self`, and the arms are generated
+here, in declaration order, each carrying its index.
+
+`variant_index` is passed as a `u32` computed by `enumerate`. Nothing counts
+variants at runtime — the index reaches the format as a literal, which is what
+lets a compact binary format write a number instead of a name for no extra cost.
+
+The extra arm requires *both* `remote` and `non_exhaustive`. A remote enum
+marked non-exhaustive may gain variants upstream that this build has never seen,
+so the generated `match` cannot be exhaustive by construction; the fallback
+returns a custom error naming the unrecognized value. A local `non_exhaustive`
+enum needs no arm, because the derive sees every variant it has.
+
+`match *self` with `ref` bindings, rather than `match self` with reference
+patterns: both work on modern Rust, this spelling works on the older compilers
+serde still supports, and changing it would be an MSRV bump for no gain. The
+dereference is why the patterns below bind `ref __field0` — they must borrow,
+because `self` is behind a shared reference.
+"""
+
+[[annotation]]
+id    = "ser-0030"
+file  = "src/ser.rs"
+lines = "421-429"
+title = "serialize_variant — two paths, and this one is the arm not the body"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+This function returns a whole `match` arm — pattern, arrow, body — not just a
+body. That is why it returns `TokenStream` rather than `Fragment`: an arm is
+neither an expression nor a block, it is both joined by `=>`.
+"""
+
+[[annotation]]
+id    = "ser-0031"
+file  = "src/ser.rs"
+lines = "430-447"
+title = "The skipped variant — a pattern that matches, and an error"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+`#[serde(skip_serializing)]` on a variant cannot mean "omit the arm": the match
+would stop being exhaustive. So an arm is emitted that matches and fails at
+runtime with a message naming the type and variant.
+
+The `fields_pat` match is there so the pattern is syntactically right for each
+shape — `(..)` for tuples and newtypes, `{ .. }` for struct variants, nothing
+for units. The bindings are deliberately absent; nothing in the arm reads them.
+"""
+
+[[annotation]]
+id    = "ser-0032"
+file  = "src/ser.rs"
+lines = "448-473"
+title = "The patterns — where `__field0` comes from"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "macro-hygiene"]
+body = """
+Four shapes, four patterns, and the names in them are the generated code's own.
+
+Tuple fields become `__field0`, `__field1` … via `field_i`, imported from the
+deserialize side because both halves need the same convention. Struct-variant
+fields keep their real names, which is safe because they are already the user's
+identifiers and are being bound in a scope the macro controls.
+
+`ref` on every binding follows from `match *self` above. Without it these
+patterns would try to move out of a shared reference.
+"""
+
+[[annotation]]
+id    = "ser-0033"
+file  = "src/ser.rs"
+lines = "474-495"
+title = "The representation fork — four tag types, one tuple match"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+The single place where `#[serde(tag/content/untagged)]` decides what a variant
+turns into. Matching on the pair `(container tag type, variant untagged flag)`
+handles precedence in one expression: an explicitly untagged variant wins over
+whatever the container said, which is the `(_, true)` arm.
+
+`Match(...)` wraps the resulting `Fragment`. It is the third rendering mode
+beside expression and block — a fragment that is going to sit on the right of
+`=>`, where a block needs no semicolon and an expression needs a comma.
+"""
+
+[[annotation]]
+id    = "ser-0034"
+file  = "src/ser.rs"
+lines = "496-501"
+title = "…and the arm, assembled"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "serialize"
+emits_case = "enum_externally_tagged"
+emits = """
+                Shape::Empty => {
+                    _serde::Serializer::serialize_unit_variant(
+                        __serializer,
+                        "Shape",
+                        0u32,
+                        "Empty",
+                    )
+                }
+"""
+body = """
+Two interpolations. The whole apparatus above exists to produce this line, and
+the `Match` wrapper is what decided whether the right-hand side arrives braced.
+"""
+
+[[annotation]]
+id    = "ser-0035"
+file  = "src/ser.rs"
+lines = "502-510"
+title = "serialize_externally_tagged_variant — the default representation"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+The shape you get with no attributes: the variant name is the key, the payload
+is the value. Both names are resolved here, at expansion time, through
+`serialize_name()` — so `rename_all = "snake_case"` on the container has
+already been applied to `variant_name` by the time it is interpolated.
+"""
+
+[[annotation]]
+id    = "ser-0036"
+file  = "src/ser.rs"
+lines = "511-523"
+title = "…unless the variant brought its own function"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`#[serde(serialize_with)]` on a *variant* wraps all of its fields into one
+generated helper type and serializes that as a newtype variant, whatever the
+variant's real shape was.
+
+The early `return` before the style match is the point: a variant with its own
+function has no shape as far as this file is concerned, because the user's
+function decides what the payload looks like.
+"""
+
+[[annotation]]
+id    = "ser-0037"
+file  = "src/ser.rs"
+lines = "524-534"
+title = "Unit variant — name, index, name"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "serialize"
+emits_case = "enum_externally_tagged"
+emits = """
+                    _serde::Serializer::serialize_unit_variant(
+                        __serializer,
+                        "Shape",
+                        0u32,
+                        "Empty",
+                    )
+"""
+body = """
+Four literals and no payload. `effective_style` rather than `variant.style` is
+what is being matched: a newtype variant whose only field is skipped is treated
+as a unit variant here, which is the only place that substitution happens.
+"""
+
+[[annotation]]
+id    = "ser-0038"
+file  = "src/ser.rs"
+lines = "535-553"
+title = "Newtype variant — one field, optionally wrapped"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "serialize"
+emits_case = "enum_externally_tagged"
+emits = """
+                    _serde::Serializer::serialize_newtype_variant(
+                        __serializer,
+                        "Shape",
+                        1u32,
+                        "Radius",
+                        __field0,
+                    )
+"""
+body = """
+The field is read from the pattern binding `__field0` rather than from `self`,
+because the enum arm already destructured it. That is the difference the
+`is_enum` flag makes in the visitors further down this file.
+
+`serialize_with` on the *field* wraps the expression before it is interpolated,
+which is why `field_expr` is `mut`.
+"""
+
+[[annotation]]
+id    = "ser-0039"
+file  = "src/ser.rs"
+lines = "554-563"
+title = "Tuple variant — hand off, carrying the names"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "serialize"
+emits_case = "enum_externally_tagged"
+emits = """
+                    let mut __serde_state = _serde::Serializer::serialize_tuple_variant(
+                        __serializer,
+                        "Shape",
+                        2u32,
+                        "Rect",
+                        0 + 1 + 1,
+                    )?;
+"""
+body = """
+`TupleVariant::ExternallyTagged` carries the three literals the untagged form
+does not need. Passing them in an enum rather than as optional arguments is what
+lets `serialize_tuple_variant` emit two different opening calls from one body of
+shared logic.
+"""
+
+[[annotation]]
+id    = "ser-0040"
+file  = "src/ser.rs"
+lines = "564-574"
+title = "Struct variant — the same hand-off, minus the type name"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "serialize"
+emits_case = "enum_externally_tagged"
+emits = """
+                    let mut __serde_state = _serde::Serializer::serialize_struct_variant(
+                        __serializer,
+                        "Shape",
+                        3u32,
+                        "Named",
+                        0 + 1,
+                    )?;
+"""
+body = """
+`type_name` is passed separately rather than inside the context enum, because
+the untagged and internally tagged callers pass something different in that
+position — the untagged one passes the *variant* name. Keeping it out of the
+enum is what makes that possible without a fourth variant.
+"""
+
+[[annotation]]
+id    = "ser-0041"
+file  = "src/ser.rs"
+lines = "575-586"
+title = "serialize_internally_tagged_variant — four names, two of them for errors"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`type_name` and `variant_name` are the wire names, after renaming.
+`enum_ident_str` and `variant_ident_str` are the *Rust* names, unrenamed, and
+they exist only so a runtime error can say which variant was being serialized
+when a format rejected the shape.
+
+Keeping both is the price of internally tagged enums: the representation can
+fail at runtime, for formats whose values are not maps, and the message has to
+be about the user's code rather than about the wire names.
+"""
+
+[[annotation]]
+id    = "ser-0042"
+file  = "src/ser.rs"
+lines = "587-600"
+title = "…and the serialize_with path, through serialize_tagged_newtype"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`serialize_tagged_newtype` is in `serde_core`'s private module, and it is the
+runtime half of this representation: it takes the tag and the payload and
+tries to merge them into one map, failing with a real message if the payload is
+not something a tag can be added to.
+
+This file cannot do that merge at expansion time, because whether the payload
+serializes as a map is a property of the value and the format.
+"""
+
+[[annotation]]
+id    = "ser-0043"
+file  = "src/ser.rs"
+lines = "601-640"
+title = "Internally tagged — four shapes, and the one that cannot exist"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "serialize"
+emits_case = "enum_internally_tagged"
+emits = """
+                    let mut __serde_state = _serde::Serializer::serialize_struct(
+                        __serializer,
+                        "Shape",
+                        0 + 1 + 1,
+                    )?;
+                    _serde::ser::SerializeStruct::serialize_field(
+                        &mut __serde_state,
+                        "type",
+                        "circle",
+                    )?;
+"""
+body = """
+A unit variant with a tag is a one-field struct whose field is the tag. The
+length is the literal `1` — the only place in this file where a struct length is
+a constant, because there is nothing conditional about it.
+
+A newtype variant goes through `serialize_tagged_newtype`, the same private
+helper the `serialize_with` path above reaches. That is the runtime half of this
+representation: it takes the tag and the payload and tries to merge them into
+one map, failing with a real message if the payload is not something a tag can
+be added to. This file cannot do that merge at expansion time, because whether
+the payload serializes as a map is a property of the value and the format.
+
+A struct variant is the case internally tagged enums are *for*: the tag becomes
+one more field, which is why the emitted length is `0 + 1 + 1` — the fields,
+plus one.
+
+The `unreachable!` for tuples is load-bearing and correct. A tuple variant has
+no field names to merge a tag into, and `internals::check` rejects it with a
+proper error long before codegen. The message says where.
+"""
+
+[[annotation]]
+id    = "ser-0044"
+file  = "src/ser.rs"
+lines = "641-659"
+title = "serialize_adjacently_tagged_variant — the tag value, as a struct"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "serialize"
+emits_case = "enum_adjacently_tagged"
+emits = """
+                        &_serde::__private229::ser::AdjacentlyTaggedEnumVariant {
+                            enum_name: "Event",
+                            variant_index: 0u32,
+                            variant_name: "Tick",
+                        },
+"""
+body = """
+`tag` and `content` split the discriminant and the payload into two named
+fields of one struct. The tag value is not written as a plain string: it is an
+`AdjacentlyTaggedEnumVariant` from serde's private module, carrying the enum
+name, the index and the variant name.
+
+That indirection exists so a format can write the discriminant the way it
+prefers — as a string, or as the index — instead of being handed a string it has
+to accept. Three literals, assembled here, interpreted there.
+"""
+
+[[annotation]]
+id    = "ser-0045"
+file  = "src/ser.rs"
+lines = "660-675"
+title = "The unit variant, which returns early with no content field"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "serialize"
+emits_case = "enum_adjacently_tagged"
+emits = """
+                    let mut __struct = _serde::Serializer::serialize_struct(
+                        __serializer,
+                        "Event",
+                        1,
+                    )?;
+"""
+body = """
+A unit variant has no payload, so the emitted struct has one field, not two —
+and the function returns from inside the `if let` rather than falling through to
+the wrapper machinery below.
+
+Three of the four shapes take that escape. What survives to the bottom of this
+function is the case that genuinely needs a helper type.
+"""
+
+[[annotation]]
+id    = "ser-0046"
+file  = "src/ser.rs"
+lines = "676-694"
+title = "The newtype variant, which also returns early"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Two fields, written directly: the tag, then the payload under the content key.
+No wrapper is needed because a newtype variant's payload is already a single
+value.
+
+`quote_spanned` on the second `serialize_field` puts the field's span on the
+call that will type-check the payload, so a non-`Serialize` payload reports at
+the field.
+"""
+
+[[annotation]]
+id    = "ser-0047"
+file  = "src/ser.rs"
+lines = "695-706"
+title = "Tuple and struct variants — reuse the untagged bodies"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+These two do *not* return. Their bodies are computed as untagged fragments — a
+tuple or a map with no tag anywhere in them — and bound as `inner`, to be
+emitted inside the helper type's `serialize` method further down.
+
+That is why they go through `TupleVariant::Untagged` and
+`StructVariant::Untagged`: inside the content wrapper there is no enum any more,
+just a value.
+"""
+
+[[annotation]]
+id    = "ser-0048"
+file  = "src/ser.rs"
+lines = "707-722"
+title = "The field list the wrapper will hold"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+`fields_ident` is the names to destructure out of the wrapper's tuple, and the
+shape decides what they are: `__field0` for a newtype, `__field0 …__fieldN` for
+a tuple, the real member names for a struct variant.
+
+The `Style::Unit` arm is the interesting one. It is reachable only when the
+variant had `serialize_with`, because every other unit path returned above — and
+if it is reached any other way, `unreachable!` says so rather than emitting a
+wrapper with no data.
+"""
+
+[[annotation]]
+id    = "ser-0049"
+file  = "src/ser.rs"
+lines = "723-731"
+title = "The wrapper's generics, and the borrowed lifetime"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["lifetimes", "generic-params"]
+body = """
+The helper struct holds *references* to the variant's fields, so it needs a
+lifetime the original type does not have. `with_lifetime_bound(&generics, "'__a")`
+adds `'__a` and bounds every existing parameter by it.
+
+When there are no fields to hold, the generics are used unchanged — adding a
+lifetime nothing mentions would be an unused-parameter error.
+"""
+
+[[annotation]]
+id    = "ser-0050"
+file  = "src/ser.rs"
+lines = "732-751"
+title = "…and the helper type itself: a struct and an impl, inline"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["marker-types", "variance", "lifetimes"]
+emits_from = "serialize"
+emits_case = "enum_adjacently_tagged"
+emits = """
+                    struct __AdjacentlyTagged<'__a> {
+                        data: (&'__a i32, &'__a i32),
+                        phantom: _serde::__private229::PhantomData<Event>,
+                    }
+"""
+body = """
+Nothing in the user's enum corresponds to `__AdjacentlyTagged`. It is invented
+here so the payload can be passed as one `Serialize` value, and it is the
+clearest example in the crate of generated code that is not a rewriting of the
+input.
+
+`phantom: PhantomData<Type<Generics>>` is not decoration. Without it, a generic
+parameter that appears only inside the `data` tuple's *references* would be
+unconstrained, and the impl would not compile. With it, the wrapper is generic
+over exactly what the original type is generic over.
+
+`#[allow(unused_variables)]` on the destructuring covers skipped fields: they
+are in the tuple, because the tuple mirrors the variant, and nothing reads them.
+"""
+
+[[annotation]]
+id    = "ser-0051"
+file  = "src/ser.rs"
+lines = "752-764"
+title = "…and the two fields that are the whole representation"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "serialize"
+emits_case = "enum_adjacently_tagged"
+emits = """
+                    _serde::ser::SerializeStruct::serialize_field(
+                        &mut __struct,
+                        "c",
+                        &__AdjacentlyTagged {
+                            data: (__field0, __field1),
+                            phantom: _serde::__private229::PhantomData::<Event>,
+                        },
+                    )?;
+"""
+body = """
+Tag under `#tag`, wrapper under `#content`, done. The struct is constructed at
+the point of use and borrowed immediately, so the references in `data` never
+outlive the arm.
+"""
+
+[[annotation]]
+id    = "ser-0052"
+file  = "src/ser.rs"
+lines = "765-776"
+title = "serialize_untagged_variant — no name reaches the wire"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`#[serde(untagged)]` serializes the payload and nothing else: no variant name,
+no index, no tag. On the way back in, deserialization tries each variant in
+order — which is why untagged enums are cheap to write and expensive to read.
+
+The `serialize_with` path is the plainest in the file: wrap the fields, call
+`Serialize::serialize` on the wrapper.
+"""
+
+[[annotation]]
+id    = "ser-0053"
+file  = "src/ser.rs"
+lines = "777-782"
+title = "Unit variant, untagged — `serialize_unit`"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+A unit variant with nothing to say becomes the unit value. In JSON that is
+`null`, which is the round-tripping hazard of untagged unit variants: any
+untagged enum with two unit variants cannot be told apart on the way back.
+"""
+
+[[annotation]]
+id    = "ser-0054"
+file  = "src/ser.rs"
+lines = "783-795"
+title = "Newtype variant, untagged — the payload, directly"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "serialize"
+emits_case = "enum_untagged"
+emits = """
+                Value::Number(ref __field0) => {
+                    _serde::Serialize::serialize(__field0, __serializer)
+                }
+"""
+body = """
+One call. The variant has disappeared entirely — the emitted arm serializes the
+field as if the enum were not there, which is exactly what untagged means.
+"""
+
+[[annotation]]
+id    = "ser-0055"
+file  = "src/ser.rs"
+lines = "796-803"
+title = "Tuple and struct variants, untagged — a sequence and a map"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+A tuple variant becomes a plain tuple, a struct variant a plain struct. The
+struct arm passes `type_name` where the externally tagged caller passed the
+variant name, which is the asymmetry that keeps `name` out of the
+`StructVariant` enum.
+"""
+
+[[annotation]]
+id    = "ser-0056"
+file  = "src/ser.rs"
+lines = "804-812"
+title = "TupleVariant — two contexts, and what each needs to know"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+`ExternallyTagged` carries three literals; `Untagged` carries none. Modelling
+the difference as an enum rather than as optional parameters means the emitting
+function matches once at the end and cannot forget a field — the compiler
+checks that the externally tagged arm uses all three.
+"""
+
+[[annotation]]
+id    = "ser-0057"
+file  = "src/ser.rs"
+lines = "813-824"
+title = "serialize_tuple_variant — the trait depends on the context"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`SerializeTupleVariant` for the tagged form, `SerializeTuple` for the untagged
+one. These are different traits in `serde_core` with the same shape, and
+`TupleTrait` at the bottom of this file is what turns the choice into a method
+path.
+
+`true` for `is_enum`: the fields are pattern bindings from the match arm, not
+members of `self`.
+"""
+
+[[annotation]]
+id    = "ser-0058"
+file  = "src/ser.rs"
+lines = "825-842"
+title = "…and the same count logic, reading bindings instead of members"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Structurally identical to `serialize_tuple_struct`'s length fold, with one
+difference: `field_i(i)` produces `__field0` rather than `get_member` producing
+`&self.0`. The values are already in scope.
+"""
+
+[[annotation]]
+id    = "ser-0059"
+file  = "src/ser.rs"
+lines = "843-859"
+title = "The externally tagged block — name, index, name, length"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "serialize"
+emits_case = "enum_externally_tagged"
+emits = """
+                    _serde::ser::SerializeTupleVariant::serialize_field(
+                        &mut __serde_state,
+                        __field0,
+                    )?;
+"""
+body = """
+Five arguments before the first element is written. Everything but `#len` is a
+literal computed at expansion time.
+"""
+
+[[annotation]]
+id    = "ser-0060"
+file  = "src/ser.rs"
+lines = "860-871"
+title = "…and the untagged block, which is just a tuple"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "serialize"
+emits_case = "enum_adjacently_tagged"
+emits = """
+                            let mut __serde_state = _serde::Serializer::serialize_tuple(
+                                __serializer,
+                                0 + 1 + 1,
+                            )?;
+"""
+body = """
+Two arguments. This is also the body that ends up *inside* the adjacently
+tagged wrapper, which is where the expansion on the right comes from — the same
+untagged fragment, emitted in a different place.
+"""
+
+[[annotation]]
+id    = "ser-0061"
+file  = "src/ser.rs"
+lines = "872-883"
+title = "StructVariant — three contexts, because the tag has to go somewhere"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+Three rather than the tuple side's two, because internally tagged struct
+variants exist and internally tagged tuple variants do not. The `tag` and
+`variant_name` on that arm are the pair written as the first field.
+"""
+
+[[annotation]]
+id    = "ser-0062"
+file  = "src/ser.rs"
+lines = "884-893"
+title = "serialize_struct_variant — flatten takes a different function entirely"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Any flattened field and the whole variant is handed to
+`serialize_struct_variant_with_flatten`. Same reasoning as the container-level
+fork: a flattened field's entry count is unknown, so the length cannot be
+computed, so the shape must become a map.
+"""
+
+[[annotation]]
+id    = "ser-0063"
+file  = "src/ser.rs"
+lines = "894-902"
+title = "…and the trait, which collapses two contexts into one"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`SerializeStructVariant` for the externally tagged form; `SerializeStruct` for
+both of the others, because an internally tagged or untagged struct variant *is*
+a struct as far as the format is concerned. The enum has already been erased by
+the time the format sees it.
+"""
+
+[[annotation]]
+id    = "ser-0064"
+file  = "src/ser.rs"
+lines = "903-920"
+title = "The count again, over members this time"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Third variation on the same fold. The predicate is applied to `#member`
+directly — a bare binding from the pattern, not `&self.field` — which is the
+`is_enum` difference showing up in the length expression as well as in the
+writes.
+"""
+
+[[annotation]]
+id    = "ser-0065"
+file  = "src/ser.rs"
+lines = "921-937"
+title = "Externally tagged — serialize_struct_variant"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "serialize"
+emits_case = "enum_externally_tagged"
+emits = """
+                    _serde::ser::SerializeStructVariant::serialize_field(
+                        &mut __serde_state,
+                        "label",
+                        label,
+                    )?;
+"""
+body = """
+The fourth of the four `Serializer` methods an externally tagged enum can
+reach. `#name` here is the enum's name, and the variant's is a separate
+argument — the format gets both and decides what to write.
+"""
+
+[[annotation]]
+id    = "ser-0066"
+file  = "src/ser.rs"
+lines = "938-953"
+title = "Internally tagged — `#len + 1`, and the tag written first"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "serialize"
+emits_case = "enum_internally_tagged"
+emits = """
+                    let mut __serde_state = _serde::Serializer::serialize_struct(
+                        __serializer,
+                        "Shape",
+                        0 + 1 + 1,
+                    )?;
+"""
+body = """
+The length is the field count plus one, for the tag, and the emitted expression
+shows the seam: `0 + 1 + 1` is the fold's zero, the one real field, and the
+`+ 1` added here.
+
+`let mut` is unconditional on this arm rather than going through `mut_if` —
+there is always a tag field to write, so `__serde_state` is always mutated.
+"""
+
+[[annotation]]
+id    = "ser-0067"
+file  = "src/ser.rs"
+lines = "954-967"
+title = "Untagged — a struct with the variant's own name"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`#name` on this arm is the *variant* name, passed down by
+`serialize_untagged_variant` as `type_name`. Since nothing on the wire records
+which variant this was, the name serves only as the type hint some formats
+print in errors.
+"""
+
+[[annotation]]
+id    = "ser-0068"
+file  = "src/ser.rs"
+lines = "968-983"
+title = "serialize_struct_variant_with_flatten — always a map"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+No trait choice and no length: a flattened struct variant is a map in all three
+contexts. What still differs is how the map is *reached*, which is the match
+below.
+"""
+
+[[annotation]]
+id    = "ser-0069"
+file  = "src/ser.rs"
+lines = "984-996"
+title = "The externally tagged arm needs a wrapper, for the same reason"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["lifetimes", "generic-params"]
+body = """
+An externally tagged variant's payload has to be one value, and a map built
+with `serialize_map` is not a value — it is a sequence of calls on the
+serializer. So the map goes inside a helper type, `__EnumFlatten`, and the
+helper is what gets passed to `serialize_newtype_variant`.
+
+Same borrowed-lifetime machinery as `__AdjacentlyTagged`, for the same reason:
+the wrapper holds references to the variant's fields.
+"""
+
+[[annotation]]
+id    = "ser-0070"
+file  = "src/ser.rs"
+lines = "997-1029"
+title = "…the wrapper, its impl, and the newtype-variant call"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["marker-types", "lifetimes"]
+body = """
+Thirty-three lines of template producing a struct, an impl, and a call. The
+`PhantomData` is doing the same job it does in `__AdjacentlyTagged` — keeping
+the wrapper generic over exactly what the original type is generic over, so
+parameters that appear only behind references stay constrained.
+
+Reading this next to the adjacently tagged wrapper is the fastest way to see
+that these two are the same trick applied to two different representations: the
+only real difference is that the map is built inline here and delegated there.
+"""
+
+[[annotation]]
+id    = "ser-0071"
+file  = "src/ser.rs"
+lines = "1030-1043"
+title = "Internally tagged — `serialize_entry`, then the fields"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+No wrapper needed: an internally tagged variant is already a map, so the tag is
+written as one more entry with `serialize_entry` and the flattened fields follow.
+
+`serialize_entry` rather than `serialize_field` is the `SerializeMap` spelling.
+The three struct traits diverge exactly here, which is what `StructTrait` at the
+bottom of the file exists to hide from every caller.
+"""
+
+[[annotation]]
+id    = "ser-0072"
+file  = "src/ser.rs"
+lines = "1044-1055"
+title = "Untagged — the map, with nothing added"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+The simplest of the three. Open a map of unknown length, write the fields,
+close. The variant name has nowhere to go and does not appear.
+"""
+
+[[annotation]]
+id    = "ser-0073"
+file  = "src/ser.rs"
+lines = "1056-1063"
+title = "serialize_tuple_struct_visitor — one statement per field"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+This and `serialize_struct_visitor` are the two functions that actually write
+fields, and every sequence-shaped caller in this file goes through one of them.
+Returning `Vec<TokenStream>` rather than one stream is what lets a caller splice
+the statements with `#(...)*` and put its own code before and after.
+
+`is_enum` decides where a field's value comes from; `tuple_trait` decides which
+method writes it.
+"""
+
+[[annotation]]
+id    = "ser-0074"
+file  = "src/ser.rs"
+lines = "1064-1081"
+title = "The field expression — a binding, or a member access"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`continue` on `skip_serializing` is why the count fold upstream filters the same
+way: the statement list and the length have to agree, and they agree by applying
+the same predicate rather than by sharing a computation.
+
+For an enum, the value is the pattern binding `__fieldN`. For a struct, it is
+whatever `get_member` decides, which is where `&self.0`, packed-field copies and
+remote getters are all resolved.
+"""
+
+[[annotation]]
+id    = "ser-0075"
+file  = "src/ser.rs"
+lines = "1082-1090"
+title = "The skip predicate is built before the wrapper, deliberately"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`skip_serializing_if` is applied to the *raw* field expression, and only then is
+`serialize_with` allowed to replace that expression with a wrapper type.
+
+The order is load-bearing. The user's predicate takes the field's own type —
+`Option::is_none` expects an `&Option<T>` — and handing it `&__SerializeWith`
+would not compile. This is the kind of ordering constraint that is invisible
+until you swap two lines and get an error inside generated code.
+"""
+
+[[annotation]]
+id    = "ser-0076"
+file  = "src/ser.rs"
+lines = "1091-1104"
+title = "…and the statement, wrapped in an `if` when it can be skipped"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "serialize"
+emits_case = "enum_externally_tagged"
+emits = """
+                    _serde::ser::SerializeTupleVariant::serialize_field(
+                        &mut __serde_state,
+                        __field0,
+                    )?;
+"""
+body = """
+`tuple_trait.serialize_element(span)` resolves to one of three method paths,
+carrying the field's span so a type error lands on the field.
+
+There is no `else` branch here, unlike the struct visitor: a sequence has no
+way to record that an element was omitted, so a skipped element simply does not
+appear and the length computed upstream is what keeps the count honest.
+"""
+
+[[annotation]]
+id    = "ser-0077"
+file  = "src/ser.rs"
+lines = "1105-1118"
+title = "serialize_struct_visitor — the same shape, with keys"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+The struct-shaped twin of the function above. Same `is_enum` decision, same
+`continue` on skipped fields; what is added is a key for every write, and a
+`flatten` branch that changes the call entirely.
+"""
+
+[[annotation]]
+id    = "ser-0078"
+file  = "src/ser.rs"
+lines = "1119-1136"
+title = "The key, resolved at expansion time — and the wrapper, applied after it"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "serialize"
+emits_case = "struct_rename"
+emits = """
+            _serde::ser::SerializeStruct::serialize_field(
+                &mut __serde_state,
+                "xCoord",
+                &self.x_coord,
+            )?;
+"""
+body = """
+`field.attrs.name().serialize_name()` is where `rename_all = "camelCase"` ends
+up: the emitted call carries the literal `"xCoord"` and there is no renaming
+code in the output at all.
+
+This is the single most useful thing to see in a real expansion. Renaming looks
+like a runtime feature in the documentation and is entirely a compile-time one.
+
+Below it, the same ordering the tuple visitor uses and for the same reason: the
+`skip_serializing_if` predicate is built against the *raw* field expression, and
+only then may `serialize_with` replace that expression with a wrapper type. The
+user's predicate takes the field's own type — `Option::is_none` expects an
+`&Option<T>` — and handing it an `&__SerializeWith` would not compile.
+"""
+
+[[annotation]]
+id    = "ser-0079"
+file  = "src/ser.rs"
+lines = "1137-1148"
+title = "The flatten branch — FlatMapSerializer, not a key"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+A flattened field is serialized with no key at all. `FlatMapSerializer` wraps the
+in-progress map and forwards whatever entries the field produces into it, which
+is how a nested struct's fields end up as siblings of the outer ones.
+
+That is why the enclosing container had to switch to `serialize_map`: the field
+emits an unknown number of entries directly into the parent, and no length could
+have been computed for it.
+"""
+
+[[annotation]]
+id    = "ser-0080"
+file  = "src/ser.rs"
+lines = "1149-1172"
+title = "…and skip_field, which a map does not have"
+kind  = "codegen"
+tracks = ["reference"]
+emits_from = "serialize"
+emits_case = "struct_rename"
+emits = """
+            if !Option::is_none(&self.label) {
+                _serde::ser::SerializeStruct::serialize_field(
+                    &mut __serde_state,
+                    "label",
+                    &self.label,
+                )?;
+            } else {
+                _serde::ser::SerializeStruct::skip_field(&mut __serde_state, "label")?;
+            }
+"""
+body = """
+The `else` branch is the detail most readers miss. `SerializeStruct` has a
+`skip_field` method, and the generated code calls it when a field is skipped at
+runtime, so a format that writes fixed-layout records can still account for the
+field it did not receive.
+
+`SerializeMap` has no such method, so `skip_field` returns `None` for it and the
+emitted code is an `if` with no `else`. One predicate, two different shapes,
+decided by which trait the container chose pages earlier.
+"""
+
+[[annotation]]
+id    = "ser-0081"
+file  = "src/ser.rs"
+lines = "1173-1181"
+title = "wrap_serialize_field_with — one field, as a one-element case"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+A thin adapter: one type, one expression, hand off to the general wrapper
+builder. Having it named separately is what keeps the call sites readable — a
+reader at `serialize_newtype_struct` does not need to know that the wrapper
+supports N fields.
+"""
+
+[[annotation]]
+id    = "ser-0082"
+file  = "src/ser.rs"
+lines = "1182-1206"
+title = "wrap_serialize_variant_with — all of a variant's fields at once"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+`#[serde(serialize_with)]` on a variant passes *every* field to the user's
+function, so the expression list is built from the variant's members: named ones
+keep their names, unnamed ones become `__fieldN` via `field_i`.
+
+The two vectors are collected before the call rather than passed as iterators,
+because `wrap_serialize_with` needs slices — it walks them twice, once for the
+types and once for the accesses.
+"""
+
+[[annotation]]
+id    = "ser-0083"
+file  = "src/ser.rs"
+lines = "1207-1222"
+title = "wrap_serialize_with — the generic wrapper builder"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["lifetimes", "generic-params"]
+body = """
+The third and last helper-type generator in this file, and the general one: the
+other two are callers.
+
+Same borrowed-lifetime decision as the enum wrappers — `'__a` is added only when
+there are fields to hold, because a lifetime parameter nothing mentions is an
+error rather than a no-op.
+"""
+
+[[annotation]]
+id    = "ser-0084"
+file  = "src/ser.rs"
+lines = "1223-1232"
+title = "Field accesses, as tuple indices"
+kind  = "codegen"
+tracks = ["reference"]
+glossary = ["syn::Index", "syn::Member"]
+body = """
+The wrapper stores its values in a tuple, so reading them back is `self.values.0`,
+`self.values.1` and so on. These `Member::Unnamed` values are those indices,
+built rather than parsed.
+
+`self_var` and `serializer_var` are bound as token streams a few lines down and
+interpolated, rather than written literally in the template. That is purely so
+the spanned block below can name them without repeating the strings.
+"""
+
+[[annotation]]
+id    = "ser-0085"
+file  = "src/ser.rs"
+lines = "1233-1240"
+title = "The span that points at `with = \"...\"`"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["proc-macro-boundary"]
+body = """
+The comment above these lines is worth more than most of this file's code: the
+call to the user's function is spanned on the *path they wrote*, so a function
+with the wrong signature reports the error under the attribute rather than
+inside code they cannot see.
+
+This is the sharpest example of why `quote_spanned` exists. Without it the
+diagnostic has nowhere to point, and a derive macro's errors become the kind
+people file issues about.
+"""
+
+[[annotation]]
+id    = "ser-0086"
+file  = "src/ser.rs"
+lines = "1241-1264"
+title = "…and the wrapper itself, inside a borrow expression"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["marker-types", "lifetimes"]
+body = """
+`quote!(&{ ... })` — the whole thing is a block expression, immediately
+borrowed, so it can be passed straight into a `serialize_field` call as a
+`&impl Serialize`.
+
+Putting the struct, the impl and the construction inside one block is what keeps
+`__SerializeWith` from colliding when a struct has two fields that both use
+`serialize_with`: each expansion has its own scope, so each gets its own
+`__SerializeWith`.
+"""
+
+[[annotation]]
+id    = "ser-0087"
+file  = "src/ser.rs"
+lines = "1265-1278"
+title = "mut_if — an entire function to avoid one warning"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+An empty struct generates a `__serde_state` that is never mutated, and `let mut`
+on it would warn. Since the warning appears in the *user's* build, on code they
+did not write and cannot edit, the only fix is not to emit the `mut`.
+
+Returning `Option<TokenStream>` rather than an empty stream is a small nicety:
+`quote!` interpolates `None` as nothing, so the call site stays a plain `#let_mut`
+with no conditional.
+"""
+
+[[annotation]]
+id    = "ser-0088"
+file  = "src/ser.rs"
+lines = "1279-1288"
+title = "get_member — the ordinary case, and the packed one"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["unsafe", "borrowing"]
+body = """
+`&self.field` for a normal struct. For `repr(packed)`, `&{self.field}` — braces
+that copy the field to a temporary first, then borrow that.
+
+The braces are not style. Taking a reference to a misaligned field is undefined
+behaviour, and the copy is the only way to get an aligned value to borrow. This
+is one of the few places in the crate where the generated code exists to avoid
+UB rather than to express a format.
+"""
+
+[[annotation]]
+id    = "ser-0089"
+file  = "src/ser.rs"
+lines = "1289-1301"
+title = "The remote cases, and what `constrain` is for"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+For a remote impl the field expression is wrapped in
+`ser::constrain::<#ty>(...)`, an identity function with a type annotation.
+
+It exists so the compiler checks the field type against the *remote definition's*
+declared type. Without it, a mismatch between the user's placeholder struct and
+the real remote type would either compile into something wrong or report an
+error far from the field that caused it.
+
+The getter arm is the same idea for `#[serde(getter = "...")]`: call the
+getter, constrain the result.
+"""
+
+[[annotation]]
+id    = "ser-0090"
+file  = "src/ser.rs"
+lines = "1302-1307"
+title = "…and the combination that cannot happen"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+A getter on a non-remote impl is rejected by `internals::check`, so this arm is
+genuinely unreachable and says why. Checking it here as well would duplicate the
+validation and produce a worse message.
+"""
+
+[[annotation]]
+id    = "ser-0091"
+file  = "src/ser.rs"
+lines = "1308-1314"
+title = "effective_style — a newtype whose only field is skipped is a unit"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+Six lines, and they are the reason `serialize_externally_tagged_variant` and its
+two siblings match on `effective_style(variant)` rather than `variant.style`.
+
+`Variant::Skipped(#[serde(skip_serializing)] String)` has a field, but nothing
+will be written for it, so the variant must be emitted as a unit variant or the
+format is handed a payload that does not exist.
+"""
+
+[[annotation]]
+id    = "ser-0092"
+file  = "src/ser.rs"
+lines = "1315-1320"
+title = "StructTrait — three traits that write a named field"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+`SerializeMap`, `SerializeStruct` and `SerializeStructVariant` are separate
+traits in `serde_core` with almost the same shape. This enum is how the rest of
+the file picks between them without repeating three method paths at every call
+site.
+"""
+
+[[annotation]]
+id    = "ser-0093"
+file  = "src/ser.rs"
+lines = "1321-1335"
+title = "serialize_field — three paths, one span"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+The one real difference between the three traits at the writing site: a map
+takes an entry, the other two take a field. Every arm is `quote_spanned` with
+the caller's span, so the field's location survives into whichever method is
+chosen.
+"""
+
+[[annotation]]
+id    = "ser-0094"
+file  = "src/ser.rs"
+lines = "1336-1348"
+title = "skip_field — the method a map does not have"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+`None` for `SerializeMap`, `Some` for the other two. The caller turns that
+`Option` into the presence or absence of an `else` branch, which is how one
+visitor emits two different shapes of skip handling.
+
+A map genuinely cannot express a skipped entry: there is no key without a
+value. The absence is in the trait, not an oversight here.
+"""
+
+[[annotation]]
+id    = "ser-0095"
+file  = "src/ser.rs"
+lines = "1349-1354"
+title = "TupleTrait — the same idea, for sequences"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+`SerializeTuple`, `SerializeTupleStruct`, `SerializeTupleVariant`. Three traits
+for three contexts that all write positional elements, and the enum picks
+between them the same way `StructTrait` does.
+"""
+
+[[annotation]]
+id    = "ser-0096"
+file  = "src/ser.rs"
+lines = "1355-1369"
+title = "serialize_element — and the naming inconsistency it hides"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Look at the method names: `SerializeTuple::serialize_element`, but
+`SerializeTupleStruct::serialize_field` and
+`SerializeTupleVariant::serialize_field`. Same job, two names, fixed in
+`serde_core`'s public API and therefore permanent.
+
+This function is where that inconsistency stops mattering. Every caller in the
+file asks for `serialize_element` and gets whichever path is right, which is
+the whole argument for routing method selection through a type rather than
+through a string.
+"""

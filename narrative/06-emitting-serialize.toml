@@ -29,6 +29,7 @@ id = "s06-serialize-body"
 source = "serde_derive-1.0.229"
 file = "src/ser.rs"
 lines = "171-189"
+annotation = "ser-0012"
 title = "serialize_body — the fork that picks one of seven shapes"
 body = """
 Every question this dispatch asks was answered during unit 02. `transparent` and
@@ -91,6 +92,7 @@ id = "s06-serialize-struct"
 source = "serde_derive-1.0.229"
 file = "src/ser.rs"
 lines = "296-313"
+annotation = "ser-0022"
 title = "serialize_struct — a struct, unless one of its fields is flattened"
 leans_on = ["s06-serialize-body"]
 body = """
@@ -114,6 +116,7 @@ id = "s06-len"
 source = "serde_derive-1.0.229"
 file = "src/ser.rs"
 lines = "341-359"
+annotation = "ser-0025"
 title = "The field count, folded into an expression"
 leans_on = ["s06-serialize-struct"]
 emits = "false as usize + 1 + if Option::is_none(&self.label) { 0 } else { 1 },"
@@ -140,6 +143,7 @@ id = "s06-quote-block"
 source = "serde_derive-1.0.229"
 file = "src/ser.rs"
 lines = "361-366"
+annotation = "ser-0026"
 title = "…and the six lines that are the body"
 leans_on = ["s06-len"]
 glossary = ["quote::quote"]
@@ -167,7 +171,8 @@ qualified calls cannot be intercepted.
 id = "s06-struct-visitor"
 source = "serde_derive-1.0.229"
 file = "src/ser.rs"
-lines = "1113-1147"
+lines = "1119-1136"
+annotation = "ser-0078"
 title = "serialize_struct_visitor — one statement per field"
 leans_on = ["s06-quote-block"]
 glossary = ["syn::spanned::Spanned", "quote::quote_spanned", "syn::Member"]
@@ -180,19 +185,24 @@ _serde::ser::SerializeStruct::serialize_field(
 """
 emits_from = "serialize"
 body = """
-The loop that produces the field statements, and the place where unit 04's
-`"xCoord"` finally reaches the output — `field.attrs.name().serialize_name()`,
-line 1125.
+The place where unit 04's `"xCoord"` finally reaches the output:
+`field.attrs.name().serialize_name()`, resolved here and interpolated as a
+string literal. Nothing about renaming survives into the generated code, because
+there is nothing left to do at run time.
 
-`quote_spanned!` rather than `quote!` for the function path, with the span of the
-original field. This is the mechanism behind serde's best error message: a field
-whose type does not implement `Serialize` produces *"the trait bound `Foo:
-Serialize` is not satisfied"* underlining **that field**, because the call that
-fails to typecheck carries the field's span rather than the derive's.
+Read the two statements after it in order, because the order is load-bearing.
+The `skip_serializing_if` predicate is built against the raw field expression
+*first*, and only then may `serialize_with` replace that expression with a
+wrapper type. The user's predicate takes the field's own type — `Option::is_none`
+wants an `&Option<T>` — and handing it a generated wrapper would not compile.
 
-The `flatten` branch takes an entirely different route — `FlatMapSerializer`,
-which is serde's internal adapter — and is the other half of the fork two steps
-back.
+Just below this, two branches decide what the write looks like: a flattened
+field goes through `FlatMapSerializer` with no key at all, and everything else
+through `quote_spanned!` with the field's span, which is the mechanism behind
+serde's best error message. A field whose type is not `Serialize` produces
+*"the trait bound `Foo: Serialize` is not satisfied"* underlining **that field**,
+because the call that fails to typecheck carries the field's span rather than
+the derive's.
 """
 
 [[step]]
@@ -200,6 +210,7 @@ id = "s06-skip"
 source = "serde_derive-1.0.229"
 file = "src/ser.rs"
 lines = "1149-1168"
+annotation = "ser-0080"
 title = "…wrapped in an if, when the field can be skipped"
 leans_on = ["s06-struct-visitor"]
 emits = """

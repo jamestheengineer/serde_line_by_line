@@ -595,6 +595,9 @@ mod tests {
                 prereqs: prereqs.iter().map(|s| s.to_string()).collect(),
                 glossary: Vec::new(),
                 macro_def: None,
+                emits: None,
+                emits_from: None,
+                emits_case: None,
                 body: "body".to_string(),
             },
         }

@@ -14,7 +14,7 @@ use askama::Template;
 use highlight::{Highlighter, Line};
 use slbl_core::schema::{CourseUnit, DeriveKind, Kind, Supplement, UnitStatus};
 use slbl_core::{vendor, Store, Unit};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// A contiguous run of source lines shown as one row: code on the left,
@@ -44,6 +44,10 @@ struct Block {
     /// the glossary page, which is where the definition lives — the annotated
     /// crate does not contain it.
     glossary: Vec<GlossLink>,
+    /// What this span emits, for a `codegen` annotation that claims something.
+    /// Sliced out of a real expansion at build time, never out of the store
+    /// (D10), so the page does not build if the claim stops being true.
+    emits: Vec<EmitBlock>,
 }
 
 /// One invocation inside a macro-use group.
@@ -430,6 +434,27 @@ fn main() -> Result<()> {
     let nav = build_nav(&store, &pages);
     let defs = macro_defs(&store);
 
+    // Every case any claim about generated code needs, expanded once for the
+    // whole build — the narrative's units and steps, and now the reference
+    // track's codegen annotations. One cache, so the two tracks cannot read
+    // different bytes and disagree about what the crate emits.
+    let narrative = slbl_core::read_narrative(&repo)?;
+    let mut cases: BTreeSet<String> = BTreeSet::new();
+    for unit in &narrative {
+        cases.extend(unit.unit.expand_case.iter().cloned());
+        for step in &unit.steps {
+            if step.step.emits.is_some() {
+                cases.extend(step.step.emits_case.iter().cloned());
+            }
+        }
+    }
+    for unit in store.all_units() {
+        if unit.annotation.emits.is_some() {
+            cases.extend(unit.annotation.emits_case.iter().cloned());
+        }
+    }
+    let expansions = expansions_for(cases.iter())?;
+
     // Highlighted once for the whole build: the reference track renders each
     // file on its own page, and the course track pulls spans out of a dozen
     // files into one unit page. Keyed by crate as well as path — two of the
@@ -451,6 +476,13 @@ fn main() -> Result<()> {
     // A file gets a page once something is written about it. An unannotated
     // file is listed in the sidebar with its zero rather than published as 400
     // lines of source nobody has explained yet.
+    let ctx = Render {
+        highlighted: &highlighted_files,
+        defs: &defs,
+        pages: &pages,
+        expansions: &expansions,
+        hl: &hl,
+    };
     let mut file_pages = 0usize;
     for source in &store.sources {
         for (file, lines) in source.annotated_files() {
@@ -473,7 +505,7 @@ fn main() -> Result<()> {
                 percent: percent_of(units, *lines),
                 percent_label: format!("{:.1}", percent_of(units, *lines)),
                 lines: *lines,
-                blocks: blocks_for(units, highlighted, &defs, &pages, file),
+                blocks: blocks_for(units, highlighted, &ctx, file)?,
                 source_id: source.source_id.clone(),
                 root: "../".to_string(),
                 current: pages.name(&source.name, file),
@@ -487,8 +519,8 @@ fn main() -> Result<()> {
         }
     }
 
-    write_course(&out, &store, &highlighted_files, &defs, &pages)?;
-    let derive = write_narrative(&out, &repo, &store, &pages, &hl)?;
+    write_course(&out, &store, &ctx)?;
+    let derive = write_narrative(&out, &repo, &store, &pages, &expansions, &hl)?;
     let glossary = write_glossary(&out, &repo, &store, &hl)?;
     write_expand(&out, &repo, &store, &hl)?;
 
@@ -837,6 +869,7 @@ fn write_narrative(
     repo: &Path,
     store: &Store,
     pages: &Pages,
+    expansions: &Expansions,
     hl: &Highlighter,
 ) -> Result<Narrated> {
     let units = slbl_core::read_narrative(repo)?;
@@ -860,30 +893,6 @@ fn write_narrative(
                 .map(|s| (s.step.id.as_str(), u.unit.id.as_str()))
         })
         .collect();
-
-    // Each case expanded once for the whole build, both ways. Ten steps quoting
-    // the same expansion must not run `serde_derive` ten times.
-    let mut expansions: BTreeMap<(String, DeriveKind), String> = BTreeMap::new();
-    let wanted = units.iter().flat_map(|u| {
-        u.unit.expand_case.iter().chain(
-            u.steps
-                .iter()
-                .filter(|s| s.step.emits.is_some())
-                .filter_map(|s| s.step.emits_case.as_ref()),
-        )
-    });
-    for case in wanted {
-        let source =
-            expand::case(case).with_context(|| format!("no such expansion case {case:?}"))?;
-        for (kind, derive) in [
-            (DeriveKind::Serialize, expand::Derive::Serialize),
-            (DeriveKind::Deserialize, expand::Derive::Deserialize),
-        ] {
-            expansions
-                .entry((case.clone(), kind))
-                .or_insert_with(|| expand::expand(source, derive));
-        }
-    }
 
     let nav: Vec<NarrativeNav> = units
         .iter()
@@ -970,30 +979,7 @@ fn write_narrative(
             let mut emits = Vec::new();
             let case = s.emits_case.as_ref().or(unit.unit.expand_case.as_ref());
             if let (Some(snippet), Some(kind), Some(case)) = (&s.emits, s.emits_from, case) {
-                let expansion = &expansions[&(case.clone(), kind)];
-                let (start, len) = locate(expansion, snippet).with_context(|| {
-                    format!(
-                        "{}: the code it says serde_derive emits is not in the {} expansion \
-                         of {case} — the store's claim and the crate's output have parted \
-                         company",
-                        s.id,
-                        kind.label()
-                    )
-                })?;
-                let text: Vec<&str> = expansion.lines().collect();
-                let block = text[start..start + len].join("\n");
-                let mut lines = hl
-                    .file(&block)
-                    .with_context(|| format!("highlighting the expansion at {}", s.id))?;
-                for (offset, line) in lines.iter_mut().enumerate() {
-                    line.number = (start + offset + 1) as u32;
-                }
-                emits.push(EmitBlock {
-                    derive: kind.label().to_string(),
-                    case: case.clone(),
-                    range_label: label(start as u32 + 1, (start + len) as u32),
-                    code: lines,
-                });
+                emits.push(emit_block(expansions, hl, &s.id, snippet, kind, case)?);
             }
 
             steps.push(NarrativeStepBlock {
@@ -1069,6 +1055,70 @@ fn clone_nnav(u: &NarrativeNav) -> NarrativeNav {
         steps: u.steps,
         crossings: u.crossings,
     }
+}
+
+/// Every expansion the build needs, computed once.
+///
+/// Both tracks quote generated code and neither stores it (D10). Ten claims
+/// against the same case must not run `serde_derive` ten times, and the
+/// reference track and the narrative must be reading the same bytes — if they
+/// expanded separately, a claim could pass on one page and fail on the other.
+type Expansions = BTreeMap<(String, DeriveKind), String>;
+
+fn expansions_for<'a>(cases: impl Iterator<Item = &'a String>) -> Result<Expansions> {
+    let mut out = Expansions::new();
+    for case in cases {
+        let source =
+            expand::case(case).with_context(|| format!("no such expansion case {case:?}"))?;
+        for (kind, derive) in [
+            (DeriveKind::Serialize, expand::Derive::Serialize),
+            (DeriveKind::Deserialize, expand::Derive::Deserialize),
+        ] {
+            out.entry((case.clone(), kind))
+                .or_insert_with(|| expand::expand(source, derive));
+        }
+    }
+    Ok(out)
+}
+
+/// One claim about generated code, rendered from the expansion rather than
+/// from the claim.
+///
+/// `who` names whatever made the claim — an annotation id or a step id — and
+/// appears in the error if the crate has stopped emitting it, which is the
+/// whole value of doing this at build time.
+fn emit_block(
+    expansions: &Expansions,
+    hl: &Highlighter,
+    who: &str,
+    snippet: &str,
+    kind: DeriveKind,
+    case: &str,
+) -> Result<EmitBlock> {
+    let expansion = expansions
+        .get(&(case.to_string(), kind))
+        .with_context(|| format!("{who}: no expansion computed for case {case:?}"))?;
+    let (start, len) = locate(expansion, snippet).with_context(|| {
+        format!(
+            "{who}: the code it says serde_derive emits is not in the {} expansion of {case} \
+             — the store's claim and the crate's output have parted company",
+            kind.label()
+        )
+    })?;
+    let text: Vec<&str> = expansion.lines().collect();
+    let block = text[start..start + len].join("\n");
+    let mut lines = hl
+        .file(&block)
+        .with_context(|| format!("highlighting the expansion at {who}"))?;
+    for (offset, line) in lines.iter_mut().enumerate() {
+        line.number = (start + offset + 1) as u32;
+    }
+    Ok(EmitBlock {
+        derive: kind.label().to_string(),
+        case: case.to_string(),
+        range_label: label(start as u32 + 1, (start + len) as u32),
+        code: lines,
+    })
 }
 
 /// Finds `snippet` in `text` as a contiguous run of lines, returning
@@ -1220,18 +1270,7 @@ fn write_glossary(out: &Path, repo: &Path, store: &Store, hl: &Highlighter) -> R
     Ok(stats)
 }
 
-fn write_course(
-    out: &Path,
-    store: &Store,
-    highlighted: &BTreeMap<(String, String), Vec<Line>>,
-    defs: &BTreeMap<String, MacroDef>,
-    pages: &Pages,
-) -> Result<()> {
-    let ctx = Render {
-        highlighted,
-        defs,
-        pages,
-    };
+fn write_course(out: &Path, store: &Store, ctx: &Render<'_>) -> Result<()> {
     let nav: Vec<NavUnit> = store
         .course
         .iter()
@@ -1278,8 +1317,8 @@ fn write_course(
         let annotations = store.course_annotations(&unit.id);
         let blocks: Vec<CourseBlock> = annotations
             .iter()
-            .map(|u| course_block(u, &ctx, i, &placement, &titles, &store.course))
-            .collect();
+            .map(|u| course_block(u, ctx, i, &placement, &titles, &store.course))
+            .collect::<Result<_>>()?;
 
         let page = UnitPage {
             page_title: format!("{} — serde line by line", unit.title),
@@ -1373,6 +1412,8 @@ struct Render<'a> {
     highlighted: &'a BTreeMap<(String, String), Vec<Line>>,
     defs: &'a BTreeMap<String, MacroDef>,
     pages: &'a Pages,
+    expansions: &'a Expansions,
+    hl: &'a Highlighter,
 }
 
 fn course_block(
@@ -1382,14 +1423,14 @@ fn course_block(
     placement: &BTreeMap<&str, usize>,
     titles: &BTreeMap<&str, &str>,
     course: &[CourseUnit],
-) -> CourseBlock {
+) -> Result<CourseBlock> {
     let a = &unit.annotation;
     let file = a.file.clone();
     let lines = ctx
         .highlighted
         .get(&(unit.source.clone(), file.clone()))
         .map_or(&[][..], Vec::as_slice);
-    let mut block = annotated(unit, lines);
+    let mut block = annotated(unit, lines, ctx)?;
 
     // Course pages never merge macro uses — a unit picks out individual
     // invocations from across a file, so there is no contiguous run to merge —
@@ -1419,12 +1460,12 @@ fn course_block(
         })
         .collect();
 
-    CourseBlock {
+    Ok(CourseBlock {
         href: format!("{}#{}", ctx.pages.unit(unit), a.id),
         file,
         block,
         assumes,
-    }
+    })
 }
 
 /// Where a `macro-def` annotation lives, and what it defines.
@@ -1478,10 +1519,9 @@ fn macro_name(title: &str) -> String {
 fn blocks_for(
     units: &[Unit],
     highlighted: &[Line],
-    defs: &BTreeMap<String, MacroDef>,
-    pages: &Pages,
+    ctx: &Render<'_>,
     file: &str,
-) -> Vec<Block> {
+) -> Result<Vec<Block>> {
     let total = highlighted.len() as u32;
     let mut blocks = Vec::new();
     let mut cursor = 1u32;
@@ -1495,9 +1535,9 @@ fn blocks_for(
 
         let run = macro_run(units, i);
         blocks.push(if run > 1 || unit.annotation.kind == Kind::MacroUse {
-            macro_block(&units[i..i + run], highlighted, defs, pages, file)
+            macro_block(&units[i..i + run], highlighted, ctx.defs, ctx.pages, file)
         } else {
-            annotated(unit, highlighted)
+            annotated(unit, highlighted, ctx)?
         });
 
         cursor = cursor.max(units[i + run - 1].range.end + 1);
@@ -1506,7 +1546,7 @@ fn blocks_for(
     if cursor <= total {
         blocks.push(gap(cursor, total, highlighted));
     }
-    blocks
+    Ok(blocks)
 }
 
 /// How many units starting at `i` belong in one macro-use block: 1 for anything
@@ -1533,9 +1573,24 @@ fn macro_run(units: &[Unit], i: usize) -> usize {
     n
 }
 
-fn annotated(unit: &Unit, highlighted: &[Line]) -> Block {
+fn annotated(unit: &Unit, highlighted: &[Line], ctx: &Render<'_>) -> Result<Block> {
     let a = &unit.annotation;
-    Block {
+    // A codegen annotation's claim about what its span emits, sliced out of a
+    // real expansion (D10). Checked here rather than in the coverage gate for
+    // the same reason the narrative's is: the gate has no business compiling
+    // `serde_derive`, and this build already has the expansion in hand.
+    let mut emits = Vec::new();
+    if let (Some(snippet), Some(kind), Some(case)) = (&a.emits, a.emits_from, &a.emits_case) {
+        emits.push(emit_block(
+            ctx.expansions,
+            ctx.hl,
+            &a.id,
+            snippet,
+            kind,
+            case,
+        )?);
+    }
+    Ok(Block {
         annotated: true,
         hidden_lines: 0,
         id: a.id.clone(),
@@ -1550,7 +1605,8 @@ fn annotated(unit: &Unit, highlighted: &[Line]) -> Block {
         expands_href: String::new(),
         uses: Vec::new(),
         glossary: gloss_links(&a.glossary),
-    }
+        emits,
+    })
 }
 
 fn macro_block(
@@ -1617,6 +1673,7 @@ fn macro_block(
         expands_href: href,
         glossary: Vec::new(),
         uses,
+        emits: Vec::new(),
     }
 }
 
@@ -1663,6 +1720,7 @@ fn gap(start: u32, end: u32, highlighted: &[Line]) -> Block {
         expands_href: String::new(),
         uses: Vec::new(),
         glossary: Vec::new(),
+        emits: Vec::new(),
     }
 }
 

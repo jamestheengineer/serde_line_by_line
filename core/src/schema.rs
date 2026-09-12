@@ -51,6 +51,24 @@ pub struct Annotation {
     /// not documentation.
     #[serde(default)]
     pub macro_def: Option<String>,
+    /// Generated code this annotation claims its lines produce, verified
+    /// against a real expansion at render time — and rendered from that
+    /// expansion, never from this string. Lines are matched contiguously and
+    /// compared with leading and trailing whitespace stripped, so a change in
+    /// generated indentation is not a failure but a change in generated code
+    /// is. This is D10's mechanism, which the narrative track proved and the
+    /// derive reference track needs on every `codegen` annotation: a `quote!`
+    /// block explained without showing what comes out is half an explanation.
+    #[serde(default)]
+    pub emits: Option<String>,
+    /// Which half of the expansion `emits` is quoting.
+    #[serde(default)]
+    pub emits_from: Option<DeriveKind>,
+    /// Which `expand/cases/*.rs` input to quote the expansion of. Required
+    /// alongside `emits`: an annotation has no unit to inherit a case from,
+    /// unlike a narrative step.
+    #[serde(default)]
+    pub emits_case: Option<String>,
     pub body: String,
 }
 
@@ -67,6 +85,14 @@ pub enum Kind {
     DocContract,
     Plumbing,
     CfgGate,
+    /// A span that *emits* code: a `quote!` block, or the function assembling
+    /// one. The lever that made `serde_core` tractable — one `macro-def`
+    /// explained and a hundred `macro-use`s pointing at it — does not exist in
+    /// `serde_derive`, which has 2 `macro_rules!` and 271 `quote!`
+    /// invocations, every one emitting something different (PLAN.md §12). What
+    /// takes its place is showing the output: a `codegen` annotation renders
+    /// with the generated code beside the code that generates it.
+    Codegen,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]

@@ -135,6 +135,7 @@ id = "s01-expand-derive-serialize"
 source = "serde_derive-1.0.229"
 file = "src/ser.rs"
 lines = "13-26"
+annotation = "ser-0002"
 title = "expand_derive_serialize — the whole pipeline in fourteen lines"
 leans_on = ["s01-derive-serialize", "s01-private-ident"]
 glossary = ["syn::DeriveInput", "syn::Result"]
@@ -162,7 +163,8 @@ the first. Unit 02 shows the machinery that makes that safe.
 id = "s01-impl-block"
 source = "serde_derive-1.0.229"
 file = "src/ser.rs"
-lines = "45-58"
+lines = "46-58"
+annotation = "ser-0004"
 title = "The impl, written out as a template"
 leans_on = ["s01-expand-derive-serialize"]
 glossary = ["quote::quote", "proc_macro2::TokenStream"]

@@ -3,11 +3,13 @@
 # A file listed under `complete` turns coverage gaps from a warning into a hard
 # CI failure. Add a file here only when every one of its lines is claimed.
 #
-# This store is empty and the list is empty with it: R1 makes `serde_derive` an
-# annotated source (D12), and R2–R5 are what fill it. Until a file is named
-# here the gate reports its gaps as warnings, which is what a track in progress
-# should look like — and the narrative's steps into that file are not yet asked
-# to name a containing annotation, because there is not one to name.
+# R1 made `serde_derive` an annotated source (D12) with this list empty; R2
+# through R5 fill it. Until a file is named here the gate reports its gaps as
+# warnings, and the narrative's steps into that file are not yet asked to name
+# a containing annotation, because there is not one to name. Naming a file here
+# turns both of those on at once.
 source = "serde_derive-1.0.229"
 
-complete = []
+complete = [
+    "src/ser.rs",
+]
