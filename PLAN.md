@@ -597,7 +597,7 @@ exactly the lie §11 refused to tell about the walk.
 | **R2 — Vertical slice: `ser.rs`** ✅ | The densest codegen file, 1,369 lines and 76 `quote!` blocks, and the one the narrative already walks | 96 | `ser.rs` at 100%; the `codegen` kind proven in the renderer; an annotation's `emits` checked against a real expansion at annotation granularity (D10); its narrative steps retargeted |
 | **R3 — The rest of codegen** ✅ | `de.rs`, then `de/struct_.rs`, `de/tuple.rs`, `de/unit.rs`, `de/identifier.rs`, and the four enum representations | 165 | codegen at 100%; the four representations read as four variations, not four transcripts |
 | **R4 — `internals/`** ✅ | `attr.rs` (1,818 lines, the attribute DSL), `check.rs`, `ast.rs`, `case.rs`, `name.rs`, `symbol.rs`, `ctxt.rs`, `respan.rs`, `mod.rs` | 102 | the `#[serde(...)]` surface is claimed, including what upstream rejects and why |
-| **R5 — Plumbing** | `bound.rs`, `receiver.rs`, `pretend.rs`, `lib.rs`, `fragment.rs`, `deprecated.rs`, `this.rs`, `dummy.rs` | ~56 | **every line of `serde_derive` claimed**; all 28 files in its manifest; the gate hard-fails on regression; all 85 narrative steps name a containing annotation |
+| **R5 — Plumbing** ✅ | `bound.rs`, `receiver.rs`, `pretend.rs`, `lib.rs`, `fragment.rs`, `deprecated.rs`, `this.rs`, `dummy.rs` | 39 | **every line of `serde_derive` claimed**; all 28 files in its manifest; the gate hard-fails on regression; all 85 narrative steps name a containing annotation |
 | **R6 — Course units** | 6–8 new units: proc-macro basics, `TokenStream` and spans, hygiene, `syn`'s AST, `quote!` interpolation, the attribute DSL, codegen for the four enum representations; the cross-crate prereq DAG | — | the course track spans both crates, walkable start to finish, D8's forward-reference check enforcing across sources |
 | **R7 — Ship** | Navigation for four reference file-trees' worth of pages, the restated promise, `README` | — | both reference tracks reachable and each honest about what it claims |
 
@@ -712,6 +712,34 @@ than moving it again.
 and four steps did not fit: one annotation pair merged, one boundary shifted,
 and two steps whose cited range had drifted past the arm they describe were
 narrowed to it.
+
+### What R5 shipped
+
+**`serde_derive` is at 100%.** 28 files, 8,975 lines, 403 annotations, every
+file named in `annotations/serde_derive/manifest.toml`, and the gate hard-fails
+on a gap from here on — the same promise `serde_core` has carried since phase 6,
+now made about a second crate.
+
+**And the conversion R1 designed is complete.** All 85 narrative steps name the
+annotation they land in; the report's crossings column reads 8, 9, 10, 7, 9, 10,
+9, 12, 11 — every step in every unit. The walk that was a track with its own
+citations is now an ordering over the annotation store, which is what PLAN.md §3
+said a track was, and it got there one file at a time with the rule turning
+compulsory exactly when there was something to point at. No flag day, and no
+window where the rule was suspended.
+
+Across R2–R5 the ratchet fired 66 times and 13 steps needed work: nine
+annotation boundaries merged, one shifted, and three steps narrowed to the code
+their prose actually describes. Five of those thirteen were in R2, which is the
+vertical slice doing its job.
+
+**Final count: 403 against a projected ~502**, at 22.3 lines per annotation.
+The scope doc's stated floor was 450 and the overshoot is in one place —
+`internals/` came in at 29.6 lines against a projected 28, codegen at 18.1
+against 14. The compression the `quote!` count could not see is that the four
+enum representations share three reading paths between them, and that
+`attr.rs`'s attribute chains are worth explaining by group rather than by
+branch.
 
 R3–R5 are pure content throughput and can be reordered freely, with one
 exception: `internals/attr.rs` is the density risk the scope doc flagged

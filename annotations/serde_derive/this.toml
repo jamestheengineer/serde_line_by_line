@@ -1,0 +1,38 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "this-0001"
+file  = "src/this.rs"
+lines = "1-17"
+title = "this_type — the same path, in type position"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::Path", "syn::PathArguments"]
+body = """
+A remote path may be written either way — `Remote<T>` or `Remote::<T>` — and in
+*type* position the turbofish is wrong. So every angle-bracketed segment has its
+`::` removed.
+
+For a local type there is nothing to do: the ident is the path.
+"""
+
+[[annotation]]
+id    = "this-0002"
+file  = "src/this.rs"
+lines = "18-32"
+title = "…and this_value, which adds the turbofish back"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::Path", "syn::Token"]
+body = """
+The exact inverse, for expression position, where `Remote<T>` parses as a
+comparison and `Remote::<T>` is required.
+
+Two functions whose bodies differ by one negation, kept separate because the
+call sites are unambiguous about which position they are in. `Parameters` holds
+both results so no generator has to decide.
+
+The span for the inserted `::` is taken from the existing `<`, so an error lands
+on the user's own tokens rather than at the call site.
+"""

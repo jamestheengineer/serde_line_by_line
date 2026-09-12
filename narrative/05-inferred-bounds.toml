@@ -83,7 +83,8 @@ reading in place.
 id = "s05-find-ty-params"
 source = "serde_derive-1.0.229"
 file = "src/bound.rs"
-lines = "97-147"
+lines = "103-147"
+annotation = "bound-0006"
 title = "FindTyParams — a hand-written visitor, and one hardcoded exception"
 leans_on = ["s05-needs-bound"]
 glossary = ["syn::Field", "syn::Type", "syn::TypePath", "syn::Path", "syn::punctuated::Pair"]
@@ -113,7 +114,8 @@ of generated traversal to serve a walk that is fifty.
 id = "s05-visit-type"
 source = "serde_derive-1.0.229"
 file = "src/bound.rs"
-lines = "149-193"
+lines = "151-193"
+annotation = "bound-0007"
 title = "…and the traversal itself, which is deliberately incomplete"
 leans_on = ["s05-find-ty-params"]
 glossary = ["syn::Type", "syn::ReturnType", "syn::TypeParamBound", "syn::Macro"]
@@ -139,6 +141,7 @@ id = "s05-make-where"
 source = "serde_derive-1.0.229"
 file = "src/bound.rs"
 lines = "284-326"
+annotation = "bound-0009"
 title = "…and the where clause, built as syntax rather than as text"
 leans_on = ["s05-visit-type"]
 glossary = ["syn::WherePredicate", "syn::PredicateType", "syn::TraitBound", "syn::TraitBoundModifiers", "syn::Token", "syn::punctuated::Punctuated"]

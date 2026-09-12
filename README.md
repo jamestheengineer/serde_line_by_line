@@ -18,14 +18,17 @@ answers the question most readers actually arrive with — **what does
 `#[derive(Serialize)]` turn into?** — by following one struct and one enum
 through `serde_derive` and running the expansion in the browser.
 
-> **Status: live. Three tracks complete, and a fourth thing under way** — the
-> reference track now covers a second crate, `serde_derive`, at 7,743 of 8,975
-> lines — codegen and `internals/` complete (PLAN.md §12).
+> **Status: live, and the reference track now covers two crates.**
+> `serde_derive` is complete at 8,975 of 8,975 lines, alongside `serde_core`'s
+> 12,037 — two crates, two hard gates, and no number that spans them
+> (PLAN.md §12, [D12](docs/decisions.md)). The course track has not been
+> extended across the second crate yet; that is R6.
 >
-> **Reference** — every line of `serde_core` is annotated: all 19 files at
-> 100%, listed in `annotations/serde_core/manifest.toml`, so the gate hard-fails
-> on any gap or overlap. The site rebuilds and deploys to the URL above on
-> every push to `main`.
+> **Reference** — every line of both annotated crates: `serde_core`'s 19 files
+> and `serde_derive`'s 28, all at 100% and all listed in their
+> `annotations/<crate>/manifest.toml`, so the gate hard-fails on any gap or
+> overlap. 871 annotations between them. The site rebuilds and deploys to the
+> URL above on every push to `main`.
 >
 > **Course** — all 14 units are written and the track is walkable start to
 > finish. Five of them are supplementary in whole or in part: ownership and
@@ -43,7 +46,10 @@ through `serde_derive` and running the expansion in the browser.
 > and those quotations are sliced out of a real expansion at build time rather
 > than stored, so the page does not build if the crate stops emitting them.
 > The walk makes no coverage claim of its own — it is a path, and the
-> percentage belongs to the reference track underneath it.
+> percentage belongs to the reference track underneath it. Every one of its 85
+> steps now lands inside an annotation and links there, which is what happened
+> when `serde_derive` stopped being walked-not-claimed and became the second
+> crate the reference track claims.
 >
 > See **[PLAN.md](PLAN.md)** for the roadmap and
 > **[docs/decisions.md](docs/decisions.md)** for the architecture calls.

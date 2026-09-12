@@ -30,5 +30,13 @@ complete = [
     "src/internals/mod.rs",
     "src/internals/name.rs",
     "src/internals/respan.rs",
+    "src/internals/receiver.rs",
     "src/internals/symbol.rs",
+    "src/bound.rs",
+    "src/deprecated.rs",
+    "src/dummy.rs",
+    "src/fragment.rs",
+    "src/lib.rs",
+    "src/pretend.rs",
+    "src/this.rs",
 ]

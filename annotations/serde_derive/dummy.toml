@@ -1,0 +1,29 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "dummy-0001"
+file  = "src/dummy.rs"
+lines = "1-31"
+title = "wrap_in_const — the alias, and the const block every expansion lives in"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Two ways to bind the alias, and one wrapper around everything.
+`#[serde(crate = "path")]` becomes a `use`; the default is `extern crate serde
+as _serde`, which is deliberate and load-bearing — it works whether or not the
+user has `serde` in scope, in a module that imported something else called
+`serde`, and in a crate that renamed the dependency. The
+`allow(unused_extern_crates)` is the price.
+
+The anonymous `const` around it does four jobs. It scopes the alias to the
+expansion. It hides the helper types — `__Visitor`, `__Field`,
+`__SerializeWith` — from the user's namespace. It is an item, so it is legal
+anywhere an item is, including inside a function body. And the four `allow`s
+suppress lints that generated code trips and the user cannot fix.
+
+`__require_serde_not_serde_core!()` is a purposeful compile error for the case
+where the alias resolved to `serde_core` rather than `serde`: the derive emits
+calls only the full crate provides, and failing here with a message that says so
+beats failing later with missing items.
+"""

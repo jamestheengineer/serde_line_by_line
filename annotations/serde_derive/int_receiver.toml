@@ -1,0 +1,149 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "recv-0001"
+file  = "src/internals/receiver.rs"
+lines = "1-20"
+title = "replace_receiver — rewriting `Self` before anything else happens"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::DeriveInput", "syn::parse_quote", "syn::TypePath"]
+body = """
+The first thing both entry points do, and the reason is one sentence: the
+generated impl is a *different* impl from the one the user wrote, so `Self`
+inside it means something else.
+
+`struct S<T> { a: Self }` is not legal, but `struct S<T> { a: Vec<Self> }` and
+`#[serde(bound = "Self: Clone")]` are, and a `Self` surviving into generated
+code would resolve to the visitor type or the wrapper struct rather than to `S`.
+
+`parse_quote!(#ident #ty_generics)` builds the replacement — the type with its
+own parameters, which is what `Self` means where the user wrote it.
+"""
+
+[[annotation]]
+id    = "recv-0002"
+file  = "src/internals/receiver.rs"
+lines = "21-54"
+title = "…and self_to_qself, which is why `Self::Assoc` becomes `<S<T>>::Assoc`"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::QSelf", "syn::Path", "syn::Token"]
+body = """
+The subtle half. `Self` alone is a type and substituting it is trivial;
+`Self::Assoc` is an associated-type path, and `S<T>::Assoc` does not parse — it
+has to become `<S<T>>::Assoc`, a qualified path.
+
+So a `QSelf` is constructed and the first segment removed. `self_ty(span)`
+respans the replacement onto the `Self` token being replaced, which is what the
+whole `respan` module exists for: an error about the substituted type points at
+the `Self` the user wrote.
+"""
+
+[[annotation]]
+id    = "recv-0003"
+file  = "src/internals/receiver.rs"
+lines = "55-71"
+title = "…and the expression-position variant, which needs the turbofish"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::Path", "syn::PathArguments"]
+body = """
+The same substitution in expression position, where `S<T>::V` parses as a
+comparison and `S::<T>::V` is required — so every angle-bracketed segment gains
+a `::`.
+
+The same distinction `this.rs` makes between `this_type` and `this_value`, met
+here as two functions instead of two callers.
+"""
+
+[[annotation]]
+id    = "recv-0004"
+file  = "src/internals/receiver.rs"
+lines = "72-106"
+title = "…three entry points, each with a comment naming its rewrite"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::Type", "syn::TypePath", "syn::ExprPath"]
+body = """
+`Self` to the receiver, `Self::Assoc` to a qualified path, `Self::method` to the
+same. The three comments are the clearest statement of the file's job.
+
+Each checks for the `Self` case and otherwise delegates to an `_impl` twin that
+does the plain recursion. That split is what keeps the substitution logic
+separate from the traversal, which is the bulk of the file.
+"""
+
+[[annotation]]
+id    = "recv-0005"
+file  = "src/internals/receiver.rs"
+lines = "107-167"
+title = "…and the traversal: a hand-written mutable visitor over syn::Type"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+glossary = ["syn::Type", "syn::ReturnType", "syn::TypeParamBound"]
+body = """
+Sixty lines of recursion, one arm per `Type` variant, because syn's own `visit_mut`
+feature is not enabled — pulling it in would add compile time to every crate
+that depends on serde, for a traversal this crate can write in an afternoon.
+
+The shape is the same as `collect_lifetimes` in `attr.rs` and the `FindTyParams`
+visitor in `bound.rs`: three hand-rolled walkers over the same tree, each
+visiting only what it needs.
+"""
+
+[[annotation]]
+id    = "recv-0006"
+file  = "src/internals/receiver.rs"
+lines = "168-217"
+title = "…paths, arguments, return types and bounds"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::PathArguments", "syn::GenericArgument"]
+body = """
+The rest of the traversal. Generic arguments are descended into, which is what
+makes `Vec<Self>` work; parenthesized arguments — `Fn(Self) -> Self` — are
+covered too, including the return type.
+
+`visit_macro_mut` at the end of the file is empty, and that is the honest
+limitation: `Self` inside a macro invocation in a field type cannot be rewritten,
+because the macro has not expanded yet.
+"""
+
+[[annotation]]
+id    = "recv-0007"
+file  = "src/internals/receiver.rs"
+lines = "218-245"
+title = "…generics, where `Self` shows up in a bound"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["where-clauses"]
+glossary = ["syn::Generics", "syn::WherePredicate"]
+body = """
+`#[serde(bound = "Self: Clone")]` parses into a where-predicate whose bounded
+type is `Self`, and it has to be rewritten like any other.
+
+The `cfg_attr` deny on this match is the third instance of that guard in the
+crate, for the same reason: `WherePredicate` is `#[non_exhaustive]`, and a new
+variant should fail a test rather than be swallowed silently.
+"""
+
+[[annotation]]
+id    = "recv-0008"
+file  = "src/internals/receiver.rs"
+lines = "246-293"
+title = "…the field types, and the expressions a const generic can hide in"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::Data", "syn::Expr"]
+body = """
+`visit_data_mut` is the entry into the actual fields — struct fields and every
+variant's fields. Unions are skipped, having been rejected already.
+
+`visit_expr_mut` exists for array lengths and const-generic arguments:
+`[u8; Self::LEN]` is a type containing an *expression* containing `Self`. Eight
+expression forms are handled and the rest ignored, which is a judgement about
+what can appear in a type position rather than an oversight.
+"""

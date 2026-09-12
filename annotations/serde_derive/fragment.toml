@@ -1,0 +1,60 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "frag-0001"
+file  = "src/fragment.rs"
+lines = "1-24"
+title = "Fragment — the distinction that runs through every generator"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["proc_macro2::TokenStream", "quote::ToTokens"]
+body = """
+Two variants, and the doc comments state the contract precisely: a `Block`'s
+tokens do **not** include the surrounding braces.
+
+That is the whole design. Generated code is spliced into positions that demand
+an expression, statements, or a match arm, and the punctuation differs between
+them. Carrying the distinction in the type means every generator says which it
+produced and no caller has to guess. Without it the alternative is emitting
+braces eagerly — and `{ ... }` in expression position is legal but changes what
+`?` and `return` mean inside it.
+
+`quote_expr!` and `quote_block!` are two of the crate's three `macro_rules!`,
+and their whole value is that the choice is made at the site that *writes* the
+tokens rather than the site that splices them. Reading a generator, which one is
+used tells you immediately whether the thing being built ends in a tail
+expression or is a sequence of statements.
+
+`$crate::fragment::Fragment` rather than a bare path, because these are used in
+modules that do not import it; `#[macro_use]` in `lib.rs` puts them in scope
+everywhere.
+"""
+
+[[annotation]]
+id    = "frag-0002"
+file  = "src/fragment.rs"
+lines = "25-74"
+title = "Expr, Stmts and Match — three positions, three punctuations"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["quote::ToTokens"]
+body = """
+The three adapters, and they are the reason `Fragment` is worth having. Each is
+a newtype with a `ToTokens` impl, and each handles the same two variants
+differently.
+
+`Expr` braces a block and passes an expression through — a block spliced where
+an expression belongs needs them. `Stmts` is the identity: in statement position
+a block's tokens are already right and a single expression works as a tail
+expression. `Match` is the asymmetric one, because `X => expr,` needs the comma
+and `X => { ... }` must not have one.
+
+`token::Brace::default().surround(...)` emits a brace-delimited group at
+`call_site` — these braces came from the macro and point nowhere in the user's
+source, which is correct.
+
+Six lines of real content between them, and they remove a whole category of
+generated-code syntax error. `AsRef` at the bottom is for the rare caller that
+wants the tokens with no punctuation decision at all.
+"""

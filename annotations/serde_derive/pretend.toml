@@ -1,0 +1,123 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "pret-0001"
+file  = "src/pretend.rs"
+lines = "1-31"
+title = "pretend_used — generating code purely to suppress a warning"
+kind  = "codegen"
+tracks = ["reference"]
+glossary = ["quote::format_ident"]
+body = """
+The comment, with its two quoted `rustc` warnings, is the entire justification:
+a remote-derive placeholder never has its fields read or its variants
+constructed, so the compiler reports them as dead code — in the user's build,
+about a struct they wrote deliberately.
+
+So this file generates code that pretends to use them. It is the only code in
+the crate whose output is intended never to run: every construct below is inside
+`match None { ... }`, so it type-checks and is unreachable.
+"""
+
+[[annotation]]
+id    = "pret-0002"
+file  = "src/pretend.rs"
+lines = "32-64"
+title = "…and thirty lines of comment showing exactly what comes out"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+Four worked examples, one per case, and they are better than any paraphrase:
+the ordinary struct, the packed struct on new rustc, the packed struct on old
+rustc, and the enum.
+
+Worth reading here rather than reconstructing from the four functions below —
+the generated shapes are small and the differences between them are the whole
+content.
+"""
+
+[[annotation]]
+id    = "pret-0003"
+file  = "src/pretend.rs"
+lines = "65-78"
+title = "pretend_fields_used — three cases, and a unit struct needs nothing"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+A unit struct has no fields to be unused, so it emits nothing. The packed split
+is the interesting one and is explained below.
+"""
+
+[[annotation]]
+id    = "pret-0004"
+file  = "src/pretend.rs"
+lines = "79-93"
+title = "…the ordinary case: destructure a value that does not exist"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+`match None::<&T> { Some(T { a: __v0, b: __v1 }) => {} _ => {} }`.
+
+The pattern mentions every field, which is what makes the compiler consider them
+used. `None::<&T>` means nothing is ever constructed and the arm never runs —
+this is a type-level statement, not a runtime one.
+
+`format_ident!("__v{}", i)` for the bindings, because the pattern needs a name
+per field and the names must not collide with anything.
+"""
+
+[[annotation]]
+id    = "pret-0005"
+file  = "src/pretend.rs"
+lines = "94-112"
+title = "…and the packed case, which cannot bind fields at all"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["unsafe", "borrowing"]
+body = """
+A field of a `repr(packed)` struct cannot be borrowed, and a binding pattern
+borrows. So the pattern uses `_` for every field and the fields are named
+through `addr_of!` instead, which produces a raw pointer without creating a
+reference.
+
+`__v @ T { .. }` binds the whole value so there is something to take the address
+of. This is the same misalignment problem `get_member` solves with braces on the
+serialize side, met from the other direction.
+"""
+
+[[annotation]]
+id    = "pret-0006"
+file  = "src/pretend.rs"
+lines = "113-140"
+title = "…and the enum case, which only reaches struct variants"
+kind  = "codegen"
+tracks = ["reference"]
+body = """
+One arm per struct variant, all in one `match`. Tuple and newtype variants are
+skipped, because their fields are positional and the variant being constructed
+below is enough to mark them used.
+"""
+
+[[annotation]]
+id    = "pret-0007"
+file  = "src/pretend.rs"
+lines = "141-188"
+title = "pretend_variants_used — constructing every variant, unreachably"
+kind  = "codegen"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+The other half of the problem: a remote enum's variants are never *constructed*
+by the generated code, so each one gets a `let _ = E::V { ... }` inside its own
+`match None`.
+
+`match None` with no turbofish here — the type is inferred from the tuple
+pattern `Some((__v0, __v1,))`, whose element types are inferred in turn from
+their use in the constructor. A small piece of type inference doing work that
+would otherwise need the field types spelled out.
+
+The trailing comma in `(#(#placeholders,)*)` is what makes a one-field variant
+produce a one-tuple rather than a parenthesized expression.
+"""

@@ -47,7 +47,8 @@ unit 09.
 id = "s06-fragment"
 source = "serde_derive-1.0.229"
 file = "src/fragment.rs"
-lines = "5-23"
+lines = "1-24"
+annotation = "frag-0001"
 title = "Fragment — is this an expression, or the inside of a block?"
 body = """
 Seventy-four lines that solve a problem you only notice once you try to write a
@@ -68,7 +69,8 @@ build them so no call site has to name the enum. Every body-producing function i
 id = "s06-fragment-adapters"
 source = "serde_derive-1.0.229"
 file = "src/fragment.rs"
-lines = "25-65"
+lines = "25-74"
+annotation = "frag-0002"
 title = "…and three adapters, one per splice position"
 leans_on = ["s06-fragment"]
 glossary = ["quote::ToTokens", "proc_macro2::TokenStream", "syn::Token"]

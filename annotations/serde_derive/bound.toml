@@ -1,0 +1,231 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "bound-0001"
+file  = "src/bound.rs"
+lines = "1-10"
+title = "bound — five ways to build the generics of a generated impl"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::punctuated::Pair", "syn::punctuated::Punctuated"]
+body = """
+Every impl this crate emits gets its generics through this file, and the comment
+on the first function is a good warning of the register: these are all
+workarounds for the difference between what is legal in a *declaration* and what
+is legal in an *impl header*.
+"""
+
+[[annotation]]
+id    = "bound-0002"
+file  = "src/bound.rs"
+lines = "11-27"
+title = "without_defaults — and the error message that explains it"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["generic-params"]
+body = """
+`struct S<T = u32>` is legal; `impl<T = u32> Serialize for S<T>` is not, and the
+compiler's message for it is quoted in the comment: "associated type bindings
+are not allowed here", because `T = u32` in that position parses as an
+associated-type binding.
+
+Three lines of real work, and without them every generic type with a default
+would fail to derive with an error naming a feature nobody used.
+"""
+
+[[annotation]]
+id    = "bound-0003"
+file  = "src/bound.rs"
+lines = "28-59"
+title = "with_where_predicates, and the field version"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["where-clauses"]
+body = """
+`make_where_clause()` creates the `where` clause if the generics do not have
+one, which is why nothing here handles the `None` case.
+
+The field version takes an accessor as a `fn` pointer — `attr::Field::ser_bound`
+or `de_bound` — so one function serves both halves of the crate. Passing a
+function pointer rather than a closure keeps it non-generic, which matters for
+a proc macro's compile time.
+"""
+
+[[annotation]]
+id    = "bound-0004"
+file  = "src/bound.rs"
+lines = "60-84"
+title = "…and the variant version, which returns early for a struct"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["where-clauses"]
+body = """
+The same shape, over variants. A struct has none, so it returns the generics
+unchanged rather than iterating nothing — one clone either way, and the early
+return says why.
+"""
+
+[[annotation]]
+id    = "bound-0005"
+file  = "src/bound.rs"
+lines = "85-102"
+title = "with_bound — and the worked example above it"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["where-clauses", "generic-params"]
+body = """
+The inference proper, and the comment gives the case exactly: `struct S<'b, A,
+B: 'b, C>` with a skipped `C` needs `A: Serialize, B: Serialize` and must not
+require `C: Serialize`.
+
+Getting this wrong in either direction is a real bug. Too few bounds and the
+impl does not compile; too many and it rejects types that would have worked.
+"""
+
+[[annotation]]
+id    = "bound-0006"
+file  = "src/bound.rs"
+lines = "103-150"
+title = "FindTyParams — three sets, and the hardcoded PhantomData exception"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["associated-types"]
+glossary = ["syn::TypePath", "syn::punctuated::Pair"]
+body = """
+Three fields. `all_type_params` is the whole set up front; `relevant_type_params`
+is filled as the visitor sees them; `associated_type_usage` is the third case and
+the least obvious.
+
+A field of type `T::Assoc` needs `T::Assoc: Serialize`, not `T: Serialize` —
+bounding `T` says nothing about its associated type. `visit_field` detects that
+shape by checking whether the *first* path segment is a known type parameter,
+and records the whole path.
+
+`visit_path` carries the exception everyone eventually meets. `PhantomData<T>`
+implements `Serialize` and `Deserialize` regardless of `T`, so a parameter used
+only as a marker must not be bounded — and the check is a name comparison on the
+last path segment, with a comment saying "hardcoded exception".
+
+Without it, `struct S<T> { marker: PhantomData<T> }` would require
+`T: Serialize`, and every user with a non-serializable marker type would have to
+write `#[serde(bound = "")]`. It is the most load-bearing five lines in the file,
+and there is no way to ask the type system this question from inside a proc
+macro, because a proc macro has no type system.
+
+A single-segment path that names a type parameter is what marks it relevant —
+`leading_colon.is_none() && segments.len() == 1`, so `other::T` does not count.
+"""
+
+[[annotation]]
+id    = "bound-0007"
+file  = "src/bound.rs"
+lines = "151-224"
+title = "…and the traversal, with the same non-exhaustive guard"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+glossary = ["syn::Type", "syn::PathArguments", "syn::GenericArgument"]
+body = """
+"Everything below is simply traversing the syntax tree", says the comment, and
+it is right — but the two `cfg_attr` denies in it are worth noticing. This is
+the second of three hand-written walkers over syn's `Type` in the crate, and
+both places where it matches a `#[non_exhaustive]` enum carry the lint that
+turns a new variant into a test failure.
+"""
+
+[[annotation]]
+id    = "bound-0008"
+file  = "src/bound.rs"
+lines = "225-283"
+title = "…running the visitor, over only the fields the filter accepts"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["closures", "iterators"]
+body = """
+`filter` is `needs_serialize_bound` or `needs_deserialize_bound`, and it decides
+per field whether the visitor sees it at all. A skipped field contributes no
+bound because its type is never visited.
+
+`field.original` rather than the parsed `Field`: the visitor walks syn's tree,
+and the serde model does not carry the full type structure.
+"""
+
+[[annotation]]
+id    = "bound-0009"
+file  = "src/bound.rs"
+lines = "284-328"
+title = "…and building the predicates, by hand"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["where-clauses"]
+glossary = ["syn::PredicateType", "syn::TraitBound", "syn::TraitBoundModifiers"]
+body = """
+`make_where_bounded_type` constructs a `WherePredicate` field by field rather
+than with `parse_quote!`, and the two inline comments name the two halves — the
+bounded type and the bound.
+
+Constructing rather than parsing because the bound arrives as a `syn::Path` from
+the caller and re-serializing it to tokens to re-parse would lose spans.
+
+Two loops: the relevant type parameters, then the associated-type paths. They
+are separate because the second set is not parameters at all.
+"""
+
+[[annotation]]
+id    = "bound-0010"
+file  = "src/bound.rs"
+lines = "329-357"
+title = "with_self_bound — `Self: Default`, for a container default"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["where-clauses"]
+body = """
+`#[serde(default)]` on a container needs the container itself to implement
+`Default`, and this adds that predicate using `type_of_item` at the bottom of
+the file for the bounded type.
+"""
+
+[[annotation]]
+id    = "bound-0011"
+file  = "src/bound.rs"
+lines = "358-390"
+title = "with_lifetime_bound — `'__a`, and everything outliving it"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["lifetimes", "generic-params"]
+body = """
+The function behind every borrowed wrapper type in the crate:
+`__SerializeWith`, `__AdjacentlyTagged`, `__EnumFlatten`.
+
+It prepends the new lifetime and adds it as a bound to every existing
+parameter — lifetimes get `'a: '__a`, type parameters get `T: '__a`, const
+parameters get nothing. Without the bounds, a wrapper holding `&'__a T` would
+not compile for a `T` that might not outlive it.
+
+Prepended rather than appended, so the generated header reads in the
+conventional order.
+"""
+
+[[annotation]]
+id    = "bound-0012"
+file  = "src/bound.rs"
+lines = "391-431"
+title = "type_of_item — the type as a type expression, and the one panic"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["generic-params"]
+glossary = ["syn::TypePath", "syn::AngleBracketedGenericArguments", "syn::GenericParam"]
+body = """
+Turns `struct S<'a, T>` into the type `S<'a, T>` — the parameters used as
+arguments, which is a different thing from the parameters declared.
+
+Built rather than parsed, forty lines of syn constructors, because the parts
+come from the user's generics and must keep their spans.
+
+And the panic: `"Serde does not support const generics yet"`. It is the only
+unconditional panic in the crate's non-error paths, it is reached only through
+`with_self_bound` — so only by a container with `#[serde(default)]` and a const
+generic parameter — and it is the clearest statement in the source of a
+limitation the documentation states more gently.
+"""

@@ -1,0 +1,51 @@
+schema = 1
+source = "serde_derive-1.0.229"
+
+[[annotation]]
+id    = "depr-0001"
+file  = "src/deprecated.rs"
+lines = "1-11"
+title = "allow_deprecated — an attribute the expansion sometimes needs"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+Deriving `Serialize` on a `#[deprecated]` type generates code that mentions it,
+and that code would warn — in the user's build, about their own deliberate
+deprecation.
+
+So the generated impl gets `#[allow(deprecated)]`. `Option<TokenStream>` rather
+than an empty stream, for the same reason `mut_if` returns one: `quote!`
+interpolates `None` as nothing.
+"""
+
+[[annotation]]
+id    = "depr-0002"
+file  = "src/deprecated.rs"
+lines = "12-31"
+title = "…and the two places a deprecation can be"
+kind  = "plumbing"
+tracks = ["reference"]
+body = """
+The doc comment lists both triggers: the type is deprecated, or the user already
+wrote `#[allow(deprecated)]` themselves — in which case they have said they know,
+and the expansion should not undo that by warning anyway.
+
+Enum variants are checked too, because a deprecated variant is constructed by
+the generated `Deserialize`.
+"""
+
+[[annotation]]
+id    = "depr-0003"
+file  = "src/deprecated.rs"
+lines = "32-56"
+title = "…and the scan, which parses inside `allow(...)`"
+kind  = "plumbing"
+tracks = ["reference"]
+glossary = ["syn::Attribute", "syn::Meta"]
+body = """
+`#[deprecated]` is a path match. `#[allow(deprecated)]` needs the nested meta
+parsed, because `allow` takes a list and `deprecated` may be anywhere in it.
+
+`let _ =` on the parse result: this is someone else's attribute, and a
+malformed `allow` is not serde's error to report — the compiler will say so.
+"""
