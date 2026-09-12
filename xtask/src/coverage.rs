@@ -37,10 +37,12 @@ pub struct UnitCoverage {
     pub lines: u32,
 }
 
-/// One narrative unit's shape. There is no percentage here on purpose: the
-/// narrative source is walked, not claimed (PLAN.md §11), and a coverage figure
-/// over it would be a lie told in a number. What is reported instead is the
-/// size of the walk and how often it crosses into the annotated crate.
+/// One narrative unit's shape. There is no percentage here on purpose, and the
+/// reason outlived the role that first gave it: the walk was over an unclaimed
+/// crate (PLAN.md §11) and is now an ordering over a claimed one (§12), but
+/// either way a percentage would be measuring the wrong thing — a path is not
+/// a fraction of a crate. What is reported instead is the size of the walk and
+/// how many of its stops land inside an annotation.
 #[derive(Debug, Serialize)]
 pub struct NarrativeUnitReport {
     pub id: String,
@@ -50,24 +52,46 @@ pub struct NarrativeUnitReport {
     pub crossings: usize,
 }
 
+/// One annotated source's coverage.
+///
+/// Every percentage in this report hangs off one of these, and none off the
+/// report itself. There are two annotated crates since D12, they promise the
+/// same thing about different amounts of code, and a figure spanning both
+/// would describe neither: 12,037 claimed lines out of 21,012 is not a fact
+/// about anything a reader could check.
 #[derive(Debug, Serialize)]
-pub struct Report {
+pub struct SourceCoverage {
+    /// "serde_core-1.0.229".
     pub source: String,
+    /// "serde_core".
+    pub name: String,
     pub total_lines: u32,
     pub claimed_lines: u32,
     pub annotations: usize,
     pub files: Vec<FileCoverage>,
-    pub course: Vec<UnitCoverage>,
-    pub narrative: Vec<NarrativeUnitReport>,
+    pub kinds: BTreeMap<String, usize>,
+    /// Files with no annotation at all. Reported as one line rather than as a
+    /// warning each: nobody has started them, which is a position on the
+    /// roadmap and not a defect.
+    pub not_started: usize,
+    pub not_started_lines: u32,
 }
 
-impl Report {
+impl SourceCoverage {
     pub fn percent(&self) -> f64 {
         if self.total_lines == 0 {
             return 0.0;
         }
         self.claimed_lines as f64 * 100.0 / self.total_lines as f64
     }
+}
+
+#[derive(Debug, Serialize)]
+pub struct Report {
+    /// The annotated sources, in pin order.
+    pub sources: Vec<SourceCoverage>,
+    pub course: Vec<UnitCoverage>,
+    pub narrative: Vec<NarrativeUnitReport>,
 }
 
 /// Errors are fatal; warnings are reported but do not fail the build.
@@ -93,122 +117,218 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
     vendor::verify(repo)?;
     check_vendor_dirs(repo, &mut diag)?;
     print_sources(repo)?;
-    let source_id = vendor::load_pin(repo)?.primary()?.source_id();
 
-    let source_files = vendor::source_files(repo)?;
-    let known_files: HashSet<&str> = source_files.iter().map(String::as_str).collect();
-
-    let manifest = Manifest::load(&repo.join("annotations").join("manifest.toml"))?;
-    if manifest.source != source_id {
-        bail!(
-            "manifest source {:?} does not match pinned source {source_id:?}",
-            manifest.source,
-        );
-    }
-    let complete: HashSet<&str> = manifest.complete.iter().map(String::as_str).collect();
-    for f in &complete {
-        if !known_files.contains(f) {
-            diag.error(format!("manifest marks unknown file complete: {f}"));
-        }
-    }
-
+    let pin = vendor::load_pin(repo)?;
     let glossary = check_glossary(repo, &mut diag)?;
     let features = load_feature_vocabulary(repo)?;
     let examples = load_example_names(repo)?;
-    let pin = vendor::load_pin(repo)?;
-    let primary = pin.primary()?;
-    check_example_pins(repo, &primary.name, &primary.version, &mut diag)?;
+    // The examples build against the first coverage source: they are
+    // `serde_core` programs, and `serde_derive` is not something an example
+    // calls, it is something the site expands.
+    let first = pin.coverage()?[0];
+    check_example_pins(repo, &first.name, &first.version, &mut diag)?;
     check_harness_pins(repo, &pin, &mut diag)?;
-    let annotations = slbl_core::read_annotations(repo, &source_id)?;
 
-    // 2. Identity and cross-reference integrity.
+    // 2. Each annotated source's store, loaded before anything is checked, so
+    //    that cross-references may point across crates. A course unit teaching
+    //    what `quote!` emits leans on `Serializer`'s contract, which lives in
+    //    the other one.
+    let mut loaded: Vec<SourceInput> = Vec::new();
+    for source in pin.coverage()? {
+        let source_id = source.source_id();
+        let root = source.dir(repo);
+        let files = vendor::source_files_in(&root)?;
+
+        let manifest = Manifest::load(&slbl_core::manifest_path(repo, &source.name))?;
+        if manifest.source != source_id {
+            bail!(
+                "{}: manifest source {:?} does not match pinned source {source_id:?}",
+                source.name,
+                manifest.source,
+            );
+        }
+        for f in &manifest.complete {
+            if !files.contains(f) {
+                diag.error(format!(
+                    "{}: manifest marks unknown file complete: {f}",
+                    source.name
+                ));
+            }
+        }
+
+        loaded.push(SourceInput {
+            name: source.name.clone(),
+            source_id: source_id.clone(),
+            root,
+            files,
+            complete: manifest.complete.into_iter().collect(),
+            annotations: slbl_core::read_annotations(repo, &source.name, &source_id)?,
+        });
+    }
+
+    // 3. Identity and cross-reference integrity, over every store at once.
+    //    Annotation ids are one namespace across the project: the narrative
+    //    names them without saying which crate, and a prereq may cross.
     let mut by_id: HashMap<&str, &Annotation> = HashMap::new();
-    for a in &annotations {
-        if by_id.insert(&a.id, a).is_some() {
-            diag.error(format!("duplicate annotation id {:?}", a.id));
+    let mut file_of: HashMap<&str, (&str, &str)> = HashMap::new();
+    for input in &loaded {
+        for a in &input.annotations {
+            if by_id.insert(&a.id, a).is_some() {
+                diag.error(format!("duplicate annotation id {:?}", a.id));
+            }
+            file_of.insert(&a.id, (input.name.as_str(), a.file.as_str()));
         }
     }
-    for a in &annotations {
-        if !known_files.contains(a.file.as_str()) {
-            diag.error(format!("{}: unknown source file {:?}", a.id, a.file));
-        }
-        for e in &a.examples {
-            if !examples.contains(e) {
-                diag.error(format!("{}: unknown example {:?}", a.id, e));
-            }
-        }
-        for p in &a.prereqs {
-            if !by_id.contains_key(p.as_str()) {
-                diag.error(format!("{}: unknown prereq {:?}", a.id, p));
-            }
-        }
-        for f in &a.rust_features {
-            if !features.contains(f) {
+
+    for input in &loaded {
+        let known_files: HashSet<&str> = input.files.iter().map(String::as_str).collect();
+        for a in &input.annotations {
+            if !known_files.contains(a.file.as_str()) {
                 diag.error(format!(
-                    "{}: rust_feature {:?} not in docs/rust-features.md",
-                    a.id, f
+                    "{}: unknown source file {:?} in {}",
+                    a.id, a.file, input.name
                 ));
             }
-        }
-        if a.tracks.contains(&Track::Course) && a.course_unit.is_none() {
-            diag.error(format!("{}: on course track but has no course_unit", a.id));
-        }
-        if a.body.trim().is_empty() {
-            diag.error(format!("{}: empty body", a.id));
-        }
-        if a.title.trim().is_empty() {
-            diag.error(format!("{}: empty title", a.id));
-        }
-        // A citation into borrowed vocabulary is the reader's only way to the
-        // definition of a type the annotated crate does not define (D9). One
-        // that resolves to nothing is a dead end the renderer cannot show.
-        for cited in &a.glossary {
-            if !glossary.contains(cited) {
-                diag.error(format!(
-                    "{}: cites glossary {cited:?}, which has no entry",
+            for e in &a.examples {
+                if !examples.contains(e) {
+                    diag.error(format!("{}: unknown example {:?}", a.id, e));
+                }
+            }
+            for p in &a.prereqs {
+                if !by_id.contains_key(p.as_str()) {
+                    diag.error(format!("{}: unknown prereq {:?}", a.id, p));
+                }
+            }
+            for f in &a.rust_features {
+                if !features.contains(f) {
+                    diag.error(format!(
+                        "{}: rust_feature {:?} not in docs/rust-features.md",
+                        a.id, f
+                    ));
+                }
+            }
+            if a.tracks.contains(&Track::Course) && a.course_unit.is_none() {
+                diag.error(format!("{}: on course track but has no course_unit", a.id));
+            }
+            if a.body.trim().is_empty() {
+                diag.error(format!("{}: empty body", a.id));
+            }
+            if a.title.trim().is_empty() {
+                diag.error(format!("{}: empty title", a.id));
+            }
+            // A citation into borrowed vocabulary is the reader's only way to
+            // the definition of a type the annotated crate does not define
+            // (D9). One that resolves to nothing is a dead end the renderer
+            // cannot show.
+            for cited in &a.glossary {
+                if !glossary.contains(cited) {
+                    diag.error(format!(
+                        "{}: cites glossary {cited:?}, which has no entry",
+                        a.id
+                    ));
+                }
+            }
+            // A macro-use annotation is only cheap because it links back to the
+            // macro-def that explains it. Without that link it is just an
+            // unexplained span, and the renderer has nothing to collapse it
+            // against — so this is an error, not a style note.
+            match (a.kind, a.macro_def.as_deref()) {
+                (Kind::MacroUse, None) => {
+                    diag.error(format!("{}: kind = macro-use but no macro_def", a.id));
+                }
+                (Kind::MacroUse, Some(target)) => match by_id.get(target) {
+                    None => diag.error(format!("{}: unknown macro_def {target:?}", a.id)),
+                    Some(def) if def.kind != Kind::MacroDef => diag.error(format!(
+                        "{}: macro_def {target:?} has kind {:?}, expected macro-def",
+                        a.id, def.kind
+                    )),
+                    // A macro definition in the other crate cannot be the one
+                    // this use expands: `macro-use` is the compression trick
+                    // for a macro invoked many times in the crate that defines
+                    // it, and crossing crates here means a wrong id that
+                    // happened to resolve.
+                    Some(_) => {
+                        let here = file_of.get(a.id.as_str()).map(|(c, _)| *c);
+                        let there = file_of.get(target).map(|(c, _)| *c);
+                        if here != there {
+                            diag.error(format!(
+                                "{}: macro_def {target:?} is in {}, not {}",
+                                a.id,
+                                there.unwrap_or("?"),
+                                here.unwrap_or("?")
+                            ));
+                        }
+                    }
+                },
+                (kind, Some(target)) => diag.error(format!(
+                    "{}: macro_def {target:?} on kind {kind:?}; only macro-use may set it",
                     a.id
-                ));
-            }
-        }
-        // A macro-use annotation is only cheap because it links back to the
-        // macro-def that explains it. Without that link it is just an
-        // unexplained span, and the renderer has nothing to collapse it
-        // against — so this is an error, not a style note.
-        match (a.kind, a.macro_def.as_deref()) {
-            (Kind::MacroUse, None) => {
-                diag.error(format!("{}: kind = macro-use but no macro_def", a.id));
-            }
-            (Kind::MacroUse, Some(target)) => match by_id.get(target) {
-                None => diag.error(format!("{}: unknown macro_def {target:?}", a.id)),
-                Some(def) if def.kind != Kind::MacroDef => diag.error(format!(
-                    "{}: macro_def {target:?} has kind {:?}, expected macro-def",
-                    a.id, def.kind
                 )),
-                Some(_) => {}
-            },
-            (kind, Some(target)) => diag.error(format!(
-                "{}: macro_def {target:?} on kind {kind:?}; only macro-use may set it",
-                a.id
-            )),
-            (_, None) => {}
+                (_, None) => {}
+            }
         }
     }
 
-    let mut kinds: BTreeMap<String, usize> = BTreeMap::new();
-    for a in &annotations {
-        *kinds
-            .entry(format!("{:?}", a.kind).to_lowercase())
-            .or_default() += 1;
-    }
-
-    // 3. The prereq graph must be acyclic so the course track can be ordered.
+    // 4. The prereq graph must be acyclic so the course track can be ordered.
     if let Some(cycle) = find_cycle(&by_id) {
         diag.error(format!("prereq cycle: {}", cycle.join(" -> ")));
     }
 
-    // 4. Line coverage, per file.
+    // 5. Line coverage, per source and then per file.
+    let mut sources = Vec::new();
+    for input in &loaded {
+        sources.push(cover_source(input, &mut diag)?);
+    }
+
+    // 6. The course track: the registry, and every annotation that points at it.
+    let course = check_course(repo, &loaded, &features, &examples, &mut diag)?;
+
+    // 7. The narrative track, which is now an ordering over both annotated
+    //    stores rather than a walk of an unclaimed one (PLAN.md §12).
+    let narrative = check_narrative(repo, &by_id, &glossary, &mut diag)?;
+
+    let report = Report {
+        sources,
+        course,
+        narrative,
+    };
+
+    print_report(&report, &diag);
+
+    if write_json {
+        let path = repo.join("coverage.json");
+        std::fs::write(&path, serde_json::to_string_pretty(&report)?)?;
+        println!("wrote {}", path.display());
+    }
+
+    if !diag.errors.is_empty() {
+        bail!("{} coverage error(s)", diag.errors.len());
+    }
+    Ok(report)
+}
+
+/// One annotated source as the gate reads it, before any checking.
+struct SourceInput {
+    name: String,
+    source_id: String,
+    root: std::path::PathBuf,
+    files: Vec<String>,
+    complete: HashSet<String>,
+    annotations: Vec<Annotation>,
+}
+
+/// Line coverage for one source: overlaps, out-of-range claims, and gaps.
+///
+/// A gap is a warning until the file is named in that source's manifest, and a
+/// hard failure after. That ramp is what lets a second annotated crate exist
+/// at 0% without the gate lying about it or failing over it.
+fn cover_source(input: &SourceInput, diag: &mut Diagnostics) -> Result<SourceCoverage> {
     let mut ranges: BTreeMap<&str, Vec<(LineRange, &str)>> = BTreeMap::new();
-    for a in &annotations {
+    let mut kinds: BTreeMap<String, usize> = BTreeMap::new();
+    for a in &input.annotations {
+        *kinds
+            .entry(format!("{:?}", a.kind).to_lowercase())
+            .or_default() += 1;
         match LineRange::parse(&a.lines) {
             Ok(r) => ranges.entry(&a.file).or_default().push((r, &a.id)),
             Err(e) => diag.error(format!("{}: {e}", a.id)),
@@ -217,11 +337,12 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
 
     let mut files = Vec::new();
     let (mut total_lines, mut claimed_lines) = (0u32, 0u32);
+    let (mut not_started, mut not_started_lines) = (0usize, 0u32);
 
-    for rel in &source_files {
-        let n = vendor::line_count(repo, rel)?;
+    for rel in &input.files {
+        let n = vendor::line_count_in(&input.root, rel)?;
         total_lines += n;
-        let is_complete = complete.contains(rel.as_str());
+        let is_complete = input.complete.contains(rel);
 
         let mut claimed = 0u32;
         let mut gaps = Vec::new();
@@ -234,16 +355,16 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
             for w in list.windows(2) {
                 if w[0].0.overlaps(&w[1].0) {
                     diag.error(format!(
-                        "{rel}: annotations {} and {} both claim lines around {}",
-                        w[0].1, w[1].1, w[1].0.start
+                        "{}/{rel}: annotations {} and {} both claim lines around {}",
+                        input.name, w[0].1, w[1].1, w[1].0.start
                     ));
                 }
             }
             if let Some((last, id)) = list.last() {
                 if last.end > n {
                     diag.error(format!(
-                        "{rel}: {id} claims line {} but file has {n} lines",
-                        last.end
+                        "{}/{rel}: {id} claims line {} but file has {n} lines",
+                        input.name, last.end
                     ));
                 }
             }
@@ -267,16 +388,31 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
 
         claimed_lines += claimed.min(n);
 
+        // Three states, and they are deliberately not the same thing. A file
+        // named in the manifest must be whole: that is the promise, and a hole
+        // in it fails the build. A file somebody has started and left a hole in
+        // is a warning, because the hole is probably an oversight. A file
+        // nobody has begun is neither — it is the roadmap, and printing 28
+        // warnings for the 28 files R2 through R5 will write would drown the
+        // one warning that means something.
         if !gaps.is_empty() {
-            let msg = format!(
-                "{rel}: {} line(s) unclaimed [{}]",
-                n - claimed.min(n),
-                summarize(&gaps)
-            );
             if is_complete {
-                diag.error(format!("{msg} (file is marked complete in manifest)"));
+                diag.error(format!(
+                    "{}/{rel}: {} line(s) unclaimed [{}] (file is marked complete in manifest)",
+                    input.name,
+                    n - claimed.min(n),
+                    summarize(&gaps)
+                ));
+            } else if count > 0 {
+                diag.warn(format!(
+                    "{}/{rel}: {} line(s) unclaimed [{}]",
+                    input.name,
+                    n - claimed.min(n),
+                    summarize(&gaps)
+                ));
             } else {
-                diag.warn(msg);
+                not_started += 1;
+                not_started_lines += n;
             }
         }
 
@@ -290,43 +426,17 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
         });
     }
 
-    // 5. The course track: the registry, and every annotation that points at it.
-    let course = check_course(
-        repo,
-        &source_id,
-        &annotations,
-        &known_files,
-        &features,
-        &examples,
-        &mut diag,
-    )?;
-
-    // 6. The narrative track, which cites both pinned sources and claims
-    //    neither exhaustively.
-    let narrative = check_narrative(repo, &source_id, &by_id, &glossary, &mut diag)?;
-
-    let report = Report {
-        source: source_id.clone(),
+    Ok(SourceCoverage {
+        not_started,
+        not_started_lines,
+        source: input.source_id.clone(),
+        name: input.name.clone(),
         total_lines,
         claimed_lines,
-        annotations: annotations.len(),
+        annotations: input.annotations.len(),
         files,
-        course,
-        narrative,
-    };
-
-    print_report(&report, &diag, &kinds);
-
-    if write_json {
-        let path = repo.join("coverage.json");
-        std::fs::write(&path, serde_json::to_string_pretty(&report)?)?;
-        println!("wrote {}", path.display());
-    }
-
-    if !diag.errors.is_empty() {
-        bail!("{} coverage error(s)", diag.errors.len());
-    }
-    Ok(report)
+        kinds,
+    })
 }
 
 /// Validates `annotations/course.toml` and every annotation that points into it.
@@ -337,24 +447,40 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
 /// whether serde_core actually supplies any of it.
 fn check_course(
     repo: &Path,
-    source_id: &str,
-    annotations: &[Annotation],
-    known_files: &HashSet<&str>,
+    loaded: &[SourceInput],
     features: &BTreeSet<String>,
     examples: &HashSet<String>,
     diag: &mut Diagnostics,
 ) -> Result<Vec<UnitCoverage>> {
     let path = repo.join("annotations").join("course.toml");
     let course = CourseFile::load(&path)?;
-    if course.source != source_id {
+    let first = &loaded[0];
+    if course.source != first.source_id {
         bail!(
-            "course registry source {:?} does not match pinned source {source_id:?}",
+            "course registry source {:?} does not match pinned source {:?}",
             course.source,
+            first.source_id,
         );
     }
 
+    // A reading-order entry is `src/ser/mod.rs` for the first source, or
+    // `serde_derive:src/ser.rs` for any other. Both crates have a `src/lib.rs`,
+    // so the bare form has to mean exactly one of them (D12).
+    let mut known_files: HashSet<String> = HashSet::new();
+    for (i, input) in loaded.iter().enumerate() {
+        for f in &input.files {
+            known_files.insert(format!("{}:{f}", input.name));
+            if i == 0 {
+                known_files.insert(f.clone());
+            }
+        }
+    }
+
     // The reading order sequences annotations drawn from several files into one
-    // unit, so a file missing from it would silently sort last.
+    // unit, so a file missing from it would silently sort last. What has to be
+    // listed is a file the course track actually draws from — demanding an
+    // entry for all 28 files of a crate no unit has reached yet would fill the
+    // registry with placeholders that mean nothing.
     let mut seen_files: HashSet<&str> = HashSet::new();
     for f in &course.reading_order {
         if !known_files.contains(f.as_str()) {
@@ -364,11 +490,25 @@ fn check_course(
             diag.error(format!("course reading_order: {f:?} listed twice"));
         }
     }
-    for f in known_files {
-        if !seen_files.contains(f) {
-            diag.error(format!("course reading_order: {f:?} is missing"));
+    for (i, input) in loaded.iter().enumerate() {
+        for a in &input.annotations {
+            if !a.tracks.contains(&Track::Course) {
+                continue;
+            }
+            let qualified = format!("{}:{}", input.name, a.file);
+            if seen_files.contains(qualified.as_str())
+                || (i == 0 && seen_files.contains(a.file.as_str()))
+            {
+                continue;
+            }
+            diag.error(format!(
+                "course reading_order: {qualified:?} is missing, and {} teaches from it",
+                a.id
+            ));
         }
     }
+
+    let annotations: Vec<&Annotation> = loaded.iter().flat_map(|i| i.annotations.iter()).collect();
 
     let mut index: HashMap<&str, usize> = HashMap::new();
     for (i, u) in course.units.iter().enumerate() {
@@ -389,7 +529,7 @@ fn check_course(
     }
 
     let mut counts: BTreeMap<&str, (usize, u32)> = BTreeMap::new();
-    for a in annotations {
+    for a in &annotations {
         let Some(unit) = a.course_unit.as_deref() else {
             continue;
         };
@@ -423,7 +563,7 @@ fn check_course(
         .iter()
         .filter_map(|a| Some((a.id.as_str(), a.course_unit.as_deref()?)))
         .collect();
-    for a in annotations {
+    for a in &annotations {
         let Some(here) = a.course_unit.as_deref().and_then(|u| index.get(u)) else {
             continue;
         };
@@ -540,7 +680,6 @@ fn check_unit(
 /// a CI gate and a pre-push gate, so the claim is enforced either way.
 fn check_narrative(
     repo: &Path,
-    coverage_id: &str,
     by_id: &HashMap<&str, &Annotation>,
     glossary: &HashSet<String>,
     diag: &mut Diagnostics,
@@ -624,17 +763,24 @@ fn check_narrative(
                 }
             }
 
-            // The crossing rule. A step in `serde_core` is the narrative
-            // walking into territory the reference track already owns, so it
+            // The crossing rule. A step landing on claimed ground is the walk
+            // crossing into territory a reference track already owns, so it
             // says which annotation it landed in and the gate proves it landed
             // there.
-            match (item.is_coverage, s.annotation.as_deref()) {
+            //
+            // "Claimed" is per file, not per source (see `NarrativeStepItem::
+            // claimed`): `serde_derive` became an annotated crate in R1 and is
+            // claimed file by file through R5, so a step into a file no
+            // annotation covers yet is asked for nothing. The moment its file
+            // is named in the manifest, it is asked for a name — which is how
+            // the 85 steps convert without a flag day.
+            match (item.claimed, s.annotation.as_deref()) {
                 (true, None) => diag.error(format!(
-                    "{}: cites {coverage_id} but names no annotation — a crossing into the \
-                     reference track must say where it lands",
-                    s.id
+                    "{}: cites {}, which is claimed ground, but names no annotation — a \
+                     crossing into a reference track must say where it lands",
+                    s.id, s.file
                 )),
-                (true, Some(id)) => match by_id.get(id) {
+                (_, Some(id)) => match by_id.get(id) {
                     None => diag.error(format!("{}: unknown annotation {id:?}", s.id)),
                     Some(a) if a.file != s.file => diag.error(format!(
                         "{}: annotation {id} is in {}, not {}",
@@ -651,13 +797,18 @@ fn check_narrative(
                         }
                     }
                 },
-                (false, Some(id)) => diag.error(format!(
-                    "{}: names annotation {id:?}, but {} is not the annotated source",
-                    s.id, s.source
-                )),
                 (false, None) => {}
             }
-            if item.is_coverage {
+            // A step may name an annotation before the file is complete — the
+            // annotation exists, it just is not yet compulsory — but it may
+            // never name one in a crate that is not annotated at all.
+            if !item.is_coverage && s.annotation.is_some() {
+                diag.error(format!(
+                    "{}: names an annotation, but {} is not an annotated source",
+                    s.id, s.source
+                ));
+            }
+            if s.annotation.is_some() {
                 crossings += 1;
             }
 
@@ -1069,38 +1220,54 @@ fn print_sources(repo: &Path) -> Result<()> {
     Ok(())
 }
 
-fn print_report(report: &Report, diag: &Diagnostics, kinds: &BTreeMap<String, usize>) {
-    println!("\nsource: {}\n", report.source);
-    println!(
-        "{:<26}{:>8}{:>9}{:>8}{:>7}  status",
-        "file", "lines", "claimed", "annots", "pct"
-    );
-    for f in &report.files {
-        let pct = if f.total_lines == 0 {
-            100.0
-        } else {
-            f.claimed_lines as f64 * 100.0 / f.total_lines as f64
-        };
-        let status = if f.complete {
-            "complete"
-        } else if f.claimed_lines == 0 {
-            "-"
-        } else {
-            "in progress"
-        };
+fn print_report(report: &Report, diag: &Diagnostics) {
+    for source in &report.sources {
+        println!("\nsource: {}\n", source.source);
         println!(
-            "{:<26}{:>8}{:>9}{:>8}{:>6.1}%  {}",
-            f.file, f.total_lines, f.claimed_lines, f.annotations, pct, status
+            "{:<26}{:>8}{:>9}{:>8}{:>7}  status",
+            "file", "lines", "claimed", "annots", "pct"
         );
+        for f in &source.files {
+            let pct = if f.total_lines == 0 {
+                100.0
+            } else {
+                f.claimed_lines as f64 * 100.0 / f.total_lines as f64
+            };
+            let status = if f.complete {
+                "complete"
+            } else if f.claimed_lines == 0 {
+                "-"
+            } else {
+                "in progress"
+            };
+            println!(
+                "{:<26}{:>8}{:>9}{:>8}{:>6.1}%  {}",
+                f.file, f.total_lines, f.claimed_lines, f.annotations, pct, status
+            );
+        }
+        println!(
+            "\n{:<26}{:>8}{:>9}{:>8}{:>6.1}%",
+            "TOTAL",
+            source.total_lines,
+            source.claimed_lines,
+            source.annotations,
+            source.percent()
+        );
+        if source.not_started > 0 {
+            println!(
+                "{} file(s) not started, {} lines",
+                source.not_started, source.not_started_lines
+            );
+        }
+        if !source.kinds.is_empty() {
+            let parts: Vec<String> = source
+                .kinds
+                .iter()
+                .map(|(k, n)| format!("{k} {n}"))
+                .collect();
+            println!("by kind: {}", parts.join(", "));
+        }
     }
-    println!(
-        "\n{:<26}{:>8}{:>9}{:>8}{:>6.1}%",
-        "TOTAL",
-        report.total_lines,
-        report.claimed_lines,
-        report.annotations,
-        report.percent()
-    );
 
     if !report.course.is_empty() {
         let written = report
@@ -1133,8 +1300,7 @@ fn print_report(report: &Report, diag: &Diagnostics, kinds: &BTreeMap<String, us
         let steps: usize = report.narrative.iter().map(|u| u.steps).sum();
         let cited: u32 = report.narrative.iter().map(|u| u.cited_lines).sum();
         println!(
-            "\nnarrative track: {} units, {steps} steps, {cited} lines cited \
-             (walked, not claimed)\n",
+            "\nnarrative track: {} units, {steps} steps, {cited} lines cited\n",
             report.narrative.len()
         );
         println!(
@@ -1147,11 +1313,6 @@ fn print_report(report: &Report, diag: &Diagnostics, kinds: &BTreeMap<String, us
                 u.id, u.steps, u.cited_lines, u.crossings
             );
         }
-    }
-
-    if !kinds.is_empty() {
-        let parts: Vec<String> = kinds.iter().map(|(k, n)| format!("{k} {n}")).collect();
-        println!("\nby kind: {}", parts.join(", "));
     }
 
     if !diag.warnings.is_empty() {

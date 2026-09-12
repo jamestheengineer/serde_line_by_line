@@ -17,7 +17,7 @@
 //!
 //! | store | record | names its source |
 //! |---|---|---|
-//! | `annotations/*.toml` | `[[annotation]]` | once, in the file header |
+//! | `annotations/<crate>/*.toml` | `[[annotation]]` | once, in the file header |
 //! | `glossary/*.toml` | `[[entry]]` | once, in the file header |
 //! | `narrative/*.toml` | `[[step]]` | per record — one file cites two sources |
 //!

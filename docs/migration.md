@@ -14,15 +14,24 @@ So a bump is a migration, and it has a tool.
 cargo xtask bump [--source NAME] <version> [--dry-run]
 ```
 
-`--source` names which of the five pinned crates to move; omitting it means the
-coverage source, `serde_core`. What the bump then rewrites follows from that
-source's **role** and nothing else (D11):
+`--source` names which of the five pinned crates to move. It used to be
+optional, defaulting to "the coverage source"; there are two of those since
+[D12](decisions.md), so omitting it now fails with both names rather than
+guessing between two crates that each key line ranges. What the bump rewrites
+follows from that source's **role** and nothing else (D11):
 
 | role | source | stores keyed to it |
 |---|---|---|
-| `coverage` | `serde_core` | `annotations/`, and the narrative's nine crossings into it |
-| `narrative` | `serde_derive` | `narrative/` — the 76 steps citing it, leaving the crossings alone |
+| `coverage` | `serde_core` | `annotations/serde_core/`, the narrative steps citing it, and the course registry |
+| `coverage` | `serde_derive` | `annotations/serde_derive/`, and the narrative steps citing it |
 | `glossary` | `syn`, `quote`, `proc-macro2` | the one `glossary/` file that quotes it |
+
+Each coverage source owns its own store directory, which is what makes "rewrite
+exactly one store" a property of the filesystem rather than of a filter. The
+course registry is one file over both crates and belongs to the source it names
+— a bump of the other one leaves it alone, and its entries there are qualified
+(`serde_derive:src/ser.rs`) so none of them is keyed to the moving tree by a
+bare path.
 
 ## What the tool does
 
@@ -43,7 +52,7 @@ source's **role** and nothing else (D11):
    reports the last two.
 6. **Rewrites everything that names the version**: the store files for that
    role and their `lines` values, `pin.toml`, `vendor/NOTICE.md`, and — where
-   they exist — `manifest.toml`, `course.toml`, each example's
+   they exist — that source's `manifest.toml`, `course.toml`, each example's
    `serde_core = "=x.y.z"`, and the harness's `expand/Cargo.toml` requirement.
 7. **Writes a report** to `docs/migrations/<name>-<old>-to-<new>.md` and lists
    every remaining hand-written mention of the old version.
@@ -120,7 +129,7 @@ cargo test --workspace
 Then work through the checklist at the bottom of the generated report.
 
 `cargo xtask coverage` is the gate that decides whether the bump is finished. It
-will fail while a file marked `complete` in `manifest.toml` has unclaimed lines,
+will fail while a file marked `complete` in its `manifest.toml` has unclaimed lines,
 which is the correct outcome: a release that added code has added annotation
 work, and the build should stay red until that work is done. It also checks two
 manifest pins, for the same reason in both cases — the crate is built from

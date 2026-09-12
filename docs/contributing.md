@@ -53,7 +53,7 @@ running one — the ranges move mechanically, the prose does not.
 
 ## Adding an annotation
 
-Annotations are data, not pages. They live in `annotations/<file>.toml`, one
+Annotations are data, not pages. They live in `annotations/<crate>/<file>.toml`, one
 file per vendored source file, each record claiming a closed line range:
 
 ```toml
@@ -77,7 +77,7 @@ Markdown. Two to twelve lines. See annotation-style.md.
 Two constraints the gate enforces and the schema does not:
 
 - **Ranges within a file may not overlap**, and once the file is listed under
-  `complete` in `annotations/manifest.toml`, they must cover every line. Gaps in
+  `complete` in `annotations/<crate>/manifest.toml`, they must cover every line. Gaps in
   an incomplete file are a warning; gaps in a complete one fail CI.
 - **`macro_def` is required on `kind = "macro-use"` and rejected everywhere
   else.** It is what lets the renderer collapse a run of invocations under one

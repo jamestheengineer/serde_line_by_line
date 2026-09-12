@@ -25,7 +25,7 @@
     <div class="figures">
       <span><b>{{ units.len() }}</b> units</span>
       <span>{{ steps }} steps, {{ cited_lines }} lines cited</span>
-      <span>{{ crossings }} crossings into serde_core</span>
+      <span>{{ crossings }} steps landing in an annotation</span>
     </div>
   </div>
 </section>
@@ -33,20 +33,22 @@
 <section class="tracknote">
   <h2>What this track claims</h2>
   <p>
-    <b>Nothing exhaustive.</b> The reference track claims every line of
-    <code>serde_core</code> and a gate fails the build if one goes unclaimed.
-    <code>serde_derive</code> is {{ derive_lines }} lines and is
-    <b>walked, not claimed</b>: this track goes where the story goes, and no
-    file of it is ever declared complete. A coverage percentage over a walk
-    would be a lie told in a number.
+    <b>A path, not a promise.</b> This track picks one route through
+    {{ derive_lines }} lines of <code>serde_derive</code> and follows it; it
+    has never said it visits all of them, and it still does not. What changed
+    is underneath it: <code>serde_derive</code> is now an
+    <a href="{{ root }}index.html">annotated crate</a> being claimed file by
+    file, so where this walk stops on finished ground it links to the
+    annotation there rather than explaining the same lines twice. The
+    percentage belongs to that track. This one has an order.
   </p>
   <p>
     What is checked is everything a reader could catch. Every line range
     resolves in a tree pinned by checksum. No step leans on one that comes
-    later. Where the walk crosses into <code>serde_core</code> it must land
-    inside an annotation the reference track already wrote, and it links there
-    rather than explaining the same lines twice. And every claim about
-    generated code is sliced out of a <a href="{{ root }}expand/index.html">real
+    later. A step standing on a file the reference track has finished must land
+    inside an annotation and say which — and once that file is declared
+    complete, the build fails if it does not. And every claim about generated
+    code is sliced out of a <a href="{{ root }}expand/index.html">real
     expansion</a> at build time — if <code>serde_derive</code> stopped emitting
     it, this page would not build.
   </p>

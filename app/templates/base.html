@@ -34,18 +34,30 @@
 <div class="shell">
   <aside class="nav">
 {% block sidebar %}
-    <div class="nav-head">source files</div>
+    {# One group per annotated crate. A file with nothing written about it is
+       still listed — the zero is the progress — but it is not a link, because
+       there is no page behind it yet. #}
+    {% for g in nav %}
+    <div class="nav-head">{{ g.name }} <span class="nav-pct">{{ g.percent_label }}%</span></div>
     <ul>
-    {% for f in nav %}
-      <li{% if f.path == current %} class="here"{% endif %}>
+    {% for f in g.files %}
+      <li{% if f.href == current %} class="here"{% endif %}{% if !f.annotated %} class="unwritten"{% endif %}>
+        {% if f.annotated %}
         <a href="{{ root }}file/{{ f.href }}">
           <span class="fname">{{ f.short }}</span>
           <span class="fmeta">{{ f.lines }}</span>
         </a>
+        {% else %}
+        <span class="nolink">
+          <span class="fname">{{ f.short }}</span>
+          <span class="fmeta">{{ f.lines }}</span>
+        </span>
+        {% endif %}
         <div class="minibar"><i style="width:{{ f.percent }}%"></i></div>
       </li>
     {% endfor %}
     </ul>
+    {% endfor %}
 {% endblock %}
   </aside>
   <main>

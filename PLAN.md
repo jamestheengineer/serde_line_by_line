@@ -113,7 +113,8 @@ than discovered in month three.
 
 ### The load-bearing decision: annotations are data, not pages
 
-Annotations live in `annotations/*.toml` as records keyed to `(file, line-range)`.
+Annotations live in `annotations/<crate>/*.toml` as records keyed to
+`(file, line-range)`.
 They are **not** hand-written HTML or Markdown pages.
 
 This buys three things:
@@ -130,7 +131,7 @@ This buys three things:
 
 ## 4. Annotation schema
 
-`annotations/ser_mod.toml`:
+`annotations/serde_core/ser_mod.toml`:
 
 ```toml
 schema  = 1
@@ -186,7 +187,8 @@ Field notes:
    README badge.
 
 CI runs it on every push. Gaps are a **warning** until a file is declared
-complete in `annotations/manifest.toml`, then a **hard failure**.
+complete in that crate's `annotations/<crate>/manifest.toml`, then a **hard
+failure**.
 
 This converts "walk the user through EVERY line" from an aspiration that quietly
 decays into a measurable, enforced property. It also makes progress visible,
@@ -275,8 +277,11 @@ serde_line_by_line/
 ├── vendor/
 │   └── serde_core-1.0.229/     ← pinned, unmodified, MIT/Apache-2.0
 ├── annotations/
-│   ├── manifest.toml           ← per-file completion status
-│   └── *.toml                  ← the content
+│   ├── course.toml             ← one course track over both annotated crates
+│   ├── serde_core/
+│   │   ├── manifest.toml       ← per-file completion status
+│   │   └── *.toml              ← the content
+│   └── serde_derive/           ← the same, from §12 onward
 ├── examples/
 │   ├── <name>/                 ← real crates, CI-verified
 │   └── compile_fail/           ← trybuild cases
@@ -508,6 +513,12 @@ read it, and a role no gate knows fails the build. The README says the same
 thing as a table, so the promise reads identically in both places a reader
 might check it.
 
+> Restated in §12's R1. The middle sentence is gone, because the thing it
+> described is gone: `serde_derive` stopped being walked-not-claimed and became
+> the second crate the reference track claims. The mechanism it demonstrates
+> did not change — the promise is still one sentence per role, still read off
+> the pin, and there are simply two rows under `coverage` now.
+
 ---
 
 ## 12. The `serde_derive` reference track
@@ -582,13 +593,34 @@ exactly the lie §11 refused to tell about the walk.
 
 | phase | scope | annots | exit criteria |
 |---|---|---:|---|
-| **R1 — Two coverage sources** | `Pin::primary` retires; `Store`, `manifest.toml`, `course.toml` and `coverage.json` become per-source; D12 | 0 | `cargo xtask coverage` reports `serde_core` 12,037/12,037 **and** `serde_derive` 0/8,975 without error; every existing gate still fires on the first source; a role no gate knows is still a build failure |
+| **R1 — Two coverage sources** ✅ | `Pin::primary` retires; `Store`, `manifest.toml` and `coverage.json` become per-source; D12 | 0 | `cargo xtask coverage` reports `serde_core` 12,037/12,037 **and** `serde_derive` 0/8,975 without error; every existing gate still fires on the first source; a role no gate knows is still a build failure |
 | **R2 — Vertical slice: `ser.rs`** | The densest codegen file, 1,369 lines and 76 `quote!` blocks, and the one the narrative already walks | ~98 | `ser.rs` at 100%; the `codegen` kind proven in the renderer; an annotation's `emits` checked against a real expansion at annotation granularity (D10); its narrative steps retargeted |
 | **R3 — The rest of codegen** | `de.rs`, then `de/struct_.rs`, `de/tuple.rs`, `de/unit.rs`, `de/identifier.rs`, and the four enum representations | ~240 | codegen at 100%; the four representations read as four variations, not four transcripts |
 | **R4 — `internals/`** | `attr.rs` (1,818 lines, the attribute DSL), `check.rs`, `ast.rs`, `case.rs`, `name.rs`, `symbol.rs`, `ctxt.rs`, `respan.rs`, `mod.rs` | ~108 | the `#[serde(...)]` surface is claimed, including what upstream rejects and why |
 | **R5 — Plumbing** | `bound.rs`, `receiver.rs`, `pretend.rs`, `lib.rs`, `fragment.rs`, `deprecated.rs`, `this.rs`, `dummy.rs` | ~56 | **every line of `serde_derive` claimed**; all 28 files in its manifest; the gate hard-fails on regression; all 85 narrative steps name a containing annotation |
 | **R6 — Course units** | 6–8 new units: proc-macro basics, `TokenStream` and spans, hygiene, `syn`'s AST, `quote!` interpolation, the attribute DSL, codegen for the four enum representations; the cross-crate prereq DAG | — | the course track spans both crates, walkable start to finish, D8's forward-reference check enforcing across sources |
 | **R7 — Ship** | Navigation for four reference file-trees' worth of pages, the restated promise, `README` | — | both reference tracks reachable and each honest about what it claims |
+
+### What R1 shipped
+
+The refusal in `Pin::primary()` is gone and the ambiguity it named is gone with
+it: no figure anywhere in the project spans the two crates, and the front page
+says so where a reader would go looking for the missing one. `Store` and
+`Report` became lists, `percent()` moved off both parents onto the children,
+and `annotations/` became `annotations/<crate>/` so that a bump physically
+cannot open the other store. The full reasoning, and the three things that
+fell out of it, are [D12](docs/decisions.md).
+
+Two of those are worth naming here because they change what the later phases
+do. The gate learned a third state — a file with no annotation at all is
+*counted*, not warned about, so `cargo xtask coverage` does not print 28
+warnings for the 28 files R2 through R5 will write. And the narrative's
+crossing rule moved from per source to **per file**: a step must name the
+annotation containing it once its file is declared complete, so the walk
+converts one file at a time, with the gate turning compulsory exactly when
+there is something to point at. `course.toml` did not move and did not need
+per-source anything — the course track is one track over both crates, which is
+R6's problem and not R1's.
 
 R2 is a vertical slice for the same reason phase 1 was: it proves the `codegen`
 kind, the `emits` verification at annotation granularity, and the writing voice

@@ -2,7 +2,8 @@
 
 [![ci](https://github.com/jamestheengineer/serde_line_by_line/actions/workflows/ci.yml/badge.svg)](https://github.com/jamestheengineer/serde_line_by_line/actions/workflows/ci.yml)
 [![pages](https://github.com/jamestheengineer/serde_line_by_line/actions/workflows/pages.yml/badge.svg)](https://github.com/jamestheengineer/serde_line_by_line/actions/workflows/pages.yml)
-[![lines annotated](https://img.shields.io/endpoint?url=https%3A%2F%2Fjamestheengineer.github.io%2Fserde_line_by_line%2Fbadge.json)](https://jamestheengineer.github.io/serde_line_by_line/)
+[![serde_core annotated](https://img.shields.io/endpoint?url=https%3A%2F%2Fjamestheengineer.github.io%2Fserde_line_by_line%2Fbadge.json)](https://jamestheengineer.github.io/serde_line_by_line/)
+[![serde_derive annotated](https://img.shields.io/endpoint?url=https%3A%2F%2Fjamestheengineer.github.io%2Fserde_line_by_line%2Fbadge-serde_derive.json)](https://jamestheengineer.github.io/serde_line_by_line/)
 
 **Read it: <https://jamestheengineer.github.io/serde_line_by_line/>**
 
@@ -17,10 +18,12 @@ answers the question most readers actually arrive with — **what does
 `#[derive(Serialize)]` turn into?** — by following one struct and one enum
 through `serde_derive` and running the expansion in the browser.
 
-> **Status: live, and complete on all three tracks.**
+> **Status: live. Three tracks complete, and a fourth thing under way** — the
+> reference track now covers a second crate, `serde_derive`, at 0 of 8,975
+> lines (PLAN.md §12).
 >
 > **Reference** — every line of `serde_core` is annotated: all 19 files at
-> 100%, listed in `annotations/manifest.toml`, so the coverage gate hard-fails
+> 100%, listed in `annotations/serde_core/manifest.toml`, so the gate hard-fails
 > on any gap or overlap. The site rebuilds and deploys to the URL above on
 > every push to `main`.
 >
@@ -36,12 +39,11 @@ through `serde_derive` and running the expansion in the browser.
 >
 > **Derive** — 9 units and 85 steps follow one struct and one enum from a
 > `syn::DeriveInput` to an emitted `impl`, citing 1,875 lines of pinned
-> `serde_derive` and `syn` and crossing nine times into annotations the
-> reference track already wrote. `serde_derive` is **walked, not claimed**: no
-> file of it is declared complete and no percentage is reported over it. Thirty
-> steps quote the code their citation emits, and those quotations are sliced
-> out of a real expansion at build time rather than stored, so the page does
-> not build if the crate stops emitting them.
+> `serde_derive` and `syn`. Thirty steps quote the code their citation emits,
+> and those quotations are sliced out of a real expansion at build time rather
+> than stored, so the page does not build if the crate stops emitting them.
+> The walk makes no coverage claim of its own — it is a path, and the
+> percentage belongs to the reference track underneath it.
 >
 > See **[PLAN.md](PLAN.md)** for the roadmap and
 > **[docs/decisions.md](docs/decisions.md)** for the architecture calls.
@@ -82,13 +84,21 @@ the gates ask of it:
 
 | role | crate | what is promised |
 |---|---|---|
-| `coverage` | `serde_core` | every line claimed by exactly one annotation; `cargo xtask coverage` fails on a gap, an overlap, or a dangling reference |
-| `narrative` | `serde_derive` | **walked, not claimed** — cited ranges must resolve and must not be forward references, but no file is ever declared complete and no percentage is reported |
+| `coverage` | `serde_core`, `serde_derive` | every line claimed by exactly one annotation; `cargo xtask coverage` fails on a gap, an overlap, or a dangling reference |
 | `glossary` | `syn`, `quote`, `proc-macro2` | **quoted, not annotated** — a definition is pinned to a line range, and the gate fails if the quotation drifts from the tree |
 
 A role the gates do not know is a build failure, which is what keeps the
 promise from quietly widening. The reasoning is D9 in
 [`docs/decisions.md`](docs/decisions.md).
+
+`serde_derive` carries the `coverage` role as of PLAN.md §12 and is claimed
+file by file; it was `narrative` while the derive walk was the only thing
+citing it. Two coverage sources means **two figures and never a combined one**
+— the two crates promise the same thing about different amounts of code, so a
+percentage spanning them would describe neither ([D12](docs/decisions.md)).
+The third state the gate needs for this is *not started*: a file no annotation
+claims is counted, not warned about, because it is the roadmap rather than a
+defect.
 
 The `serde_core` work is roughly **1,195 annotation units** averaging ~10 lines
 each — not 12,037 individual comments, because doc-comment blocks and repeated

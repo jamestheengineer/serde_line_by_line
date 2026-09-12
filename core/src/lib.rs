@@ -15,36 +15,38 @@ use schema::{
 use std::collections::BTreeMap;
 use std::path::Path;
 
-/// One annotation resolved against the pinned source: its parsed line range and
-/// the source text it claims.
+/// One annotation resolved against the pinned source: its parsed line range,
+/// and which annotated crate it claims a piece of.
 #[derive(Debug, Clone)]
 pub struct Unit {
     pub annotation: Annotation,
     pub range: LineRange,
+    /// The crate name — "serde_core" or "serde_derive". Two annotated sources
+    /// both have a `src/lib.rs`, so a file path alone stopped identifying
+    /// anything when the second one arrived (D12).
+    pub source: String,
 }
 
-/// Everything the site generator needs, already grouped and ordered.
-#[derive(Debug, Default)]
-pub struct Store {
+/// One annotated source and everything the store claims about it.
+///
+/// There is one of these per `role = "coverage"` row in `vendor/pin.toml`, and
+/// every coverage figure lives here rather than on [`Store`]: two crates make
+/// two promises, and a number spanning both would describe neither (D12).
+#[derive(Debug, Clone, Default)]
+pub struct SourceStore {
+    /// The crates.io name: "serde_core".
+    pub name: String,
+    pub version: String,
+    /// `"serde_core-1.0.229"` — what this source's annotation files must name.
+    pub source_id: String,
     /// Annotations by source file, each sorted by starting line.
     pub by_file: BTreeMap<String, Vec<Unit>>,
     /// Every source file in the pinned tree, in path order, with its line count.
     pub files: Vec<(String, u32)>,
     pub complete: Vec<String>,
-    /// The course track's units, in teaching order.
-    pub course: Vec<CourseUnit>,
-    /// Dependency order over the source files, from the course registry. Used
-    /// to sequence annotations drawn from several files into one unit.
-    pub reading_order: Vec<String>,
-    /// The pinned crate version, e.g. "1.0.229". Read from `vendor/pin.toml`
-    /// rather than compiled in, so a bump moves it in one place.
-    pub version: String,
-    /// `"serde_core-1.0.229"` — what every annotation file's `source` field
-    /// must match.
-    pub source_id: String,
 }
 
-impl Store {
+impl SourceStore {
     pub fn total_lines(&self) -> u32 {
         self.files.iter().map(|(_, n)| n).sum()
     }
@@ -65,8 +67,72 @@ impl Store {
         self.claimed_lines() as f64 * 100.0 / total as f64
     }
 
+    pub fn annotations(&self) -> usize {
+        self.by_file.values().map(Vec::len).sum()
+    }
+
     pub fn units_for(&self, file: &str) -> &[Unit] {
         self.by_file.get(file).map_or(&[], Vec::as_slice)
+    }
+
+    /// Files with at least one annotation, which is what the renderer will
+    /// give a page to. A file nobody has written about yet is listed with its
+    /// zero rather than published as a page of unexplained source.
+    pub fn annotated_files(&self) -> impl Iterator<Item = &(String, u32)> {
+        self.files
+            .iter()
+            .filter(|(f, _)| self.by_file.contains_key(f))
+    }
+}
+
+/// Everything the site generator needs, already grouped and ordered.
+#[derive(Debug, Default)]
+pub struct Store {
+    /// The annotated sources, in pin order — which is reading order, because
+    /// `serde_derive` generates calls into `serde_core`.
+    pub sources: Vec<SourceStore>,
+    /// The course track's units, in teaching order. One track over all of the
+    /// sources, not one per source: a reader learning what `quote!` emits needs
+    /// `Serializer`'s contract behind them, and that is in the other crate.
+    pub course: Vec<CourseUnit>,
+    /// Dependency order over the source files, from the course registry. Used
+    /// to sequence annotations drawn from several files into one unit. Entries
+    /// are `src/ser/mod.rs` for the first coverage source, or
+    /// `serde_derive:src/ser.rs` to name another one.
+    pub reading_order: Vec<String>,
+}
+
+impl Store {
+    pub fn source(&self, name: &str) -> Option<&SourceStore> {
+        self.sources.iter().find(|s| s.name == name)
+    }
+
+    /// The first coverage source in pin order. Used where a caller genuinely
+    /// means "the crate this project started with" — the examples' pin, the
+    /// front page's lead figure — and never as a stand-in for "the" annotated
+    /// crate, of which there is no longer one.
+    pub fn first(&self) -> &SourceStore {
+        self.sources.first().expect("at least one coverage source")
+    }
+
+    pub fn total_lines(&self) -> u32 {
+        self.sources.iter().map(SourceStore::total_lines).sum()
+    }
+
+    pub fn claimed_lines(&self) -> u32 {
+        self.sources.iter().map(SourceStore::claimed_lines).sum()
+    }
+
+    pub fn annotations(&self) -> usize {
+        self.sources.iter().map(SourceStore::annotations).sum()
+    }
+
+    /// Every annotation, across every source, in no particular order.
+    pub fn all_units(&self) -> impl Iterator<Item = &Unit> {
+        self.sources
+            .iter()
+            .flat_map(|s| s.by_file.values())
+            .flatten()
     }
 
     /// Every annotation tagged with `unit_id`, in teaching order.
@@ -79,12 +145,10 @@ impl Store {
     /// machinery, instead of with `type Ok`.
     pub fn course_annotations(&self, unit_id: &str) -> Vec<&Unit> {
         let mut pool: Vec<&Unit> = self
-            .by_file
-            .values()
-            .flatten()
+            .all_units()
             .filter(|u| u.annotation.course_unit.as_deref() == Some(unit_id))
             .collect();
-        pool.sort_by_key(|u| (self.file_rank(&u.annotation.file), u.range.start));
+        pool.sort_by_key(|u| (self.file_rank(&u.source, &u.annotation.file), u.range.start));
 
         // Kahn's algorithm, always taking the position-earliest ready node, so
         // the result is deterministic and as close to source order as the
@@ -136,10 +200,17 @@ impl Store {
     }
 
     /// Position of a file in `reading_order`; unlisted files sort last, by path.
-    fn file_rank(&self, file: &str) -> usize {
+    ///
+    /// A file may be listed bare (`src/ser/mod.rs`, meaning the first coverage
+    /// source) or qualified (`serde_derive:src/ser.rs`). Bare entries kept the
+    /// registry unchanged when the second source arrived, and qualifying is
+    /// what stops `src/lib.rs` — which both crates have — from matching twice.
+    fn file_rank(&self, source: &str, file: &str) -> usize {
+        let qualified = format!("{source}:{file}");
+        let bare = source == self.first().name;
         self.reading_order
             .iter()
-            .position(|f| f == file)
+            .position(|f| f == &qualified || (bare && f == file))
             .unwrap_or(usize::MAX)
     }
 
@@ -148,66 +219,97 @@ impl Store {
     }
 }
 
-/// Loads every `annotations/*.toml`, validating schema and source id, and
-/// resolves each record against the pinned tree.
+/// Loads every annotated source's store, validating schema and source id, and
+/// resolves each record against the pinned tree it claims.
 ///
 /// This does *not* enforce coverage — that is the coverage gate's job. The site
-/// generator must be able to render a partially annotated crate.
+/// generator must be able to render a partially annotated crate, which since
+/// D12 is the normal state of the newer of the two.
 pub fn load(repo: &Path) -> Result<Store> {
     let pin = vendor::load_pin(repo)?;
-    let primary = pin.primary()?;
-    let source_id = primary.source_id();
-    let mut store = Store {
-        version: primary.version.clone(),
-        source_id: source_id.clone(),
-        ..Store::default()
-    };
+    let mut store = Store::default();
 
-    for rel in vendor::source_files(repo)? {
-        let n = vendor::line_count(repo, &rel)?;
-        store.files.push((rel, n));
+    for source in pin.coverage()? {
+        let source_id = source.source_id();
+        let root = source.dir(repo);
+        let mut s = SourceStore {
+            name: source.name.clone(),
+            version: source.version.clone(),
+            source_id: source_id.clone(),
+            ..SourceStore::default()
+        };
+
+        for rel in vendor::source_files_in(&root)? {
+            let n = vendor::line_count_in(&root, &rel)?;
+            s.files.push((rel, n));
+        }
+
+        let manifest = Manifest::load(&manifest_path(repo, &source.name))?;
+        anyhow::ensure!(
+            manifest.source == source_id,
+            "manifest source {:?} does not match pinned source {source_id:?}",
+            manifest.source
+        );
+        s.complete = manifest.complete;
+
+        for annotation in read_annotations(repo, &source.name, &source_id)? {
+            let range = LineRange::parse(&annotation.lines)
+                .with_context(|| format!("annotation {}", annotation.id))?;
+            s.by_file
+                .entry(annotation.file.clone())
+                .or_default()
+                .push(Unit {
+                    annotation,
+                    range,
+                    source: source.name.clone(),
+                });
+        }
+        for units in s.by_file.values_mut() {
+            units.sort_by_key(|u| (u.range.start, u.range.end));
+        }
+        store.sources.push(s);
     }
 
-    let manifest = Manifest::load(&repo.join("annotations").join("manifest.toml"))?;
-    anyhow::ensure!(
-        manifest.source == source_id,
-        "manifest source {:?} does not match pinned source {source_id:?}",
-        manifest.source
-    );
-    store.complete = manifest.complete;
-
+    // One registry for the whole course track, so it lives beside the stores
+    // rather than inside one of them. It names the source it was written
+    // against, which is the first one — the track predates the second.
     let course = CourseFile::load(&repo.join("annotations").join("course.toml"))?;
+    let first = store.first().source_id.clone();
     anyhow::ensure!(
-        course.source == source_id,
-        "course registry source {:?} does not match pinned source {source_id:?}",
+        course.source == first,
+        "course registry source {:?} does not match pinned source {first:?}",
         course.source
     );
     store.reading_order = course.reading_order;
     store.course = course.units;
 
-    for annotation in read_annotations(repo, &source_id)? {
-        let range = LineRange::parse(&annotation.lines)
-            .with_context(|| format!("annotation {}", annotation.id))?;
-        store
-            .by_file
-            .entry(annotation.file.clone())
-            .or_default()
-            .push(Unit { annotation, range });
-    }
-
-    for units in store.by_file.values_mut() {
-        units.sort_by_key(|u| (u.range.start, u.range.end));
-    }
-
     Ok(store)
 }
 
-/// Reads and validates every annotation file, without resolving line ranges.
+/// Where one annotated source's store lives: `annotations/<crate>/`.
+///
+/// The stores were one flat directory while there was one annotated crate. Two
+/// of them share file names — both crates have a `src/lib.rs` and a `ser`
+/// module — so the split is what keeps an annotation file's name meaningful,
+/// and it is what lets a bump rewrite exactly one store (D11).
+pub fn store_dir(repo: &Path, name: &str) -> std::path::PathBuf {
+    repo.join("annotations").join(name)
+}
+
+pub fn manifest_path(repo: &Path, name: &str) -> std::path::PathBuf {
+    store_dir(repo, name).join("manifest.toml")
+}
+
+/// Reads and validates one source's annotation files, without resolving line
+/// ranges.
 ///
 /// `source_id` is passed in rather than read from the pin so that the bump
 /// tool can load a store still keyed to the outgoing version.
-pub fn read_annotations(repo: &Path, source_id: &str) -> Result<Vec<Annotation>> {
-    let dir = repo.join("annotations");
+pub fn read_annotations(repo: &Path, name: &str, source_id: &str) -> Result<Vec<Annotation>> {
+    let dir = store_dir(repo, name);
+    if !dir.is_dir() {
+        return Ok(Vec::new());
+    }
     let mut entries: Vec<_> = std::fs::read_dir(&dir)
         .with_context(|| format!("reading {}", dir.display()))?
         .collect::<std::io::Result<Vec<_>>>()?;
@@ -219,12 +321,9 @@ pub fn read_annotations(repo: &Path, source_id: &str) -> Result<Vec<Annotation>>
         if path.extension().is_none_or(|e| e != "toml") {
             continue;
         }
-        // The manifest and the course registry live in the same directory but
-        // are not annotation files.
-        if path
-            .file_name()
-            .is_some_and(|n| n == "manifest.toml" || n == "course.toml")
-        {
+        // The manifest lives in the same directory but is not an annotation
+        // file.
+        if path.file_name().is_some_and(|n| n == "manifest.toml") {
             continue;
         }
         let text = std::fs::read_to_string(&path)?;
@@ -356,9 +455,21 @@ pub struct NarrativeStepItem {
     /// tree they are looking at on every step — the walk crosses between two.
     pub crate_name: String,
     pub version: String,
-    /// True when this step cites the one coverage source, which is what makes
-    /// it a crossing into the reference track rather than a stop in the walk.
+    /// True when this step cites an annotated crate, which is what makes it a
+    /// crossing into a reference track rather than a stop in the walk.
     pub is_coverage: bool,
+    /// True when the cited *file* is declared complete in that source's
+    /// manifest, so a reference-track annotation is guaranteed to contain the
+    /// range and the step is required to name it.
+    ///
+    /// This is finer than `is_coverage` because of the order §12 does the work
+    /// in: `serde_derive` becomes an annotated crate in R1 and is annotated
+    /// file by file through R5, so for most of that time a step cites a
+    /// coverage source over ground no annotation claims yet. Requiring a name
+    /// there would ask the walk to point at something that does not exist;
+    /// requiring it the moment the file is declared complete is what converts
+    /// the 85 steps without a flag day.
+    pub claimed: bool,
     /// The cited lines, read from the pinned tree at load time. Never stored in
     /// the toml, for the same reason a glossary quotation is not (see
     /// [`GlossaryItem::quoted`]).
@@ -378,7 +489,13 @@ pub fn read_narrative(repo: &Path) -> Result<Vec<NarrativeItem>> {
         return Ok(Vec::new());
     }
     let pin = vendor::load_pin(repo)?;
-    let coverage_id = pin.primary()?.source_id();
+    // Which files are claimed ground, by source id. Read once: a unit cites
+    // both annotated crates and the answer cannot depend on which step asks.
+    let mut claimed: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for source in pin.coverage()? {
+        let manifest = Manifest::load(&manifest_path(repo, &source.name))?;
+        claimed.insert(source.source_id(), manifest.complete);
+    }
 
     let mut paths: Vec<_> = std::fs::read_dir(&dir)
         .with_context(|| format!("reading {}", dir.display()))?
@@ -440,7 +557,10 @@ pub fn read_narrative(repo: &Path) -> Result<Vec<NarrativeItem>> {
                 range,
                 crate_name: source.name.clone(),
                 version: source.version.clone(),
-                is_coverage: step.source == coverage_id,
+                is_coverage: source.role == vendor::Role::Coverage,
+                claimed: claimed
+                    .get(&step.source)
+                    .is_some_and(|files| files.contains(&step.file)),
                 quoted: lines[range.start as usize - 1..range.end as usize].join("\n"),
                 step,
             });
@@ -461,6 +581,7 @@ mod tests {
     fn annotation(id: &str, file: &str, line: u32, prereqs: &[&str]) -> Unit {
         Unit {
             range: LineRange::parse(&line.to_string()).unwrap(),
+            source: "serde_core".to_string(),
             annotation: Annotation {
                 id: id.to_string(),
                 file: file.to_string(),
@@ -479,57 +600,105 @@ mod tests {
         }
     }
 
+    /// A store with one annotated source, built from `(file, units)` pairs.
+    fn store_of(name: &str, reading_order: &[&str], files: &[(&str, Vec<Unit>)]) -> Store {
+        let mut source = SourceStore {
+            name: name.to_string(),
+            ..SourceStore::default()
+        };
+        for (file, units) in files {
+            source.files.push((file.to_string(), 1000));
+            source.by_file.insert(file.to_string(), units.clone());
+        }
+        Store {
+            sources: vec![source],
+            reading_order: reading_order.iter().map(|s| s.to_string()).collect(),
+            ..Store::default()
+        }
+    }
+
+    fn order_of(store: &Store) -> Vec<String> {
+        store
+            .course_annotations("01-unit")
+            .iter()
+            .map(|u| u.annotation.id.clone())
+            .collect()
+    }
+
     /// Teaching order is the prereq graph first and position second.
     #[test]
     fn course_order_respects_prereqs_then_reading_order() {
-        let mut store = Store {
-            reading_order: vec!["src/ser/mod.rs".into(), "src/de/impls.rs".into()],
-            ..Store::default()
-        };
-        store.by_file.insert(
-            "src/ser/mod.rs".into(),
-            vec![
-                annotation("c", "src/ser/mod.rs", 100, &["a"]),
-                annotation("b", "src/ser/mod.rs", 500, &[]),
+        let store = store_of(
+            "serde_core",
+            &["src/ser/mod.rs", "src/de/impls.rs"],
+            &[
+                (
+                    "src/ser/mod.rs",
+                    vec![
+                        annotation("c", "src/ser/mod.rs", 100, &["a"]),
+                        annotation("b", "src/ser/mod.rs", 500, &[]),
+                    ],
+                ),
+                (
+                    "src/de/impls.rs",
+                    vec![annotation("a", "src/de/impls.rs", 10, &[])],
+                ),
             ],
         );
-        store.by_file.insert(
-            "src/de/impls.rs".into(),
-            vec![annotation("a", "src/de/impls.rs", 10, &[])],
-        );
-
-        let order: Vec<&str> = store
-            .course_annotations("01-unit")
-            .iter()
-            .map(|u| u.annotation.id.as_str())
-            .collect();
 
         // `b` first: earliest position with nothing to wait for. `c` sits
         // ahead of it in the source but cannot precede its own prereq.
-        assert_eq!(order, ["b", "a", "c"]);
+        assert_eq!(order_of(&store), ["b", "a", "c"]);
     }
 
     /// A file the registry forgot must not silently sort into the middle.
     #[test]
     fn unlisted_files_sort_last() {
-        let mut store = Store {
-            reading_order: vec!["src/ser/mod.rs".into()],
-            ..Store::default()
-        };
-        store.by_file.insert(
-            "src/de/mod.rs".into(),
-            vec![annotation("x", "src/de/mod.rs", 1, &[])],
+        let store = store_of(
+            "serde_core",
+            &["src/ser/mod.rs"],
+            &[
+                (
+                    "src/de/mod.rs",
+                    vec![annotation("x", "src/de/mod.rs", 1, &[])],
+                ),
+                (
+                    "src/ser/mod.rs",
+                    vec![annotation("y", "src/ser/mod.rs", 900, &[])],
+                ),
+            ],
         );
-        store.by_file.insert(
-            "src/ser/mod.rs".into(),
-            vec![annotation("y", "src/ser/mod.rs", 900, &[])],
-        );
+        assert_eq!(order_of(&store), ["y", "x"]);
+    }
 
-        let order: Vec<&str> = store
-            .course_annotations("01-unit")
-            .iter()
-            .map(|u| u.annotation.id.as_str())
-            .collect();
-        assert_eq!(order, ["y", "x"]);
+    /// D12. Both annotated crates have a `src/lib.rs`, so a bare registry
+    /// entry must rank only the first source's copy — otherwise the second
+    /// crate's file inherits a position written about someone else's.
+    #[test]
+    fn a_bare_reading_order_entry_does_not_rank_the_other_source() {
+        let mut store = store_of(
+            "serde_core",
+            &["src/lib.rs", "serde_derive:src/ser.rs"],
+            &[(
+                "src/lib.rs",
+                vec![annotation("core-lib", "src/lib.rs", 10, &[])],
+            )],
+        );
+        let mut derive = SourceStore {
+            name: "serde_derive".to_string(),
+            ..SourceStore::default()
+        };
+        let mut lib = annotation("derive-lib", "src/lib.rs", 5, &[]);
+        lib.source = "serde_derive".to_string();
+        let mut ser = annotation("derive-ser", "src/ser.rs", 5, &[]);
+        ser.source = "serde_derive".to_string();
+        derive.by_file.insert("src/lib.rs".into(), vec![lib]);
+        derive.by_file.insert("src/ser.rs".into(), vec![ser]);
+        store.sources.push(derive);
+
+        // `core-lib` matches the bare entry at rank 0; `derive-ser` matches the
+        // qualified entry at rank 1; `derive-lib` matches nothing and sorts
+        // last, rather than sharing rank 0 with a file in the other crate.
+        assert_eq!(order_of(&store), ["core-lib", "derive-ser", "derive-lib"]);
     }
 }

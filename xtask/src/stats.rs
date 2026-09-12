@@ -15,6 +15,12 @@ struct FileStats {
     items: u32,
     macro_defs: u32,
     macro_uses: u32,
+    /// `quote!` / `quote_spanned!` invocations. The opposite of a macro use as
+    /// a compression lever: each one emits different code and needs its own
+    /// explanation next to what it emits, which is why `serde_derive` costs
+    /// more annotations than `serde_core` despite being 25% smaller
+    /// (PLAN.md §12).
+    quote_uses: u32,
 }
 
 impl FileStats {
@@ -23,6 +29,10 @@ impl FileStats {
     fn estimated_units(&self) -> u32 {
         if self.macro_uses > 40 {
             self.macro_defs * 3 + self.macro_uses / 4 + self.items
+        } else if self.quote_uses > 10 {
+            // Codegen density, measured against what this project achieved and
+            // not against the macro-driven files: one annotation per ~14 lines.
+            self.items.max(self.lines / 14)
         } else {
             self.items.max(self.lines / 18)
         }
@@ -31,6 +41,8 @@ impl FileStats {
     fn profile(&self) -> &'static str {
         if self.macro_uses > 40 {
             "macro-driven"
+        } else if self.quote_uses > 10 {
+            "quote-driven"
         } else if self.lines > 0 && self.doc * 10 / self.lines >= 4 {
             "doc-heavy"
         } else {
@@ -40,10 +52,17 @@ impl FileStats {
 }
 
 pub fn run(repo: &Path) -> Result<()> {
-    let root = vendor::vendor_root(repo)?;
+    for source in vendor::load_pin(repo)?.coverage()? {
+        println!("\n== {} ==", source.source_id());
+        run_source(&source.dir(repo))?;
+    }
+    Ok(())
+}
+
+fn run_source(root: &Path) -> Result<()> {
     let mut stats: Vec<FileStats> = Vec::new();
 
-    for rel in vendor::source_files(repo)? {
+    for rel in vendor::source_files_in(root)? {
         let text = std::fs::read_to_string(root.join(&rel))?;
         let mut s = FileStats {
             file: rel,
@@ -53,6 +72,7 @@ pub fn run(repo: &Path) -> Result<()> {
             items: 0,
             macro_defs: 0,
             macro_uses: 0,
+            quote_uses: 0,
         };
         for line in text.lines() {
             s.lines += 1;
@@ -69,6 +89,8 @@ pub fn run(repo: &Path) -> Result<()> {
             } else if is_macro_use(t) {
                 s.macro_uses += 1;
             }
+            s.quote_uses +=
+                t.matches("quote!").count() as u32 + t.matches("quote_spanned!").count() as u32;
             if is_item(t) {
                 s.items += 1;
             }
@@ -79,13 +101,13 @@ pub fn run(repo: &Path) -> Result<()> {
     stats.sort_by_key(|s| std::cmp::Reverse(s.lines));
 
     println!(
-        "\n{:<26}{:>7}{:>6}{:>6}{:>7}{:>6}{:>6}{:>7}  profile",
-        "file", "lines", "doc", "code", "items", "mdef", "muse", "units"
+        "\n{:<26}{:>7}{:>6}{:>6}{:>7}{:>6}{:>6}{:>7}{:>7}  profile",
+        "file", "lines", "doc", "code", "items", "mdef", "muse", "quote", "units"
     );
     let (mut tl, mut td, mut tu) = (0, 0, 0);
     for s in &stats {
         println!(
-            "{:<26}{:>7}{:>6}{:>6}{:>7}{:>6}{:>6}{:>7}  {}",
+            "{:<26}{:>7}{:>6}{:>6}{:>7}{:>6}{:>6}{:>7}{:>7}  {}",
             s.file,
             s.lines,
             s.doc,
@@ -93,6 +115,7 @@ pub fn run(repo: &Path) -> Result<()> {
             s.items,
             s.macro_defs,
             s.macro_uses,
+            s.quote_uses,
             s.estimated_units(),
             s.profile()
         );
@@ -100,7 +123,7 @@ pub fn run(repo: &Path) -> Result<()> {
         td += s.doc;
         tu += s.estimated_units();
     }
-    println!("\n{:<26}{:>7}{:>6}{:>19}{:>14}", "TOTAL", tl, td, "", tu);
+    println!("\n{:<26}{:>7}{:>6}{:>26}{:>14}", "TOTAL", tl, td, "", tu);
     println!(
         "\n{} files, {tl} lines, {td} doc ({:.0}%), ~{tu} estimated annotation units, \
          ~{:.1} lines/unit\n",

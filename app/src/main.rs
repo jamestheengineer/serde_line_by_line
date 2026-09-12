@@ -102,6 +102,25 @@ struct NavFile {
     percent: f64,
     percent_label: String,
     complete: bool,
+    /// False for a file no annotation claims yet. It is still listed, with its
+    /// zero — that is the progress the sidebar is for — but it gets no link,
+    /// because a page of unexplained source is not a page.
+    annotated: bool,
+}
+
+/// One annotated crate's files in the sidebar.
+///
+/// The sidebar is grouped since there are two of them (D12): a flat list of 47
+/// files across two crates, three of which are called `lib.rs`, tells the
+/// reader nothing about where they are.
+struct NavGroup {
+    name: String,
+    version: String,
+    percent: f64,
+    percent_label: String,
+    claimed_lines: u32,
+    total_lines: u32,
+    files: Vec<NavFile>,
 }
 
 #[derive(Template)]
@@ -148,12 +167,10 @@ struct NotFoundPage;
 struct IndexPage {
     page_title: String,
     description: String,
-    nav: Vec<NavFile>,
-    total_lines: u32,
-    claimed_lines: u32,
-    percent: f64,
-    percent_label: String,
-    annotations: usize,
+    nav: Vec<NavGroup>,
+    /// One row per annotated crate. There is deliberately no figure spanning
+    /// them — see where this is built.
+    sources: Vec<SourceSummary>,
     course_units: usize,
     derive: Narrated,
     glossary: Borrowed,
@@ -161,6 +178,19 @@ struct IndexPage {
     root: String,
     current: String,
     track: String,
+}
+
+/// One annotated crate as the front page states it.
+struct SourceSummary {
+    name: String,
+    version: String,
+    total_lines: u32,
+    claimed_lines: u32,
+    percent: f64,
+    percent_label: String,
+    annotations: usize,
+    files: usize,
+    complete_files: usize,
 }
 
 /// What the derive track came to, counted once and reported in two places: on
@@ -172,9 +202,6 @@ struct Narrated {
     cited_lines: u32,
     crossings: usize,
     version: String,
-    /// Lines of `serde_derive` in the pinned tree — the denominator the track
-    /// deliberately does not have a numerator for.
-    source_lines: u32,
 }
 
 /// What the glossary came to. Same reason.
@@ -366,7 +393,10 @@ struct EmitBlock {
 struct FilePage {
     page_title: String,
     description: String,
-    nav: Vec<NavFile>,
+    nav: Vec<NavGroup>,
+    /// Which annotated crate this file belongs to. Shown on the page because
+    /// `src/lib.rs` is now an ambiguous title (D12).
+    source: String,
     file: String,
     percent: f64,
     percent_label: String,
@@ -396,52 +426,69 @@ fn main() -> Result<()> {
     std::fs::create_dir_all(out.join("file"))?;
     std::fs::create_dir_all(out.join("course"))?;
 
-    let nav = build_nav(&store);
+    let pages = Pages::new(&store);
+    let nav = build_nav(&store, &pages);
     let defs = macro_defs(&store);
-    let root = vendor::vendor_root(&repo)?;
 
     // Highlighted once for the whole build: the reference track renders each
     // file on its own page, and the course track pulls spans out of a dozen
-    // files into one unit page.
-    let mut highlighted_files: BTreeMap<&str, Vec<Line>> = BTreeMap::new();
-    for (file, _) in &store.files {
-        let text =
-            std::fs::read_to_string(root.join(file)).with_context(|| format!("reading {file}"))?;
-        highlighted_files.insert(
-            file,
-            hl.file(&text)
-                .with_context(|| format!("highlighting {file}"))?,
-        );
+    // files into one unit page. Keyed by crate as well as path — two of the
+    // annotated files are called `src/lib.rs`.
+    let mut highlighted_files: BTreeMap<(String, String), Vec<Line>> = BTreeMap::new();
+    for source in &store.sources {
+        let root = repo.join("vendor").join(&source.source_id);
+        for (file, _) in source.annotated_files() {
+            let text = std::fs::read_to_string(root.join(file))
+                .with_context(|| format!("reading {file}"))?;
+            highlighted_files.insert(
+                (source.name.clone(), file.clone()),
+                hl.file(&text)
+                    .with_context(|| format!("highlighting {file}"))?,
+            );
+        }
     }
 
-    for (file, lines) in &store.files {
-        let highlighted = &highlighted_files[file.as_str()];
-        let units = store.units_for(file);
+    // A file gets a page once something is written about it. An unannotated
+    // file is listed in the sidebar with its zero rather than published as 400
+    // lines of source nobody has explained yet.
+    let mut file_pages = 0usize;
+    for source in &store.sources {
+        for (file, lines) in source.annotated_files() {
+            let key = (source.name.clone(), file.clone());
+            let highlighted = &highlighted_files[&key];
+            let units = source.units_for(file);
 
-        let page = FilePage {
-            page_title: format!("{file} — serde line by line"),
-            description: format!(
-                "{file} from serde_core {}, annotated line by line: {} lines, {} explanations.",
-                store.version,
-                lines,
-                units.len(),
-            ),
-            nav: nav_for(&nav),
-            file: file.clone(),
-            percent: percent_of(units, *lines),
-            percent_label: format!("{:.1}", percent_of(units, *lines)),
-            lines: *lines,
-            blocks: blocks_for(units, highlighted, &defs, file),
-            source_id: store.source_id.clone(),
-            root: "../".to_string(),
-            current: file.clone(),
-            track: "reference".to_string(),
-        };
-        write(&out.join("file").join(page_name(file)), &page.render()?)?;
+            let page = FilePage {
+                page_title: format!("{file} — serde line by line"),
+                description: format!(
+                    "{file} from {} {}, annotated line by line: {} lines, {} explanations.",
+                    source.name,
+                    source.version,
+                    lines,
+                    units.len(),
+                ),
+                nav: nav_for(&nav),
+                file: file.clone(),
+                source: source.name.clone(),
+                percent: percent_of(units, *lines),
+                percent_label: format!("{:.1}", percent_of(units, *lines)),
+                lines: *lines,
+                blocks: blocks_for(units, highlighted, &defs, &pages, file),
+                source_id: source.source_id.clone(),
+                root: "../".to_string(),
+                current: pages.name(&source.name, file),
+                track: "reference".to_string(),
+            };
+            write(
+                &out.join("file").join(pages.name(&source.name, file)),
+                &page.render()?,
+            )?;
+            file_pages += 1;
+        }
     }
 
-    write_course(&out, &store, &highlighted_files, &defs)?;
-    let derive = write_narrative(&out, &repo, &store, &hl)?;
+    write_course(&out, &store, &highlighted_files, &defs, &pages)?;
+    let derive = write_narrative(&out, &repo, &store, &pages, &hl)?;
     let glossary = write_glossary(&out, &repo, &store, &hl)?;
     write_expand(&out, &repo, &store, &hl)?;
 
@@ -449,6 +496,7 @@ fn main() -> Result<()> {
     // track claims, and those numbers are counted while the tracks are built
     // rather than kept in a second place that could disagree with them.
     let narrative_units = derive.units;
+    let first = store.first();
     let index = IndexPage {
         page_title: "serde line by line".to_string(),
         description: one_line(&format!(
@@ -456,22 +504,36 @@ fn main() -> Result<()> {
              beside the source, with runnable examples — a {}-unit Rust course read out of \
              the same annotations, and a {}-unit walk through what #[derive(Serialize)] \
              expands to.",
-            store.version,
-            store.total_lines(),
-            index_count(&store),
+            first.version,
+            first.total_lines(),
+            first.annotations(),
             store.course.len(),
             derive.units,
         )),
-        nav: build_nav(&store),
-        total_lines: store.total_lines(),
-        claimed_lines: store.claimed_lines(),
-        percent: store.percent(),
-        percent_label: format!("{:.1}", store.percent()),
-        annotations: store.by_file.values().map(Vec::len).sum(),
+        nav: build_nav(&store, &pages),
+        // One row per annotated crate, each with its own figure. There is no
+        // combined percentage anywhere on the site and this is the reason
+        // (D12): the two crates promise the same thing about different amounts
+        // of code, and 12,037 of 21,012 would be a number about neither.
+        sources: store
+            .sources
+            .iter()
+            .map(|s| SourceSummary {
+                name: s.name.clone(),
+                version: s.version.clone(),
+                total_lines: s.total_lines(),
+                claimed_lines: s.claimed_lines(),
+                percent: s.percent(),
+                percent_label: format!("{:.1}", s.percent()),
+                annotations: s.annotations(),
+                files: s.files.len(),
+                complete_files: s.complete.len(),
+            })
+            .collect(),
         course_units: store.course.len(),
         derive,
         glossary,
-        source_id: store.source_id.clone(),
+        source_id: first.source_id.clone(),
         root: "./".to_string(),
         current: String::new(),
         track: "reference".to_string(),
@@ -494,22 +556,35 @@ fn main() -> Result<()> {
     // A shields.io endpoint badge, derived from the store on every build so
     // the README figure cannot drift from the coverage gate. Served from the
     // deployed site; shields fetches it and renders the badge.
-    write(&out.join("badge.json"), &badge_json(&store))?;
+    // `badge.json` stays the first source's, so the README badge that has
+    // always pointed at it keeps working; the others are named.
+    write(&out.join("badge.json"), &badge_json(store.first()))?;
+    for source in store.sources.iter().skip(1) {
+        write(
+            &out.join(format!("badge-{}.json", source.name)),
+            &badge_json(source),
+        )?;
+    }
 
     // Pages serves this for any unknown path under the site.
     write(&out.join("404.html"), &NotFoundPage.render()?)?;
 
     let links = check_links(&out)?;
 
+    let claims: Vec<String> = store
+        .sources
+        .iter()
+        .map(|s| format!("{} {:.1}%", s.name, s.percent()))
+        .collect();
     println!(
-        "wrote {} pages to {}  ({:.1}% annotated, {} annotations)",
-        // one per source file, one per course unit, one per narrative unit,
+        "wrote {} pages to {}  ({}, {} annotations)",
+        // one per annotated file, one per course unit, one per narrative unit,
         // plus the front page, the course index, the derive index, the
         // glossary, the expansion page and the 404.
-        store.files.len() + store.course.len() + narrative_units + 6,
+        file_pages + store.course.len() + narrative_units + 6,
         out.display(),
-        store.percent(),
-        index_count(&store),
+        claims.join(", "),
+        store.annotations(),
     );
     println!("checked {links} internal links");
     Ok(())
@@ -733,7 +808,7 @@ fn write_expand(out: &Path, repo: &Path, store: &Store, hl: &Highlighter) -> Res
         first_expansion,
         derive_version: derive_source.version.clone(),
         untouched_lines,
-        source_id: store.source_id.clone(),
+        source_id: store.first().source_id.clone(),
         root: "../".to_string(),
         track: "expand".to_string(),
     };
@@ -757,15 +832,19 @@ fn write_expand(out: &Path, repo: &Path, store: &Store, hl: &Highlighter) -> Res
 /// longer matches what `serde_derive` emits fails this build naming the step,
 /// which is the only way a sentence about generated code can stay true across a
 /// version bump.
-fn write_narrative(out: &Path, repo: &Path, store: &Store, hl: &Highlighter) -> Result<Narrated> {
+fn write_narrative(
+    out: &Path,
+    repo: &Path,
+    store: &Store,
+    pages: &Pages,
+    hl: &Highlighter,
+) -> Result<Narrated> {
     let units = slbl_core::read_narrative(repo)?;
     if units.is_empty() {
         return Ok(Narrated::default());
     }
     let by_id: BTreeMap<&str, &Unit> = store
-        .by_file
-        .values()
-        .flatten()
+        .all_units()
         .map(|u| (u.annotation.id.as_str(), u))
         .collect();
     let titles: BTreeMap<&str, &str> = units
@@ -843,7 +922,6 @@ fn write_narrative(out: &Path, repo: &Path, store: &Store, hl: &Highlighter) -> 
             .sum(),
         crossings: nav.iter().map(|u| u.crossings).sum(),
         version: derive_source.version.clone(),
-        source_lines: derive_lines,
     };
 
     let index = NarrativePage {
@@ -861,7 +939,7 @@ fn write_narrative(out: &Path, repo: &Path, store: &Store, hl: &Highlighter) -> 
         crossings: stats.crossings,
         derive_version: derive_source.version.clone(),
         derive_lines,
-        source_id: store.source_id.clone(),
+        source_id: store.first().source_id.clone(),
         root: "../".to_string(),
         track: "derive".to_string(),
     };
@@ -881,7 +959,7 @@ fn write_narrative(out: &Path, repo: &Path, store: &Store, hl: &Highlighter) -> 
             let (annotation_href, annotation_title) = match s.annotation.as_deref() {
                 Some(id) => match by_id.get(id) {
                     Some(u) => (
-                        format!("{}#{id}", page_name(&u.annotation.file)),
+                        format!("{}#{id}", pages.unit(u)),
                         u.annotation.title.clone(),
                     ),
                     None => (String::new(), String::new()),
@@ -972,7 +1050,7 @@ fn write_narrative(out: &Path, repo: &Path, store: &Store, hl: &Highlighter) -> 
                 .into_iter()
                 .collect(),
             next: nav.get(i + 1).map(clone_nnav).into_iter().collect(),
-            source_id: store.source_id.clone(),
+            source_id: store.first().source_id.clone(),
             root: "../".to_string(),
             track: "derive".to_string(),
         };
@@ -1132,7 +1210,7 @@ fn write_glossary(out: &Path, repo: &Path, store: &Store, hl: &Highlighter) -> R
         sources: groups.len(),
         groups,
         borrowed_lines,
-        source_id: store.source_id.clone(),
+        source_id: store.first().source_id.clone(),
         root: "../".to_string(),
         track: "glossary".to_string(),
     };
@@ -1145,9 +1223,15 @@ fn write_glossary(out: &Path, repo: &Path, store: &Store, hl: &Highlighter) -> R
 fn write_course(
     out: &Path,
     store: &Store,
-    highlighted: &BTreeMap<&str, Vec<Line>>,
-    defs: &BTreeMap<String, (String, String)>,
+    highlighted: &BTreeMap<(String, String), Vec<Line>>,
+    defs: &BTreeMap<String, MacroDef>,
+    pages: &Pages,
 ) -> Result<()> {
+    let ctx = Render {
+        highlighted,
+        defs,
+        pages,
+    };
     let nav: Vec<NavUnit> = store
         .course
         .iter()
@@ -1169,7 +1253,7 @@ fn write_course(
             .count(),
         total_units: store.course.len(),
         course_annotations: nav.iter().map(|u| u.annotations).sum(),
-        source_id: store.source_id.clone(),
+        source_id: store.first().source_id.clone(),
         root: "../".to_string(),
         track: "course".to_string(),
     };
@@ -1178,9 +1262,7 @@ fn write_course(
     // Which unit each annotation belongs to, and how far into the course that
     // unit is — the two facts a forward-reference warning needs.
     let placement: BTreeMap<&str, usize> = store
-        .by_file
-        .values()
-        .flatten()
+        .all_units()
         .filter_map(|u| {
             let unit = u.annotation.course_unit.as_deref()?;
             let at = store.course.iter().position(|c| c.id == unit)?;
@@ -1188,9 +1270,7 @@ fn write_course(
         })
         .collect();
     let titles: BTreeMap<&str, &str> = store
-        .by_file
-        .values()
-        .flatten()
+        .all_units()
         .map(|u| (u.annotation.id.as_str(), u.annotation.title.as_str()))
         .collect();
 
@@ -1198,7 +1278,7 @@ fn write_course(
         let annotations = store.course_annotations(&unit.id);
         let blocks: Vec<CourseBlock> = annotations
             .iter()
-            .map(|u| course_block(u, highlighted, defs, i, &placement, &titles, &store.course))
+            .map(|u| course_block(u, &ctx, i, &placement, &titles, &store.course))
             .collect();
 
         let page = UnitPage {
@@ -1223,7 +1303,7 @@ fn write_course(
                 .collect(),
             next: nav.get(i + 1).map(clone_unit).into_iter().collect(),
             blocks,
-            source_id: store.source_id.clone(),
+            source_id: store.first().source_id.clone(),
             root: "../".to_string(),
             track: "course".to_string(),
         };
@@ -1286,10 +1366,18 @@ fn clone_unit(u: &NavUnit) -> NavUnit {
     }
 }
 
+/// What every block renderer needs and none of them owns: the highlighted
+/// source for each annotated crate, the macro-definition index, and how a
+/// `(source, file)` pair becomes a URL.
+struct Render<'a> {
+    highlighted: &'a BTreeMap<(String, String), Vec<Line>>,
+    defs: &'a BTreeMap<String, MacroDef>,
+    pages: &'a Pages,
+}
+
 fn course_block(
     unit: &Unit,
-    highlighted: &BTreeMap<&str, Vec<Line>>,
-    defs: &BTreeMap<String, (String, String)>,
+    ctx: &Render<'_>,
     position: usize,
     placement: &BTreeMap<&str, usize>,
     titles: &BTreeMap<&str, &str>,
@@ -1297,8 +1385,9 @@ fn course_block(
 ) -> CourseBlock {
     let a = &unit.annotation;
     let file = a.file.clone();
-    let lines = highlighted
-        .get(file.as_str())
+    let lines = ctx
+        .highlighted
+        .get(&(unit.source.clone(), file.clone()))
         .map_or(&[][..], Vec::as_slice);
     let mut block = annotated(unit, lines);
 
@@ -1306,11 +1395,11 @@ fn course_block(
     // invocations from across a file, so there is no contiguous run to merge —
     // but the link back to the definition still has to work.
     if a.kind == Kind::MacroUse {
-        if let Some((def_file, name)) = a.macro_def.as_deref().and_then(|id| defs.get(id)) {
-            block.expands_name = name.clone();
+        if let Some(d) = a.macro_def.as_deref().and_then(|id| ctx.defs.get(id)) {
+            block.expands_name = d.name.clone();
             block.expands_href = format!(
                 "{}#{}",
-                page_name(def_file),
+                ctx.pages.name(&d.source, &d.file),
                 a.macro_def.as_deref().unwrap_or_default()
             );
         }
@@ -1331,31 +1420,39 @@ fn course_block(
         .collect();
 
     CourseBlock {
-        href: format!("{}#{}", page_name(&file), a.id),
+        href: format!("{}#{}", ctx.pages.unit(unit), a.id),
         file,
         block,
         assumes,
     }
 }
 
-fn index_count(store: &Store) -> usize {
-    store.by_file.values().map(Vec::len).sum()
+/// Where a `macro-def` annotation lives, and what it defines.
+struct MacroDef {
+    source: String,
+    file: String,
+    name: String,
 }
 
-/// Every `macro-def` annotation, by id, as `(file, macro name)`.
+/// Every `macro-def` annotation, by id.
 ///
 /// Built once for the whole store rather than per file, because a definition
 /// and its uses need not live in the same file — `macros.rs` defines three that
 /// are invoked thirty times elsewhere.
-fn macro_defs(store: &Store) -> BTreeMap<String, (String, String)> {
+fn macro_defs(store: &Store) -> BTreeMap<String, MacroDef> {
     store
-        .by_file
-        .values()
-        .flatten()
+        .all_units()
         .filter(|u| u.annotation.kind == Kind::MacroDef)
         .map(|u| {
             let a = &u.annotation;
-            (a.id.clone(), (a.file.clone(), macro_name(&a.title)))
+            (
+                a.id.clone(),
+                MacroDef {
+                    source: u.source.clone(),
+                    file: a.file.clone(),
+                    name: macro_name(&a.title),
+                },
+            )
         })
         .collect()
 }
@@ -1381,7 +1478,8 @@ fn macro_name(title: &str) -> String {
 fn blocks_for(
     units: &[Unit],
     highlighted: &[Line],
-    defs: &BTreeMap<String, (String, String)>,
+    defs: &BTreeMap<String, MacroDef>,
+    pages: &Pages,
     file: &str,
 ) -> Vec<Block> {
     let total = highlighted.len() as u32;
@@ -1397,7 +1495,7 @@ fn blocks_for(
 
         let run = macro_run(units, i);
         blocks.push(if run > 1 || unit.annotation.kind == Kind::MacroUse {
-            macro_block(&units[i..i + run], highlighted, defs, file)
+            macro_block(&units[i..i + run], highlighted, defs, pages, file)
         } else {
             annotated(unit, highlighted)
         });
@@ -1458,7 +1556,8 @@ fn annotated(unit: &Unit, highlighted: &[Line]) -> Block {
 fn macro_block(
     units: &[Unit],
     highlighted: &[Line],
-    defs: &BTreeMap<String, (String, String)>,
+    defs: &BTreeMap<String, MacroDef>,
+    pages: &Pages,
     file: &str,
 ) -> Block {
     let start = units[0].range.start;
@@ -1469,8 +1568,13 @@ fn macro_block(
     // A definition in another file is linked by page; one in this file by
     // anchor, so the reader is not sent on a round trip to land two screens up.
     let (name, href) = match def {
-        Some((def_file, name)) if def_file == file => (name.clone(), format!("#{def_id}")),
-        Some((def_file, name)) => (name.clone(), format!("{}#{def_id}", page_name(def_file))),
+        Some(d) if d.file == file && d.source == units[0].source => {
+            (d.name.clone(), format!("#{def_id}"))
+        }
+        Some(d) => (
+            d.name.clone(),
+            format!("{}#{def_id}", pages.name(&d.source, &d.file)),
+        ),
         None => (String::new(), String::new()),
     };
 
@@ -1596,39 +1700,98 @@ fn percent_of(units: &[Unit], lines: u32) -> f64 {
     claimed.min(lines) as f64 * 100.0 / lines as f64
 }
 
-fn build_nav(store: &Store) -> Vec<NavFile> {
+fn build_nav(store: &Store, pages: &Pages) -> Vec<NavGroup> {
     store
-        .files
+        .sources
         .iter()
-        .map(|(path, lines)| NavFile {
-            href: page_name(path),
-            short: path.strip_prefix("src/").unwrap_or(path).to_string(),
-            percent: percent_of(store.units_for(path), *lines),
-            percent_label: format!("{:.0}", percent_of(store.units_for(path), *lines)),
-            complete: store.complete.iter().any(|c| c == path),
-            path: path.clone(),
-            lines: *lines,
+        .map(|s| NavGroup {
+            name: s.name.clone(),
+            version: s.version.clone(),
+            percent: s.percent(),
+            percent_label: format!("{:.1}", s.percent()),
+            claimed_lines: s.claimed_lines(),
+            total_lines: s.total_lines(),
+            files: s
+                .files
+                .iter()
+                .map(|(path, lines)| {
+                    let pct = percent_of(s.units_for(path), *lines);
+                    NavFile {
+                        href: pages.name(&s.name, path),
+                        short: path.strip_prefix("src/").unwrap_or(path).to_string(),
+                        percent: pct,
+                        percent_label: format!("{:.0}", pct),
+                        complete: s.complete.iter().any(|c| c == path),
+                        annotated: !s.units_for(path).is_empty(),
+                        path: path.clone(),
+                        lines: *lines,
+                    }
+                })
+                .collect(),
         })
         .collect()
 }
 
-fn nav_for(nav: &[NavFile]) -> Vec<NavFile> {
+fn nav_for(nav: &[NavGroup]) -> Vec<NavGroup> {
     nav.iter()
-        .map(|n| NavFile {
-            path: n.path.clone(),
-            href: n.href.clone(),
-            short: n.short.clone(),
-            lines: n.lines,
-            percent: n.percent,
-            percent_label: n.percent_label.clone(),
-            complete: n.complete,
+        .map(|g| NavGroup {
+            name: g.name.clone(),
+            version: g.version.clone(),
+            percent: g.percent,
+            percent_label: g.percent_label.clone(),
+            claimed_lines: g.claimed_lines,
+            total_lines: g.total_lines,
+            files: g
+                .files
+                .iter()
+                .map(|n| NavFile {
+                    path: n.path.clone(),
+                    href: n.href.clone(),
+                    short: n.short.clone(),
+                    lines: n.lines,
+                    percent: n.percent,
+                    percent_label: n.percent_label.clone(),
+                    complete: n.complete,
+                    annotated: n.annotated,
+                })
+                .collect(),
         })
         .collect()
 }
 
-/// `src/ser/mod.rs` -> `src-ser-mod.rs.html`
-fn page_name(file: &str) -> String {
-    format!("{}.html", file.replace('/', "-"))
+/// How a `(source, file)` pair becomes a page name.
+///
+/// Built once from the store. The first annotated source keeps the
+/// unqualified names the site has always served — `src-ser-mod.rs.html` — and
+/// every other source is prefixed with its crate name. Both crates have a
+/// `src/lib.rs`, so something has to distinguish them; prefixing the newer one
+/// means the second reference track arrives without breaking a URL that is
+/// already published (D12).
+struct Pages {
+    first: String,
+}
+
+impl Pages {
+    fn new(store: &Store) -> Self {
+        Pages {
+            first: store.first().name.clone(),
+        }
+    }
+
+    /// `("serde_core", "src/ser/mod.rs")` -> `src-ser-mod.rs.html`
+    /// `("serde_derive", "src/ser.rs")`   -> `serde_derive-src-ser.rs.html`
+    fn name(&self, source: &str, file: &str) -> String {
+        let flat = file.replace('/', "-");
+        if source == self.first {
+            format!("{flat}.html")
+        } else {
+            format!("{source}-{flat}.html")
+        }
+    }
+
+    fn unit(&self, unit: &Unit) -> String {
+        self.name(&unit.source, &unit.annotation.file)
+    }
 }
 
 /// Light theme at top level; dark scoped so an explicit toggle wins in both
@@ -1644,12 +1807,14 @@ fn syntax_css(hl: &Highlighter) -> Result<String> {
     ))
 }
 
-/// The coverage figure as a shields.io endpoint payload.
+/// One annotated crate's coverage as a shields.io endpoint payload.
 ///
 /// Green only at 100%: the promise this project makes is "every line", and a
-/// badge that reads healthy at 97% would be advertising the wrong thing.
-fn badge_json(store: &Store) -> String {
-    let percent = store.percent();
+/// badge that reads healthy at 97% would be advertising the wrong thing. One
+/// file per source, never a combined badge, for the reason on the front page
+/// (D12) — a badge is the shortest place a misleading number can hide.
+fn badge_json(source: &slbl_core::SourceStore) -> String {
+    let percent = source.percent();
     let colour = if percent >= 100.0 {
         "brightgreen"
     } else if percent >= 90.0 {
@@ -1658,8 +1823,9 @@ fn badge_json(store: &Store) -> String {
         "orange"
     };
     format!(
-        "{{\"schemaVersion\":1,\"label\":\"lines annotated\",\
-         \"message\":\"{percent:.1}%\",\"color\":\"{colour}\"}}\n"
+        "{{\"schemaVersion\":1,\"label\":\"{} annotated\",\
+         \"message\":\"{percent:.1}%\",\"color\":\"{colour}\"}}\n",
+        source.name
     )
 }
 

@@ -104,7 +104,7 @@ reader finds the other 723 places `'de` shows up.
 - [ ] Every non-obvious claim has an example or a verified reference
 - [ ] The file reads end to end without assuming anything not yet introduced,
       or explicitly links forward when it must
-- [ ] Add it to `complete` in `annotations/manifest.toml` — this makes future
+- [ ] Add it to `complete` in `annotations/<crate>/manifest.toml` — this makes future
       gaps a hard CI failure
 
 ## Course units

@@ -308,7 +308,7 @@ that side's replacement text.
 
 ### Textual rewriting, not serialization
 
-The obvious implementation reads each `annotations/*.toml` with the `toml`
+The obvious implementation reads each `annotations/<crate>/*.toml` with the `toml`
 crate, edits the `lines` field, and writes it back. That reflows every
 multi-line `body` into an escaped single-line string, drops the column
 alignment, and loses the comments: a migration that moves three line ranges
@@ -528,12 +528,9 @@ D9 settled the prerequisite for a `serde_derive` track, and both shapes in
 [`derive-track-scope.md`](derive-track-scope.md) have now been chosen: the
 narrative one shipped as PLAN.md §11, and the reference one is PLAN.md §12.
 
-**One question is open, and §12's first phase is where it gets answered: D12 —
-does the project report one coverage number or two?** `Pin::primary()` refuses
-a second `coverage` source today, on the recorded grounds that two crates each
-promising 100% make "the" coverage table ambiguous with no reader-visible gain.
-The gain is now visible, but the ambiguity is real, so lifting the refusal has
-to come with an answer for what a percentage means once there are two of them.
+D12, the one question §12 opened, is answered below.
+
+**Still open: nothing.**
 
 ---
 
@@ -701,3 +698,98 @@ ranges mechanically and then hands back a list of steps whose prose describes
 code that changed — and, because the expander is built from that same tree, a
 transcript diff to read as well. The tool says so in the report's checklist;
 reading it is still the work.
+
+
+---
+
+## D12 — two coverage sources, and no number that spans them
+
+**Decided in R1.** `vendor/pin.toml` may carry more than one source with
+`role = "coverage"`, and every coverage figure in the project belongs to
+exactly one of them.
+
+### The refusal this overturns
+
+`Pin::primary()` returned the single coverage source and failed on a second,
+with its reason written into the code:
+
+> exactly one is allowed, because two crates each promising 100% would make
+> "the" coverage table ambiguous with no reader-visible gain.
+
+That was right when it was written and it is not an argument that gets waved
+away now. The gain became visible — the second reference track is a track a
+reader walks — but the ambiguity it names is real and does not go away by
+being outvoted. So the refusal is lifted and the ambiguity is removed instead:
+**there is no "the" coverage number any more, and nothing reports one.**
+
+### What that means concretely
+
+`Store` became a list of `SourceStore`s and `Report` a list of
+`SourceCoverage`s, and `percent()` moved off both parents onto the children.
+There is no `Store::percent`. There is no combined figure in `coverage.json`,
+in the gate's output, in the sidebar, on the front page, or in a badge. The
+front page says why, in the place a reader would go looking for the missing
+number:
+
+> There are two annotated crates and therefore two figures above; there is no
+> third figure combining them, because 21,012 lines is not a promise anyone
+> made.
+
+The two crates promise the same thing about different amounts of code. 12,037
+of 21,012 lines is not a fact about `serde_core`, which is finished, nor about
+`serde_derive`, which is not; it is a fact about an arithmetic operation.
+
+### Three states, not two
+
+Making a second crate an annotated source at 0% needed the gate to tell apart
+things it had never had to:
+
+| state | gate |
+|---|---|
+| named in `manifest.toml` | a hole is a **build failure** |
+| annotated, with a gap | a **warning** — somebody started and left a hole |
+| no annotation at all | **counted, not warned** — it is the roadmap |
+
+The third row is new. Before it, `cargo xtask coverage` printed 28 warnings on
+every run — one per file R2 through R5 will write — which is the reliable way
+to make people stop reading warnings.
+
+### What this did to the narrative track
+
+`serde_derive` stopped being a `narrative` source and became a `coverage` one,
+and the walk it was pinned for stopped being a track with citations of its own.
+It is now an ordering over the annotation store, which is what PLAN.md §3 said
+a track was.
+
+The conversion has a moving part. `check_narrative` requires a step standing on
+the coverage source to name the reference-track annotation containing it; nine
+of the 85 steps do. The other 76 stand on `serde_derive`, where no annotation
+exists yet. So the requirement moved from *per source* to **per file**: a step
+must name an annotation once the file it cites is declared complete in that
+source's manifest, and until then it is asked for nothing. R2 through R5 will
+convert the walk one file at a time, and the gate turns compulsory at exactly
+the moment there is something to point at. No flag day, and no window where the
+rule is suspended.
+
+### Layout, and why the stores split
+
+`annotations/` became `annotations/<crate>/`, each with its own
+`manifest.toml`; `course.toml` stayed at the top because the course track is
+one track over both crates. Two annotated crates share file names — both have a
+`src/lib.rs`, both have serialization and deserialization modules — so a flat
+directory would have had `lib.toml` meaning one of two things. The split also
+gives `cargo xtask bump` (D11) a directory per source, so a bump physically
+cannot open the other crate's store and silently retarget ranges that were read
+against a different tree. A test asserts it does not.
+
+Two smaller consequences fell out of the same ambiguity. Reading-order entries
+in `course.toml` are bare for the first source and `crate:path` for any other.
+And `cargo xtask bump <version>` with no `--source` now refuses rather than
+guessing, because "the pinned source" stopped naming one thing.
+
+### What is not affected
+
+URLs. The first source keeps the unqualified page names the site already
+serves — `file/src-ser-mod.rs.html` — and only the newer crate is prefixed.
+`badge.json` likewise stays `serde_core`'s, with the other sources' badges
+named after them.

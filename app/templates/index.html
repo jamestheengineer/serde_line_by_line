@@ -1,51 +1,60 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="hero">
-  <h1>Every line of <code>serde_core</code></h1>
+  <h1>Every line of <code>serde_core</code>, and now <code>serde_derive</code></h1>
   <p class="lede">
-    A guided walkthrough of the crate that holds Serde&rsquo;s trait definitions,
-    with explanations beside the source and runnable micro-examples.
+    A guided walkthrough of the crate that holds Serde&rsquo;s trait definitions
+    and the one that generates the code calling into it, with explanations
+    beside the source and runnable micro-examples.
   </p>
 
-  <div class="progress">
-    <div class="bar"><i style="width:{{ percent }}%"></i></div>
-    <div class="figures">
-      <span><b>{{ percent_label }}%</b> annotated</span>
-      <span>{{ claimed_lines }} / {{ total_lines }} lines</span>
-      <span>{{ annotations }} annotations</span>
+  {# One block per annotated crate, never a combined figure. The two crates
+     promise the same thing about different amounts of code, so a percentage
+     spanning both would describe neither (D12). #}
+  <div class="sources">
+  {% for s in sources %}
+    <div class="progress">
+      <div class="srchead"><code>{{ s.name }}</code> {{ s.version }}</div>
+      <div class="bar"><i style="width:{{ s.percent }}%"></i></div>
+      <div class="figures">
+        <span><b>{{ s.percent_label }}%</b> annotated</span>
+        <span>{{ s.claimed_lines }} / {{ s.total_lines }} lines</span>
+        <span>{{ s.annotations }} annotations</span>
+        <span>{{ s.complete_files }} / {{ s.files }} files complete</span>
+      </div>
     </div>
+  {% endfor %}
   </div>
 </section>
 
 <section class="tracknote">
   <h2>Three ways through</h2>
   <p>
-    The <b>reference track</b> below walks the source tree, file by file, and
-    claims every one of the {{ total_lines }} lines. The
+    The <b>reference track</b> below walks the source trees, file by file, and
+    claims every line of them. The
     <a href="{{ root }}course/index.html"><b>course track</b></a> is the same
     annotations in teaching order &mdash; {{ course_units }} units, from why a
     data model exists to the macros that generate a third of the crate. The
-    <a href="{{ root }}derive/index.html"><b>derive track</b></a> leaves this
-    crate and follows one struct and one enum through
-    <code>serde_derive</code> {{ derive.version }} &mdash;
-    {{ derive.units }} units, {{ derive.steps }} stops &mdash; ending with the
-    expansion <a href="{{ root }}expand/index.html">running in your browser</a>.
+    <a href="{{ root }}derive/index.html"><b>derive track</b></a> follows one
+    struct and one enum through <code>serde_derive</code>
+    {{ derive.version }} &mdash; {{ derive.units }} units, {{ derive.steps }}
+    stops &mdash; ending with the expansion
+    <a href="{{ root }}expand/index.html">running in your browser</a>.
   </p>
 
   <h2>What each of them claims</h2>
   <p>
-    Every line of every <i>annotated</i> crate is claimed. That is
-    <code>serde_core</code>, and the coverage gate fails the build over one
-    unclaimed line, one overlap, or one range left behind by a version bump.
+    Every line of every <i>annotated</i> crate is claimed, and the coverage
+    gate fails the build over one unclaimed line, one overlap, or one range
+    left behind by a version bump. There are two annotated crates and
+    therefore two figures above; there is no third figure combining them,
+    because 21,012 lines is not a promise anyone made.
   </p>
   <p>
-    <code>serde_derive</code> is <b>walked, not claimed</b>. Its
-    {{ derive.source_lines }} lines are the derive track's territory and no
-    file of it is ever declared complete; the walk cites
-    {{ derive.cited_lines }} of them where the story goes through them, and
-    {{ derive.crossings }} times it crosses back into an annotation the
-    reference track already wrote. A percentage over a walk would be a lie told
-    in a number.
+    A crate is claimed <i>file by file</i>. A file named as complete may never
+    develop a hole &mdash; that is a build failure &mdash; and a file nobody
+    has begun is reported at zero rather than quietly left out of the
+    denominator.
   </p>
   <p>
     Borrowed vocabulary is quoted, pinned, and named as borrowed. The
@@ -59,14 +68,22 @@
   </p>
 </section>
 
+{% for g in nav %}
 <section class="filelist">
-  <h2>Files</h2>
+  <h2>{{ g.name }}</h2>
+  <p class="filemeta">
+    {{ g.claimed_lines }} of {{ g.total_lines }} lines claimed &mdash;
+    {{ g.percent_label }}%.
+  </p>
   <table>
     <thead><tr><th>file</th><th class="n">lines</th><th class="n">annotated</th><th></th></tr></thead>
     <tbody>
-    {% for f in nav %}
-      <tr>
-        <td><a href="{{ root }}file/{{ f.href }}">{{ f.short }}</a></td>
+    {% for f in g.files %}
+      <tr{% if !f.annotated %} class="unwritten"{% endif %}>
+        <td>
+          {% if f.annotated %}<a href="{{ root }}file/{{ f.href }}">{{ f.short }}</a>
+          {% else %}{{ f.short }}{% endif %}
+        </td>
         <td class="n">{{ f.lines }}</td>
         <td class="n">{{ f.percent_label }}%</td>
         <td class="barcell"><div class="minibar"><i style="width:{{ f.percent }}%"></i></div></td>
@@ -75,4 +92,5 @@
     </tbody>
   </table>
 </section>
+{% endfor %}
 {% endblock %}

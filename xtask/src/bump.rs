@@ -93,8 +93,11 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
 pub fn run(repo: &Path, opts: &Options) -> Result<()> {
     let pin = vendor::load_pin(repo)?;
     // Any pinned source can move. Which one is named on the command line;
-    // omitting it means the coverage source, which is what "the pinned
-    // source" meant when this tool had only one to move.
+    // omitting it means the coverage source, which is what "the pinned source"
+    // meant when this tool had only one to move. There are two since D12, so
+    // the default only survives while it is unambiguous — guessing between two
+    // crates that both key line ranges is exactly the silent retarget the
+    // checksum gate exists to prevent.
     let target = match &opts.source {
         Some(name) => pin.get(name).with_context(|| {
             format!(
@@ -106,7 +109,22 @@ pub fn run(repo: &Path, opts: &Options) -> Result<()> {
                     .join(", ")
             )
         })?,
-        None => pin.primary()?,
+        None => {
+            let coverage = pin.coverage()?;
+            if coverage.len() > 1 {
+                bail!(
+                    "which source? {} are both annotated crates, and a bump rewrites one \
+                     store. Name it: `cargo xtask bump --source <name> {}`",
+                    coverage
+                        .iter()
+                        .map(|s| s.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" and "),
+                    opts.version,
+                );
+            }
+            coverage[0]
+        }
     }
     .clone();
     let name = target.name.clone();
@@ -268,7 +286,7 @@ fn collect_cites(repo: &Path, target: &Source) -> Result<Vec<StoreFile>> {
     let mut out = Vec::new();
     match target.role {
         Role::Coverage => {
-            for (path, parsed) in read_annotation_files(repo)? {
+            for (path, parsed) in read_annotation_files(repo, &target.name)? {
                 if parsed.source != id {
                     bail!(
                         "{}: names source {:?}, but the pin says {id:?}. Fix the store before \
@@ -297,7 +315,7 @@ fn collect_cites(repo: &Path, target: &Source) -> Result<Vec<StoreFile>> {
         }
         Role::Narrative => out.extend(narrative_cites(repo, &id)?),
         Role::Glossary => {
-            for path in store_paths(repo, "glossary")? {
+            for path in store_paths(&repo.join("glossary"))? {
                 let parsed = slbl_core::schema::GlossaryFile::load(&path)?;
                 if parsed.source != id {
                     continue;
@@ -329,7 +347,7 @@ fn collect_cites(repo: &Path, target: &Source) -> Result<Vec<StoreFile>> {
 /// effect, so the diff of a bump names only files the bump changed.
 fn narrative_cites(repo: &Path, id: &str) -> Result<Vec<StoreFile>> {
     let mut out = Vec::new();
-    for path in store_paths(repo, "narrative")? {
+    for path in store_paths(&repo.join("narrative"))? {
         let parsed = slbl_core::schema::NarrativeFile::load(&path)?;
         let cites: Vec<Cite> = parsed
             .steps
@@ -392,7 +410,9 @@ struct FileOutcome {
 
 /// The two registries keyed to the coverage source's file list.
 struct Registries {
-    reading_order: Vec<String>,
+    /// `None` when the course registry does not belong to the source being
+    /// bumped — there is one registry and two annotated crates (D12).
+    reading_order: Option<Vec<String>>,
     complete: Vec<String>,
     /// Files still declared complete that the migration leaves with holes.
     now_incomplete: Vec<String>,
@@ -580,7 +600,8 @@ impl Plan {
         // is reported rather than guessed at. Both registries describe the
         // reference track, so both belong to the coverage source alone.
         if target.role == Role::Coverage {
-            let manifest = slbl_core::schema::Manifest::load(&manifest_path(repo))?;
+            let manifest =
+                slbl_core::schema::Manifest::load(&slbl_core::manifest_path(repo, &target.name))?;
             let complete: Vec<String> = manifest
                 .complete
                 .into_iter()
@@ -596,15 +617,24 @@ impl Plan {
                     now_incomplete.push(f.clone());
                 }
             }
+            // The course registry is one file over both annotated crates, and
+            // it names the source whose files it lists bare. A bump of the
+            // *other* coverage source leaves it alone: its entries there are
+            // qualified (`serde_derive:src/ser.rs`) and none of them is keyed
+            // to the tree being moved by a bare path.
             let course = slbl_core::schema::CourseFile::load(&course_path(repo))?;
-            let mut reading_order: Vec<String> = course
-                .reading_order
-                .into_iter()
-                .filter(|f| new_set.contains(f.as_str()))
-                .collect();
-            for (rel, _) in &plan.added {
-                reading_order.push(rel.clone());
-            }
+            let reading_order = (course.source == target.source_id()).then(|| {
+                let mut order: Vec<String> = course
+                    .reading_order
+                    .iter()
+                    .filter(|f| f.contains(':') || new_set.contains(f.as_str()))
+                    .cloned()
+                    .collect();
+                for (rel, _) in &plan.added {
+                    order.push(rel.clone());
+                }
+                order
+            });
             plan.registries = Some(Registries {
                 reading_order,
                 complete,
@@ -750,17 +780,19 @@ impl Plan {
 
         // 2. The registries, which only the coverage source has.
         if let Some(r) = &self.registries {
-            let manifest = manifest_path(repo);
+            let manifest = slbl_core::manifest_path(repo, &self.name);
             let text = std::fs::read_to_string(&manifest)?;
             let text = store_edit::set_scalar(&text, "source", &new_source)?;
             let text = store_edit::set_string_array(&text, "complete", &r.complete)?;
             std::fs::write(&manifest, text)?;
 
-            let course = course_path(repo);
-            let text = std::fs::read_to_string(&course)?;
-            let text = store_edit::set_scalar(&text, "source", &new_source)?;
-            let text = store_edit::set_string_array(&text, "reading_order", &r.reading_order)?;
-            std::fs::write(&course, text)?;
+            if let Some(reading_order) = &r.reading_order {
+                let course = course_path(repo);
+                let text = std::fs::read_to_string(&course)?;
+                let text = store_edit::set_scalar(&text, "source", &new_source)?;
+                let text = store_edit::set_string_array(&text, "reading_order", reading_order)?;
+                std::fs::write(&course, text)?;
+            }
         }
 
         // 3. The vendored tree. Moved into place only now, so an earlier
@@ -1127,21 +1159,16 @@ fn sha256_file(path: &Path) -> Result<String> {
 // Odds and ends
 // ---------------------------------------------------------------------------
 
-fn manifest_path(repo: &Path) -> PathBuf {
-    repo.join("annotations").join("manifest.toml")
-}
-
 fn course_path(repo: &Path) -> PathBuf {
     repo.join("annotations").join("course.toml")
 }
 
 /// Every `.toml` in one store directory, in a stable order.
-fn store_paths(repo: &Path, dir: &str) -> Result<Vec<PathBuf>> {
-    let dir = repo.join(dir);
+fn store_paths(dir: &Path) -> Result<Vec<PathBuf>> {
     if !dir.is_dir() {
         return Ok(Vec::new());
     }
-    let mut entries: Vec<PathBuf> = std::fs::read_dir(&dir)?
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)?
         .collect::<std::io::Result<Vec<_>>>()?
         .into_iter()
         .map(|e| e.path())
@@ -1151,16 +1178,18 @@ fn store_paths(repo: &Path, dir: &str) -> Result<Vec<PathBuf>> {
     Ok(entries)
 }
 
-/// Every annotation file, paired with its path, in a stable order.
-fn read_annotation_files(repo: &Path) -> Result<Vec<(PathBuf, AnnotationFile)>> {
+/// One annotated source's annotation files, paired with their paths, in a
+/// stable order.
+///
+/// Scoped to `annotations/<crate>/` since D12. A bump rewrites exactly one
+/// store, and reading the other crate's files here is how it would silently
+/// retarget ranges that were never read against the tree being moved.
+fn read_annotation_files(repo: &Path, name: &str) -> Result<Vec<(PathBuf, AnnotationFile)>> {
     let mut out = Vec::new();
-    for path in store_paths(repo, "annotations")? {
-        // The manifest and the course registry live in the same directory but
-        // are not annotation files.
-        if path
-            .file_name()
-            .is_some_and(|n| n == "manifest.toml" || n == "course.toml")
-        {
+    for path in store_paths(&slbl_core::store_dir(repo, name))? {
+        // The manifest lives in the same directory but is not an annotation
+        // file.
+        if path.file_name().is_some_and(|n| n == "manifest.toml") {
             continue;
         }
         let text = std::fs::read_to_string(&path)?;
@@ -1399,22 +1428,38 @@ mod tests {
     /// leave the other one's steps alone — before this was role-aware, a
     /// `serde_core` bump rewrote `annotations/` and silently left the
     /// narrative's crossings pointing into the old tree.
+    ///
+    /// Since D12 there are two coverage sources, and the annotation store each
+    /// one owns is its own directory: a `serde_core` bump must not open a file
+    /// under `annotations/serde_derive/`, whose ranges were read against a
+    /// different tree.
     #[test]
     fn which_stores_a_bump_rewrites_follows_from_the_role() {
         let coverage = stores("serde_core");
         assert_eq!(
             dirs(&coverage),
-            ["annotations", "narrative"]
+            ["serde_core", "narrative"]
                 .map(String::from)
                 .into_iter()
                 .collect()
         );
 
-        let narrative = stores("serde_derive");
-        assert_eq!(
-            dirs(&narrative),
-            ["narrative"].map(String::from).into_iter().collect()
+        // The derive store is empty until R2 fills it, so what this proves
+        // today is the isolation rather than the contents: neither coverage
+        // bump reaches into the other's directory.
+        let derive = stores("serde_derive");
+        assert!(
+            dirs(&derive).is_subset(
+                &["serde_derive", "narrative"]
+                    .map(String::from)
+                    .into_iter()
+                    .collect()
+            ),
+            "{:?}",
+            dirs(&derive)
         );
+        assert!(!dirs(&derive).contains("serde_core"));
+        assert!(dirs(&derive).contains("narrative"));
 
         let glossary = stores("syn");
         assert_eq!(

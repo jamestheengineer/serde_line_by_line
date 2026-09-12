@@ -14,7 +14,7 @@
 //! That distinction is the whole of D9: a crate can be quoted without being
 //! claimed, so long as the pin says which one it is.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -79,24 +79,26 @@ pub struct Pin {
 }
 
 impl Pin {
-    /// The one `coverage` source. Everything written before PLAN.md §11
-    /// assumes a single pinned crate, and for those callers this is it —
-    /// exactly one is allowed, because two crates each promising 100% would
-    /// make "the" coverage table ambiguous with no reader-visible gain.
-    pub fn primary(&self) -> Result<&Source> {
-        let mut it = self.sources.iter().filter(|s| s.role == Role::Coverage);
-        let first = it
-            .next()
-            .context("vendor/pin.toml has no source with role = \"coverage\"")?;
-        if let Some(second) = it.next() {
-            bail!(
-                "vendor/pin.toml has two coverage sources ({} and {}); \
-                 exactly one is supported",
-                first.name,
-                second.name
-            );
-        }
-        Ok(first)
+    /// Every `coverage` source, in pin order.
+    ///
+    /// This used to be `primary()`, which returned the one coverage source and
+    /// refused a second on the grounds that two crates each promising 100%
+    /// would make "the" coverage table ambiguous with no reader-visible gain.
+    /// The gain is now the second reference track (PLAN.md §12) and the
+    /// ambiguity is answered rather than argued away: there is no "the"
+    /// coverage number any more, so nothing reports one. Every percentage in
+    /// the gate, in `coverage.json` and on the site is per source, and the
+    /// front page states one figure per row of this list (D12).
+    ///
+    /// Order is pin order, which is reading order: `serde_core` is pinned
+    /// first because `serde_derive` generates calls into it.
+    pub fn coverage(&self) -> Result<Vec<&Source>> {
+        let out: Vec<&Source> = self.by_role(Role::Coverage).collect();
+        ensure!(
+            !out.is_empty(),
+            "vendor/pin.toml has no source with role = \"coverage\""
+        );
+        Ok(out)
     }
 
     pub fn get(&self, name: &str) -> Result<&Source> {
@@ -122,15 +124,6 @@ pub fn source_files_in(root: &Path) -> Result<Vec<String>> {
     collect(&src, root, &mut out)?;
     out.sort();
     Ok(out)
-}
-
-pub fn source_files(repo: &Path) -> Result<Vec<String>> {
-    source_files_in(&vendor_root(repo)?)
-}
-
-/// The primary (coverage) source's directory.
-pub fn vendor_root(repo: &Path) -> Result<PathBuf> {
-    Ok(load_pin(repo)?.primary()?.dir(repo))
 }
 
 pub fn pin_path(repo: &Path) -> PathBuf {
@@ -171,14 +164,6 @@ pub fn tree_hash_of(root: &Path) -> Result<String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-pub fn tree_hash(repo: &Path) -> Result<String> {
-    tree_hash_of(&vendor_root(repo)?)
-}
-
-pub fn line_count(repo: &Path, rel: &str) -> Result<u32> {
-    line_count_in(&vendor_root(repo)?, rel)
-}
-
 /// Lines in one file of a given crate root.
 pub fn line_count_in(root: &Path, rel: &str) -> Result<u32> {
     let path = root.join(rel);
@@ -207,7 +192,10 @@ pub fn render_pin(pin: &Pin) -> String {
          #   coverage  — every line must be claimed once manifest.toml calls a file\n\
          #               complete. The reference track's promise.\n\
          #   narrative — annotated where the story goes, never asked to be exhaustive\n\
-         #               (PLAN.md §11).\n\
+         #               (PLAN.md §11). No source carries it now: serde_derive held it\n\
+         #               through N1-N5 and became a coverage source in R1 (D12), and the\n\
+         #               walk it was pinned for became an ordering over the annotations\n\
+         #               rather than a track with citations of its own.\n\
          #   glossary  — never annotated at all; quoted verbatim by glossary entries\n\
          #               (D9). The pin is what keeps a quotation honest.\n",
     );
@@ -284,9 +272,10 @@ src_tree_sha256 = "dd"
 "#;
 
     #[test]
-    fn the_coverage_source_is_the_primary_one() {
+    fn roles_partition_the_sources() {
         let pin: Pin = toml::from_str(PIN).unwrap();
-        assert_eq!(pin.primary().unwrap().name, "serde_core");
+        assert_eq!(pin.coverage().unwrap().len(), 1);
+        assert_eq!(pin.coverage().unwrap()[0].name, "serde_core");
         assert_eq!(pin.get("syn").unwrap().role, Role::Glossary);
         assert_eq!(pin.by_role(Role::Glossary).count(), 1);
     }
@@ -294,17 +283,33 @@ src_tree_sha256 = "dd"
     #[test]
     fn source_ids_are_the_vendor_directory_names() {
         let pin: Pin = toml::from_str(PIN).unwrap();
-        assert_eq!(pin.primary().unwrap().source_id(), "serde_core-1.0.229");
+        assert_eq!(pin.coverage().unwrap()[0].source_id(), "serde_core-1.0.229");
         // Hyphenated crate names survive: the id is name-version, not a slug.
         assert_eq!(source_id("proc-macro2", "1.0.107"), "proc-macro2-1.0.107");
     }
 
+    /// D12. Two coverage sources used to be a hard error; the derive reference
+    /// track is the second one, and pin order is the order they are reported
+    /// in.
     #[test]
-    fn two_coverage_sources_are_refused() {
+    fn two_coverage_sources_are_allowed_and_ordered() {
         let doubled = PIN.replace("role = \"glossary\"", "role = \"coverage\"");
         let pin: Pin = toml::from_str(&doubled).unwrap();
-        let err = pin.primary().unwrap_err().to_string();
-        assert!(err.contains("two coverage sources"), "{err}");
+        let names: Vec<&str> = pin
+            .coverage()
+            .unwrap()
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
+        assert_eq!(names, ["serde_core", "syn"]);
+    }
+
+    #[test]
+    fn no_coverage_source_at_all_is_still_an_error() {
+        let none = PIN.replace("role = \"coverage\"", "role = \"glossary\"");
+        let pin: Pin = toml::from_str(&none).unwrap();
+        let err = pin.coverage().unwrap_err().to_string();
+        assert!(err.contains("no source with role"), "{err}");
     }
 
     /// A role the gates do not know is a parse failure, not a source that
