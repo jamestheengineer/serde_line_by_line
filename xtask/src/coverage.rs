@@ -4,6 +4,7 @@
 //! slogan. It proves that every line of every pinned source file is claimed by
 //! exactly one annotation, and that every cross-reference resolves.
 
+use crate::bump;
 use crate::harness;
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
@@ -1231,6 +1232,24 @@ fn check_vendor_dirs(repo: &Path, diag: &mut Diagnostics) -> Result<()> {
                  or remove it"
             ));
         }
+    }
+
+    // NOTICE.md is generated from the pin, so it can drift from it: R1 changed
+    // serde_derive's role to `coverage` (D12) and the attribution file went on
+    // calling it `narrative` for seven commits, because nothing re-ran
+    // `cargo xtask pin` and nothing asked. An attribution file that describes
+    // the wrong thing is the one generated artifact in this repo that is worth
+    // more than a rebuild, so it is checked rather than regenerated here.
+    let notice_path = repo.join("vendor").join("NOTICE.md");
+    let want = bump::notice(repo, &pin)?;
+    match std::fs::read_to_string(&notice_path) {
+        Ok(have) if have == want => {}
+        Ok(_) => diag.error(
+            "vendor/NOTICE.md no longer matches vendor/pin.toml — regenerate it with \
+             `cargo xtask pin`"
+                .to_string(),
+        ),
+        Err(e) => diag.error(format!("vendor/NOTICE.md: {e}")),
     }
     Ok(())
 }

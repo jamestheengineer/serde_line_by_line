@@ -326,9 +326,10 @@ counts above are `serde_core`'s alone; the project's are 21,012 lines of two
 annotated crates claimed by 871 annotations, 21 course units, and the same
 9-unit walk.
 
-Two more gates went in during phase 8. Listed beside the coverage gate from
-phase 0, they are what makes the promises in this document checkable rather
-than stated:
+Two more gates went in during phase 8, and the last one arrived after §12,
+when a generated file was caught having drifted from the pin it is generated
+from. Listed beside the coverage gate from phase 0, they are what makes the
+promises in this document checkable rather than stated:
 
 | gate | what it makes impossible |
 |---|---|
@@ -337,6 +338,7 @@ than stated:
 | the wasm output check | an example that prints one thing in CI and another on the site |
 | the example version pin check | an example running a different `serde_core` release than the annotations describe |
 | `cargo xtask bump` | a source version moving without every line range moving with it |
+| the `NOTICE.md` freshness check | a vendored crate attributed with a role, licence or copyright the pin no longer gives it |
 
 Phase 1 is deliberately a full vertical slice: it forces the schema, the renderer,
 the WASM pipeline, and the writing voice to all be proven against real content
