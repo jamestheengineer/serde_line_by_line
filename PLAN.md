@@ -407,12 +407,33 @@ measurements behind each:
    six unit introductions were rewritten to match, and the check is now a hard
    failure so the count cannot climb back off zero.
 
-**Still open:** one, and §12 opens it — **D12, whether the project reports
-one coverage number or two.** `Pin::primary()` currently refuses a second
-`coverage` source on the grounds that two crates each promising 100% make
-"the" coverage table ambiguous. The reference derive track needs that refusal
-lifted, and lifting it is R1's real work: the objection has to be answered in
-the reporting, not argued away.
+**Resolved in §11 and §12:**
+
+9. **D9 — borrowed vocabulary is quoted and pinned, not annotated.** `syn`,
+   `quote` and `proc-macro2` are pinned sources with `role = "glossary"`. 62
+   entries quote 1,123 of their lines, and a quotation that drifts from its
+   pinned tree fails the gate — but no line of them is ever *claimed*, so the
+   "every line" promise stays a promise about the crates that made it.
+10. **D10 — a claim about generated code is checked against a real expansion.**
+    An `emits` field holds a locator, not a transcript. `cargo site` finds it in
+    an expansion produced at build time and renders that expansion's bytes, so
+    the page does not build if `serde_derive` stops emitting it. Both tracks
+    read one expansion cache and cannot disagree about what the crate emits.
+11. **D11 — a bump is role-driven, and the harness is pinned like the trees.**
+    `cargo xtask bump --source <name>` migrates any pinned source, and the role
+    decides which store it rewrites. With no `--source` it refuses rather than
+    guessing, because "the pinned source" stopped naming one thing.
+12. **D12 — two coverage sources, and no number that spans them.** The refusal
+    in `Pin::primary()` is lifted, and the ambiguity it named is removed rather
+    than outvoted: every coverage figure belongs to exactly one source,
+    `percent()` moved off the parents onto the children, and there is no
+    combined figure in `coverage.json`, in the gate's output, in the sidebar, on
+    the front page, or in a badge. The front page says why, in the place a
+    reader would go looking for the missing number.
+
+**Still open: nothing.** §9's eight phases, §11's five and §12's seven have all
+shipped; the gates listed in §9 are what keep their promises checkable rather
+than stated.
 
 > As of 2026-09-10, `serde_core` 1.0.229 is still the newest published
 > release, so there is nothing to bump *to*. The migration path is built and
