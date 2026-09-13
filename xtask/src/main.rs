@@ -5,7 +5,8 @@
 //!   cargo xtask bump [--source NAME] <version>
 //!                                   migrate the stores to a new release of a pinned source
 //!   cargo xtask pin                 rehash every vendored tree into pin.toml + NOTICE.md
-//!   cargo xtask stats               structural inventory of the pinned source
+//!   cargo xtask stats [--dir PATH]  structural inventory of the pinned source,
+//!                                   or of an unpinned candidate tree
 //!   cargo xtask wasm                build the example playground for the browser
 
 mod bump;
@@ -32,7 +33,7 @@ fn main() -> Result<()> {
         "bump" => bump::run(&repo, &bump::parse_args(&args[1..])?)?,
         "pin" => pin(&repo)?,
         "wasm" => wasm::run(&repo)?,
-        "stats" => stats::run(&repo)?,
+        "stats" => stats::run(&repo, stats_dir(&args[1..])?.as_deref())?,
         "-h" | "--help" | "help" => print_help(),
         other => {
             print_help();
@@ -56,8 +57,29 @@ fn print_help() {
          \x20   --keep-old                 leave the previous vendor/ tree in place\n\
          cargo xtask pin                 rehash vendor/pin.toml and NOTICE.md\n\
          cargo xtask stats               structural inventory of the pinned source\n\
+         \x20   --dir PATH                 measure an unpinned tree instead (any\n\
+         \x20                              directory with a src/)\n\
          cargo xtask wasm                build the example playground for the browser"
     );
+}
+
+/// `--dir PATH` for `stats`, which is the one command that can run outside the
+/// pin: a candidate crate is measured before anyone decides to vendor it.
+fn stats_dir(args: &[String]) -> Result<Option<PathBuf>> {
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        if arg == "--dir" {
+            let path = it
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("--dir takes a path"))?;
+            let path = PathBuf::from(path);
+            if !path.join("src").is_dir() {
+                bail!("{} has no src/ directory", path.display());
+            }
+            return Ok(Some(path));
+        }
+    }
+    Ok(None)
 }
 
 /// The workspace root, from CARGO_MANIFEST_DIR (xtask/) upward.
@@ -99,4 +121,40 @@ fn pin(repo: &Path) -> Result<()> {
     std::fs::write(&notice_path, bump::notice(repo, &existing)?)?;
     println!("wrote {}", notice_path.display());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn stats_without_dir_measures_the_pin() {
+        assert!(stats_dir(&args(&[])).unwrap().is_none());
+    }
+
+    #[test]
+    fn stats_dir_takes_any_tree_with_a_src() {
+        let core = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../core");
+        let got = stats_dir(&args(&["--dir", core.to_str().unwrap()])).unwrap();
+        assert_eq!(got, Some(core));
+    }
+
+    /// A typo'd path measured as if it were empty would report a crate with no
+    /// files and no error, which is the one outcome a scoping measurement must
+    /// not produce.
+    #[test]
+    fn stats_dir_rejects_a_tree_with_no_src() {
+        let docs = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../docs");
+        let err = stats_dir(&args(&["--dir", docs.to_str().unwrap()])).unwrap_err();
+        assert!(err.to_string().contains("no src/"), "{err}");
+    }
+
+    #[test]
+    fn stats_dir_needs_a_path() {
+        assert!(stats_dir(&args(&["--dir"])).is_err());
+    }
 }

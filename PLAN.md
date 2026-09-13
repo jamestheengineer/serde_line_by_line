@@ -435,6 +435,21 @@ measurements behind each:
 shipped; the gates listed in §9 are what keep their promises checkable rather
 than stated.
 
+**Measured but not decided:** a third annotated crate. With the plan complete,
+the next thing is a choice rather than a step, and the strongest candidate is
+the format the first two only describe —
+[`docs/json-track-scope.md`](docs/json-track-scope.md) is the measurement, taken
+the way the derive one was and before anybody argues for it. About 700
+annotations over 18,329 lines, eight course units, ~8 phases, and no
+prerequisite left to spike: `serde_json` is a library that compiles to wasm
+untouched (10 KB gzipped, measured), the vocabulary it borrows is 16 items
+because the rest of it is `serde_core`, which is already claimed, and it
+implements `Deserializer` 13 times and `Serializer` 8 times against contracts
+the reader has already read. What it carries instead of the derive track's
+`syn` wall is one decision — `src/lexical/`, 3,708 lines of somebody else's
+float parser living inside the crate that would be claimed, behind a
+non-default feature, and one ULP away from mattering (scope §3).
+
 > As of 2026-09-10, `serde_core` 1.0.229 is still the newest published
 > release, so there is nothing to bump *to*. The migration path is built and
 > exercised — `1.0.229 → 1.0.228` and back returns the tree byte for byte, and

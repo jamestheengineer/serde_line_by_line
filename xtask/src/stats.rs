@@ -51,7 +51,17 @@ impl FileStats {
     }
 }
 
-pub fn run(repo: &Path) -> Result<()> {
+/// Measures every pinned coverage source, or one arbitrary tree with `--dir`.
+///
+/// `--dir` exists so a crate can be measured *before* it is pinned: the effort
+/// model for a candidate track is the first thing worth knowing about it, and
+/// asking for a vendored tree first would mean committing to the candidate in
+/// order to find out what it costs. It takes any directory with a `src/`.
+pub fn run(repo: &Path, dir: Option<&Path>) -> Result<()> {
+    if let Some(dir) = dir {
+        println!("\n== {} ==", dir.display());
+        return run_source(dir);
+    }
     for source in vendor::load_pin(repo)?.coverage()? {
         println!("\n== {} ==", source.source_id());
         run_source(&source.dir(repo))?;
