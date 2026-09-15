@@ -452,8 +452,11 @@ the reader has already read. What it carries instead of the derive track's
 float parser living inside the crate that would be claimed, behind a
 non-default feature, and one ULP away from mattering (scope §3).
 
-> As of 2026-09-10, `serde_core` 1.0.229 is still the newest published
-> release, so there is nothing to bump *to*. The migration path is built and
+> As of 2026-09-15, `serde_core` 1.0.229 is still the newest published
+> release, so there is nothing to bump *to*. So is `serde_derive` 1.0.229, and
+> so is the `serde_json` 1.0.151 the scope doc measured — its one unverified
+> risk, release cadence, is now checked against crates.io rather than against
+> this machine's registry cache (scope §9). The migration path is built and
 > exercised — `1.0.229 → 1.0.228` and back returns the tree byte for byte, and
 > `1.0.220 → 1.0.229` is verified as a dry run because it is the hard shape: a
 > file added, a file removed, eleven annotations whose contents moved.

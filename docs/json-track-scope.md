@@ -269,12 +269,24 @@ throughput.
 
 Two risks worth writing down before anyone says yes:
 
-**Release cadence.** Three `serde_json` releases sit in this machine's registry
-cache against one `serde_core`. If that reflects the real cadence, a third
-claimed crate means a ~700-range remap several times a year, where the first two
-have needed none. `cargo xtask bump` makes that a command rather than a chore,
-but it is a standing cost the first two crates have not charged. **Unverified —
-this machine has no network; check crates.io before deciding.**
+**Release cadence — checked, and the registry cache was the wrong sample.**
+Against crates.io on 2026-09-15, since 2025-01-01: `serde_json` published 17
+versions and `serde_core` 10. The counts are close and they mislead, because
+nine of `serde_core`'s ten landed in the single fortnight of the crate's split
+from `serde`. The number that costs something is **distinct months with a
+release**, which is how many times a bump would actually be run: `serde_json`
+**10 months of 20**, `serde_core` **2**. A third claimed crate is therefore a
+~700-range remap roughly **six times a year**, against what the first two crates
+have charged so far, which is nothing at all: `1.0.229` is still the newest of
+both.
+
+`serde_json 1.0.151` is likewise still the newest, so §2's measurement is
+against current head and the track would not start behind. `cargo xtask bump`
+makes each remap a command rather than a chore ([D7](decisions.md),
+[D11](decisions.md)), and `1.0.135 → 1.0.151` shows what it would be absorbing:
+16 releases in 18 months, none of them a major. This is a real standing cost and
+it is the *only* one on this candidate that the first two crates have not already
+paid.
 
 **The promise gets a third figure, not a bigger one.** D12 settled that already,
 and it settles the same way here: three crates, three percentages, no total.
