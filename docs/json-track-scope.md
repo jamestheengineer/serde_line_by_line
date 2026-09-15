@@ -255,6 +255,18 @@ neither of the existing tracks does.
 
 ## 9. Recommendation
 
+**Decided, 2026-09-15: §8, the narrative track.** This section's recommendation
+was not overruled on its merits — §6 is the better answer to "what does this
+project do next with `serde_json`" and stays available. It was declined on
+appetite, and on the one thing §8 has that §6 does not: it is the only option
+that walks all three crates in a single reading, which neither reference track
+can do by construction and the course track does not attempt. It is PLAN.md
+§13. §3 does not arise on that path — a narrative source is never asked to be
+exhaustive — and PLAN.md §10 records the answer anyway, which is this
+document's: claim it.
+
+The rest of this section stands as the argument for the other shape.
+
 **Reference track, and settle §3 before starting it.**
 
 Unlike the derive track, there is no prerequisite left to spike. The vocabulary

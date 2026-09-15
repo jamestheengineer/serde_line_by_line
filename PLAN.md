@@ -433,11 +433,18 @@ measurements behind each:
     the front page, or in a badge. The front page says why, in the place a
     reader would go looking for the missing number.
 
-**Still open: nothing.** §9's eight phases, §11's five and §12's seven have all
-shipped; the gates listed in §9 are what keep their promises checkable rather
-than stated.
+**Still open: D13**, and it is §13's to settle — how a walk through a crate
+that *runs* proves what it claims the crate produces, where the derive walk had
+an expansion to check against. §9's eight phases, §11's five and §12's seven
+have all shipped; the gates listed in §9 are what keep their promises checkable
+rather than stated.
 
-**Measured but not decided:** a third annotated crate. With the plan complete,
+**Measured, and decided — the smaller way.** `serde_json` is the next crate and
+it is **walked, not claimed**: §8 of the scope doc rather than §6, which is
+§13. What follows is the measurement as it stood when the choice was made, and
+the reasoning for taking the smaller shape is in §13.
+
+A third annotated crate. With the plan complete,
 the next thing is a choice rather than a step, and the strongest candidate is
 the format the first two only describe —
 [`docs/json-track-scope.md`](docs/json-track-scope.md) is the measurement, taken
@@ -451,6 +458,16 @@ the reader has already read. What it carries instead of the derive track's
 `syn` wall is one decision — `src/lexical/`, 3,708 lines of somebody else's
 float parser living inside the crate that would be claimed, behind a
 non-default feature, and one ULP away from mattering (scope §3).
+
+> That decision is settled in advance rather than left to be re-argued: if the
+> reference track is ever taken, `lexical/` is **claimed**, the scope doc's own
+> recommendation. "Every line" is the load-bearing claim of this project and
+> the only reason the coverage gate exists; a qualifier about feature sets
+> would have to be stated on the front page next to a percentage, and the first
+> reader to ask "which features?" gets a worse answer than the first reader to
+> ask "why is there a chapter about floats?". §13 does not reach the question —
+> a narrative source is never asked to be exhaustive, so those 3,708 lines are
+> vendored, unclaimed, and not qualified about.
 
 > As of 2026-09-15, `serde_core` 1.0.229 is still the newest published
 > release, so there is nothing to bump *to*. So is `serde_derive` 1.0.229, and
@@ -876,3 +893,127 @@ in the repo and two more were hiding in it, which is close enough to say the
 estimate held. About 60% of what is left is prose, and §5 of the scope doc is
 right that the course units are the long pole — 468 annotations landed across
 four working days, while 14 course units took six.
+
+---
+
+## 13. The narrative json track
+
+[`docs/json-track-scope.md`](docs/json-track-scope.md) measured two shapes, the
+way the derive scope doc did, and recommended the larger one: every line of
+`serde_json` claimed, a third 100% defended by the same gate. **This is the
+smaller one** — §8 of that document, the shape §11 took and delivered.
+
+The recommendation is not being overruled on its merits; it is being declined on
+appetite, and one thing the smaller shape has that the larger one does not. A
+narrative track is *the only option that connects all three crates in a single
+walk.* The reference tracks are per crate by construction, and the course track
+orders annotations rather than following a value through a program. Nothing in
+this repo yet takes one document from bytes to a struct and back, across the
+parser, the data model, and the macro-generated impl the reader has already
+watched being emitted.
+
+### What it is
+
+Eight to ten units following **one document** — `{"a":[1,true],"b":"x"}` — from
+bytes through `read.rs` into `Value`, back out through `ser.rs`, and separately
+straight into a struct through the `Deserialize` impl §11's walk generated.
+
+`serde_json` pins with `role = "narrative"`: annotated where the story goes,
+never asked to be exhaustive. That role already exists and the gates already
+know it — `serde_derive` held it through N1–N5 and gave it up in R1 — so the
+pin comment describing it stops being a description of something the repo used
+to do.
+
+Two consequences follow from the role and are worth stating before the work, not
+after:
+
+**There is no third percentage, and no fourth promise.** The front page gains a
+sentence, not a figure. §12's form holds: one sentence per role in
+`vendor/pin.toml`, read off the pin, and `coverage` still has exactly two rows.
+
+**§3 of the scope doc does not arise.** `src/lexical/` is 3,708 lines of
+somebody else's float parser inside the crate, and it is a hard question only
+for a track that promises to claim every line. A narrative source promises
+nothing about lines it does not walk, so `lexical/` is vendored, unclaimed, and
+not qualified about. (§10 records what the answer would be if the reference
+track is ever taken: claim it.)
+
+### The three deltas N1–N5 did not have to face
+
+The scope doc's §4 costed the *reference* track's deltas and found them nearly
+all discharged. The narrative shape has a different set, and two of them are
+invisible from the scope doc because the derive walk never had a sibling.
+
+**1. The narrative store is single-track, and says so in three places.**
+`core::load`'s counterpart `read_narrative` reads a flat `narrative/`, filename
+order *is* reading order, and the gate numbers steps across units "because the
+walk is one sequence" — so a second walk collides step ids with the first, sorts
+into the middle of it, and makes the forward-reference check compare positions
+in two unrelated stories. This is R1's shape exactly, one level down:
+`annotations/` became `annotations/<crate>/` so a bump could not open the other
+store, and `narrative/` becomes `narrative/<track>/` so one walk cannot order
+itself against another. R1 is the precedent and the work is smaller.
+
+**2. `emits` is derive-shaped, and the json walk's output is run, not expanded.**
+D10 made a claim about generated code checkable: the store holds a locator,
+`cargo site` finds it in a real expansion, and the page does not build if
+`serde_derive` stops emitting it. Every field carrying that mechanism assumes an
+expansion — `expand_case` names a file in `expand/cases/`, `emits_from` names
+which half of a derive. A walk through `serde_json` claims a different kind of
+thing: not *this code is emitted* but **this input produces this output**. The
+principle transfers exactly and the mechanism does not.
+
+That is **D13**, and it is a decision to argue in the open the way D12 was. The
+shape that keeps D10's guarantee is that a step names an input and the claim is
+checked against `serde_json` actually producing the output at build time, from
+the same pinned version the site's wasm ships — so a step cannot say what the
+crate does not do, and the page does not build if it stops doing it. What has to
+be argued is where that lands relative to the example harness, which already
+compiles and runs real crates and diffs against `expected.txt` (§6): the walk
+may not need a second mechanism so much as a way to cite the one that exists.
+
+**3. The crossing ratchet is fully on from the first step.** R1 made the rule
+per file so the derive walk could convert one file at a time, with the gate
+turning compulsory exactly when there was something to point at. Both annotated
+crates are now at 100% with all 47 files complete, so every crossing this walk
+makes into `serde_core` or `serde_derive` names a containing annotation *on the
+day it is written*. No conversion, no flag day — and a stronger claim than the
+derive walk ever got to make, because the walk that connects three crates is
+checked at every seam between them.
+
+One smaller thing, and it is the door the scope doc found open. The example pin
+check reads `pin.coverage()?[0]` with its reason in a comment: *"the examples
+build against the first coverage source: they are `serde_core` programs"*. A
+`serde_json` example is a `serde_json` program, and under a narrative role it is
+not a coverage source at all, so today the check would not look at its version
+in either shape. Same refusal, correct when written, wrong for a third crate.
+
+### Roadmap
+
+| phase | scope | exit criteria |
+|---|---|---|
+| **J1 — A second walk** | Pin `serde_json` 1.0.151 as `narrative`; `narrative/` becomes `narrative/<track>/`; step ids, unit ordering and the forward-reference check become per track; `NOTICE.md` gains the tree's second copyright holder; glossary sources pinned only for what the walk actually quotes (scope §5 lists four candidates; it may be none) | `cargo xtask coverage` reports the derive walk unchanged — 9 units, 85 steps, crossings 8, 9, 10, 7, 9, 10, 9, 12, 11 — beside an empty json walk, without error; a step id repeated across tracks is fine and a forward reference inside one still fails the build |
+| **J2 — D13: output that is run** | The json walk's analogue of D10, argued and built: a claim about what the crate produces, checked against the crate producing it | A step's claimed output is byte-identical to what the pinned `serde_json` produces on the host and in the browser; editing the expected text fails the build rather than the page |
+| **J3 — The walk** | 8–10 units, one document, bytes → `read.rs` → `Value` → `ser.rs`, and separately into a struct through §11's generated impl | Walkable start to finish; every cited range resolves; every crossing into either annotated crate names the annotation it lands in; no forward references |
+| **J4 — Ship** | Four tracks in the header, the restated promise, `README` | Each track reachable and each honest about what it claims; the front page says what `serde_json` is in the one-sentence-per-role form, with no third percentage |
+
+### Cost
+
+Calibrated against N1–N5, which is the same shape at the same size: nine units
+and 85 steps, built on machinery that already existed.
+
+| item | sessions |
+|---|---:|
+| pin, per-track narrative store, notice, nav (J1) | 1 |
+| D13 and its gate (J2) | 0.5–1 |
+| 8–10 units (J3) | 4–6 |
+| ship (J4) | 0.5 |
+| **total** | **6–8.5** |
+
+Against the reference track's 16–22. The difference is almost entirely the ~700
+annotations and the eight course units, which is the trade being made: no third
+crate at 100%, no ~700-range remap six times a year (scope §9), and no chapter
+about floats — in exchange for the walk this repo does not have.
+
+If it lands well, §6 of the scope doc is still available and nothing here is in
+its way. That was true of §11 too, and §12 is what happened next.
