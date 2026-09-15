@@ -6,9 +6,10 @@
 #   coverage  — every line must be claimed once manifest.toml calls a file
 #               complete. The reference track's promise.
 #   narrative — annotated where the story goes, never asked to be exhaustive
-#               (PLAN.md §11). No source carries it now: serde_derive held it
-#               through N1-N5 and became a coverage source in R1 (D12), and the
-#               walk it was pinned for became an ordering over the annotations
+#               (PLAN.md §13). No coverage promise and no percentage: a walk
+#               reports the lines it cites, not a fraction of a crate.
+#               serde_derive held this role through N1-N5 and gave it up in
+#               R1 (D12), when the walk became an ordering over annotations
 #               rather than a track with citations of its own.
 #   glossary  — never annotated at all; quoted verbatim by glossary entries
 #               (D9). The pin is what keeps a quotation honest.
@@ -26,6 +27,13 @@ version = "1.0.229"
 role = "coverage"
 crate_sha256 = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
 src_tree_sha256 = "510e108f5ac71439f41fb8dc6b0da87d155ae14421706e27d93e8ca916989458"
+
+[[source]]
+name = "serde_json"
+version = "1.0.151"
+role = "narrative"
+crate_sha256 = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
+src_tree_sha256 = "a665c44b0a7679d9330484c98f36050cc6b95709310580b11872361d19a64737"
 
 [[source]]
 name = "syn"

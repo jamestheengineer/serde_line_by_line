@@ -182,6 +182,12 @@ pub fn load_pin(repo: &Path) -> Result<Pin> {
 }
 
 /// Serializes a pin in the committed format, comments and all.
+/// Renders the pin file.
+///
+/// Source order is preserved as given, and it is meaningful: `coverage()`
+/// hands its list out in pin order, which is reading order — `serde_core` is
+/// pinned before `serde_derive` because the second generates calls into the
+/// first. `vendor_add` keeps the roles grouped when it appends.
 pub fn render_pin(pin: &Pin) -> String {
     let mut out = String::from(
         "# Regenerate with `cargo xtask pin`; change a version with `cargo xtask bump`.\n\
@@ -192,9 +198,10 @@ pub fn render_pin(pin: &Pin) -> String {
          #   coverage  — every line must be claimed once manifest.toml calls a file\n\
          #               complete. The reference track's promise.\n\
          #   narrative — annotated where the story goes, never asked to be exhaustive\n\
-         #               (PLAN.md §11). No source carries it now: serde_derive held it\n\
-         #               through N1-N5 and became a coverage source in R1 (D12), and the\n\
-         #               walk it was pinned for became an ordering over the annotations\n\
+         #               (PLAN.md §13). No coverage promise and no percentage: a walk\n\
+         #               reports the lines it cites, not a fraction of a crate.\n\
+         #               serde_derive held this role through N1-N5 and gave it up in\n\
+         #               R1 (D12), when the walk became an ordering over annotations\n\
          #               rather than a track with citations of its own.\n\
          #   glossary  — never annotated at all; quoted verbatim by glossary entries\n\
          #               (D9). The pin is what keeps a quotation honest.\n",

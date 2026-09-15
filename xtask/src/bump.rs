@@ -1082,7 +1082,7 @@ fn index_path(name: &str) -> String {
 ///
 /// The index is the authority crates.io itself uses, and it is a flat file of
 /// one JSON object per version — cheap enough to fetch on every bump.
-fn fetch_index_checksum(name: &str, version: &str) -> Result<String> {
+pub(crate) fn fetch_index_checksum(name: &str, version: &str) -> Result<String> {
     let url = format!("https://index.crates.io/{}", index_path(name));
     let body = curl(&url)?;
     let mut known = Vec::new();
@@ -1106,7 +1106,7 @@ fn fetch_index_checksum(name: &str, version: &str) -> Result<String> {
     )
 }
 
-fn download(name: &str, version: &str, dest: &Path) -> Result<()> {
+pub(crate) fn download(name: &str, version: &str, dest: &Path) -> Result<()> {
     let url = format!("https://static.crates.io/crates/{name}/{name}-{version}.crate");
     println!("fetching {url}");
     let status = Command::new("curl")
@@ -1135,7 +1135,7 @@ fn curl(url: &str) -> Result<String> {
     Ok(String::from_utf8(out.stdout)?)
 }
 
-fn extract(archive: &Path, into: &Path) -> Result<()> {
+pub(crate) fn extract(archive: &Path, into: &Path) -> Result<()> {
     let status = Command::new("tar")
         .arg("-xzf")
         .arg(archive)
@@ -1149,7 +1149,7 @@ fn extract(archive: &Path, into: &Path) -> Result<()> {
     Ok(())
 }
 
-fn sha256_file(path: &Path) -> Result<String> {
+pub(crate) fn sha256_file(path: &Path) -> Result<String> {
     use sha2::{Digest, Sha256};
     let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
     Ok(format!("{:x}", Sha256::digest(&bytes)))
@@ -1213,6 +1213,15 @@ fn fmt_range(r: LineRange) -> String {
 /// Upstream URL and authorship are read from each crate's own `Cargo.toml`
 /// rather than written here, so a source added to the pin cannot be attributed
 /// by a table this file forgot to update.
+///
+/// A manifest is not always the whole story. `serde_json` carries 3,708 lines
+/// of somebody else's float parser inside its own `src/`, dual licensed the
+/// same way but copyright a third person its `authors` field does not name, so
+/// the tree is scanned for copyright lines its manifest does not account for
+/// and each one is quoted where it is found. That keeps the generator's
+/// promise rather than adding the table it was written to avoid: a vendored
+/// tree that grows a new holder regenerates a different NOTICE, and the
+/// freshness gate fails until somebody has looked at it.
 pub(crate) fn notice(repo: &Path, pin: &Pin) -> Result<String> {
     #[derive(serde::Deserialize)]
     struct Manifest {
@@ -1262,8 +1271,31 @@ pub(crate) fn notice(repo: &Path, pin: &Pin) -> Result<String> {
                 manifest.package.authors.join(", ")
             ));
         }
+        for (file, line, text) in in_tree_copyrights(&source.dir(repo))? {
+            s.push_str(&format!("- Also, in `{file}` line {line}: {text}\n"));
+        }
     }
     Ok(s)
+}
+
+/// Copyright lines written inside a vendored tree's own source.
+///
+/// Deliberately literal: the line is quoted and located rather than parsed for
+/// a name, because the sentence around it is usually the part that matters —
+/// `serde_json`'s says which module the third party's code is and under which
+/// licence it arrived.
+fn in_tree_copyrights(root: &Path) -> Result<Vec<(String, usize, String)>> {
+    let mut out = Vec::new();
+    for rel in slbl_core::vendor::source_files_in(root)? {
+        let text = std::fs::read_to_string(root.join(&rel))?;
+        for (i, line) in text.lines().enumerate() {
+            let trimmed = line.trim_start_matches(['/', '!', '*', ' ']).trim_end();
+            if trimmed.to_ascii_lowercase().contains("copyright") {
+                out.push((rel.clone(), i + 1, trimmed.to_string()));
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// Retargets the `serde_core = "=x.y.z"` pin in every example crate.

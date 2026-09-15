@@ -5,6 +5,8 @@
 //!   cargo xtask bump [--source NAME] <version>
 //!                                   migrate the stores to a new release of a pinned source
 //!   cargo xtask pin                 rehash every vendored tree into pin.toml + NOTICE.md
+//!   cargo xtask vendor <name>@<version> --role <role>
+//!                                   fetch, verify and pin a source not vendored yet
 //!   cargo xtask stats [--dir PATH]  structural inventory of the pinned source,
 //!                                   or of an unpinned candidate tree
 //!   cargo xtask wasm                build the example playground for the browser
@@ -14,6 +16,7 @@ mod coverage;
 mod harness;
 mod stats;
 mod store_edit;
+mod vendor_add;
 mod wasm;
 
 use anyhow::{bail, Result};
@@ -32,6 +35,7 @@ fn main() -> Result<()> {
         }
         "bump" => bump::run(&repo, &bump::parse_args(&args[1..])?)?,
         "pin" => pin(&repo)?,
+        "vendor" => vendor_add::run(&repo, &vendor_add::parse_args(&args[1..])?)?,
         "wasm" => wasm::run(&repo)?,
         "stats" => stats::run(&repo, stats_dir(&args[1..])?.as_deref())?,
         "-h" | "--help" | "help" => print_help(),
@@ -56,6 +60,9 @@ fn print_help() {
          \x20   --allow-orphans            drop records whose lines no longer exist\n\
          \x20   --keep-old                 leave the previous vendor/ tree in place\n\
          cargo xtask pin                 rehash vendor/pin.toml and NOTICE.md\n\
+         cargo xtask vendor <name>@<version> --role <role>\n\
+         \x20                              fetch, verify and pin a source the repo does\n\
+         \x20                              not have yet\n\
          cargo xtask stats               structural inventory of the pinned source\n\
          \x20   --dir PATH                 measure an unpinned tree instead (any\n\
          \x20                              directory with a src/)\n\

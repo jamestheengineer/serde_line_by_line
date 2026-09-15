@@ -24,6 +24,15 @@ rather than annotated is D9 in `docs/decisions.md`.
 - License: MIT OR Apache-2.0 (see `serde_derive-1.0.229/LICENSE-MIT` and `serde_derive-1.0.229/LICENSE-APACHE`)
 - Copyright: Erick Tryzelaar <erick.tryzelaar@gmail.com>, David Tolnay <dtolnay@gmail.com>
 
+## serde_json 1.0.151 (narrative)
+
+- crates.io: https://crates.io/crates/serde_json/1.0.151
+- Upstream: https://github.com/serde-rs/json
+- sha256: `c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14`
+- License: MIT OR Apache-2.0 (see `serde_json-1.0.151/LICENSE-MIT` and `serde_json-1.0.151/LICENSE-APACHE`)
+- Copyright: Erick Tryzelaar <erick.tryzelaar@gmail.com>, David Tolnay <dtolnay@gmail.com>
+- Also, in `src/lexical/mod.rs` line 9: copyright Alexander Huszagh.
+
 ## syn 3.0.5 (glossary)
 
 - crates.io: https://crates.io/crates/syn/3.0.5
