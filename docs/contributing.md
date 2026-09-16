@@ -148,8 +148,12 @@ line order within each file.
 
 ## Adding or editing a narrative unit
 
-The derive track lives in `narrative/*.toml`, one unit per file, and the file
-name is the unit id — filename order is reading order, so there is no registry.
+A walk lives in `narrative/<track>/`: a `track.toml` naming the walk and the
+crate it is about, then one unit per file whose name is the unit id — filename
+order is reading order within a track, so there is no registry. There are two
+walks since [PLAN.md §13](../PLAN.md), and ids and ordering are per track:
+`narrative/derive/` and `narrative/json/` may both have an `s01-imports` and
+neither sorts into the other.
 [`docs/narrative-style.md`](narrative-style.md) is the full guide; the three
 things that differ most from an annotation:
 

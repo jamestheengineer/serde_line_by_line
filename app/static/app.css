@@ -196,6 +196,9 @@ main { padding: 0 0 80px; min-width: 0; }
 .hero { padding: 34px 32px 8px; max-width: 760px; }
 .hero h1 { font-size: 30px; margin: 0 0 8px; letter-spacing: -0.02em; }
 .lede { color: var(--fg-muted); margin: 0 0 22px; }
+/* A walk's lede is markdown from its track.toml, so it arrives wrapped in its
+   own paragraph rather than as the <p class="lede"> the other heroes use. */
+.lede > p { margin: 0; }
 
 .bar {
   height: 8px;

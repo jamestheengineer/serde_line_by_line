@@ -275,6 +275,8 @@ serde_line_by_line/
 ├── README.md
 ├── LICENSE-MIT / LICENSE-APACHE
 ├── vendor/
+│   ├── pin.toml                ← every source, its role and its checksums
+│   ├── NOTICE.md               ← generated from the pin; never hand-edited
 │   └── serde_core-1.0.229/     ← pinned, unmodified, MIT/Apache-2.0
 ├── annotations/
 │   ├── course.toml             ← one course track over both annotated crates
@@ -282,6 +284,11 @@ serde_line_by_line/
 │   │   ├── manifest.toml       ← per-file completion status
 │   │   └── *.toml              ← the content
 │   └── serde_derive/           ← the same, from §12 onward
+├── narrative/                  ← one directory per walk, from §13
+│   └── derive/
+│       ├── track.toml          ← what this walk is and what it is about
+│       └── NN-*.toml           ← one unit per file; filename order is reading order
+├── glossary/                   ← borrowed vocabulary, quoted and never claimed (D9)
 ├── examples/
 │   ├── <name>/                 ← real crates, CI-verified
 │   └── compile_fail/           ← trybuild cases

@@ -1,8 +1,11 @@
 # Writing narrative units
 
-The narrative track walks `serde_derive` from a `DeriveInput` to an emitted
-`impl` ([PLAN.md §11](../PLAN.md)). One unit per file in `narrative/`, named for
-its id, checked by `cargo xtask coverage` and rendered by `cargo site`.
+A narrative track walks one crate along one path: `serde_derive` from a
+`DeriveInput` to an emitted `impl` ([PLAN.md §11](../PLAN.md)), and from §13 a
+second walk through `serde_json`. One unit per file in `narrative/<track>/`,
+named for its id, beside the `track.toml` that says what the walk is and which
+pinned source it is about — checked by `cargo xtask coverage` and rendered by
+`cargo site`.
 
 ## A step is not an annotation
 

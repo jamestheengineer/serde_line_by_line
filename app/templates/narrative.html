@@ -4,7 +4,7 @@
     <ul class="unitnav">
     {% for u in units %}
       <li>
-        <a href="{{ root }}derive/{{ u.href }}">
+        <a href="{{ root }}{{ walk.id }}/{{ u.href }}">
           <span class="unum">{{ u.number }}</span>
           <span class="fname">{{ u.title }}</span>
         </a>
@@ -14,13 +14,8 @@
 {% endblock %}
 {% block content %}
 <section class="hero">
-  <h1>The derive track</h1>
-  <p class="lede">
-    One struct and one enum, followed through <code>serde_derive</code>
-    {{ derive_version }} from the tokens the compiler hands over to the
-    <code>impl</code> it gets back. {{ units.len() }} units, {{ steps }} stops,
-    citing the pinned source as the path goes through it.
-  </p>
+  <h1>{{ walk.title }}</h1>
+  <div class="lede">{{ walk.lede_html|safe }}</div>
   <div class="progress">
     <div class="figures">
       <span><b>{{ units.len() }}</b> units</span>
@@ -34,12 +29,11 @@
   <h2>What this track claims</h2>
   <p>
     <b>A path, not a promise.</b> This track picks one route through
-    {{ derive_lines }} lines of <code>serde_derive</code> and follows it; it
-    has never said it visits all of them, and it still does not. What changed
-    is underneath it: <code>serde_derive</code> is now an
-    <a href="{{ root }}index.html">annotated crate</a> being claimed file by
-    file, so where this walk stops on finished ground it links to the
-    annotation there rather than explaining the same lines twice. The
+    {{ walk.source_lines }} lines of <code>{{ walk.crate_name }}</code> and
+    follows it; it has never said it visits all of them, and it still does not.
+    Where it stops on ground the
+    <a href="{{ root }}index.html">reference track</a> has finished, it links
+    to the annotation there rather than explaining the same lines twice. A
     percentage belongs to that track. This one has an order.
   </p>
   <p>
@@ -47,10 +41,12 @@
     resolves in a tree pinned by checksum. No step leans on one that comes
     later. A step standing on a file the reference track has finished must land
     inside an annotation and say which — and once that file is declared
-    complete, the build fails if it does not. And every claim about generated
-    code is sliced out of a <a href="{{ root }}expand/index.html">real
-    expansion</a> at build time — if <code>serde_derive</code> stopped emitting
-    it, this page would not build.
+    complete, the build fails if it does not.
+    {%- if walk.id == "derive" %}
+    And every claim about generated code is sliced out of a
+    <a href="{{ root }}expand/index.html">real expansion</a> at build time — if
+    <code>serde_derive</code> stopped emitting it, this page would not build.
+    {%- endif %}
   </p>
 </section>
 
@@ -59,7 +55,7 @@
   <article class="unitcard">
     <div class="unithead">
       <span class="unum">{{ u.number }}</span>
-      <h2><a href="{{ root }}derive/{{ u.href }}">{{ u.title }}</a></h2>
+      <h2><a href="{{ root }}{{ walk.id }}/{{ u.href }}">{{ u.title }}</a></h2>
     </div>
     <div class="prose">{{ u.summary_html|safe }}</div>
     <div class="unitmeta">{{ u.steps }} steps{% if u.crossings > 0 %} · {{ u.crossings }} into serde_core{% endif %}</div>
@@ -69,11 +65,12 @@
 
 <section class="whatnext">
   <h2>Next</h2>
+  {%- if walk.id == "derive" %}
   <p>
     <a href="{{ root }}expand/index.html">Run the expansion &rarr;</a>
-    &mdash; <code>serde_derive</code> {{ derive_version }} itself, compiled to
-    wasm, over the two types this track follows. Every quotation above is
-    sliced out of that output at build time.
+    &mdash; <code>{{ walk.crate_name }}</code> {{ walk.version }} itself,
+    compiled to wasm, over the two types this track follows. Every quotation
+    above is sliced out of that output at build time.
   </p>
   <p>
     <a href="{{ root }}glossary/index.html">Borrowed vocabulary</a>
@@ -81,6 +78,7 @@
     <code>proc-macro2</code> types the walk names but does not annotate,
     quoted from their own pinned trees.
   </p>
+  {%- endif %}
   <p>
     <a href="{{ root }}index.html">The reference track</a>
     &mdash; back inside <code>serde_core</code>, where the

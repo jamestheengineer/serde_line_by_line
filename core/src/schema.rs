@@ -302,6 +302,64 @@ impl CourseFile {
 /// unit is reading order; the numeric prefix on the id orders the units. There
 /// is no registry file, because a registry is a second place for the order to
 /// live and the filenames already say it.
+///
+/// Since §13 the units of one walk sit in `narrative/<track>/` beside a
+/// [`TrackFile`]. Ids and ordering are per track: two walks may both have an
+/// `s01-imports` and neither sorts into the other.
+/// `narrative/<track>/track.toml` — what one walk is and what it is about.
+///
+/// A second walk is what forced this file to exist. Through N1-N5 there was
+/// one, and its identity could live in the renderer: the URL prefix, the title
+/// and the lede were all written into templates because there was nothing to
+/// tell them apart from. A walk through `serde_json` is a different story
+/// about a different crate and it needs its own, so the identity moves out of
+/// the app and into the store beside the units it names (PLAN.md §13).
+///
+/// What is *not* here is order. Tracks are presented in the order their
+/// `source` is pinned, so the sequence lives in `vendor/pin.toml`, where a
+/// reading order already lives, rather than in a number somebody has to keep
+/// consistent with it.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrackFile {
+    pub schema: u32,
+    pub track: NarrativeTrack,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NarrativeTrack {
+    /// Slug, and the directory's own name. It is the URL prefix for every page
+    /// of this walk.
+    pub id: String,
+    /// What the track index calls itself: "The derive track".
+    pub title: String,
+    /// The pinned source this walk is *about*, which is not the only one it
+    /// cites — the derive walk crosses into `serde_core` nine times and is
+    /// still a walk through `serde_derive`. Its position in the pin orders the
+    /// tracks.
+    pub source: String,
+    /// The paragraph under the title on the track index.
+    pub lede: String,
+}
+
+impl TrackFile {
+    pub fn load(path: &Path) -> Result<Self> {
+        let text =
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        let parsed: TrackFile =
+            toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+        if parsed.schema != SCHEMA_VERSION {
+            bail!(
+                "{}: schema {} but this build understands {SCHEMA_VERSION}",
+                path.display(),
+                parsed.schema
+            );
+        }
+        Ok(parsed)
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NarrativeFile {

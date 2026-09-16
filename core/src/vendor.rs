@@ -174,6 +174,19 @@ pub fn line_count_in(root: &Path, rel: &str) -> Result<u32> {
     Ok(n as u32)
 }
 
+/// Every line of every `src/*.rs` in a crate root.
+///
+/// The size of a tree, which is a different fact from how much of it anything
+/// claims: a walk reports it to say how large the territory is, and the
+/// coverage gate reports it as a denominator.
+pub fn total_lines_in(root: &Path) -> Result<u32> {
+    let mut lines = 0;
+    for rel in source_files_in(root)? {
+        lines += line_count_in(root, &rel)?;
+    }
+    Ok(lines)
+}
+
 pub fn load_pin(repo: &Path) -> Result<Pin> {
     let path = pin_path(repo);
     let text = std::fs::read_to_string(&path)

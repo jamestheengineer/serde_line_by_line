@@ -345,9 +345,15 @@ fn collect_cites(repo: &Path, target: &Source) -> Result<Vec<StoreFile>> {
 ///
 /// A unit with no step citing it is skipped rather than rewritten to no
 /// effect, so the diff of a bump names only files the bump changed.
+///
+/// Every walk is searched, not the one whose crate is moving. A bump of
+/// `serde_core` has to retarget the crossings *into* it from walks that are
+/// about something else — which is how this went wrong for `syn` (D11): the
+/// narrative's nine crossings were keyed to a tree the bump would have
+/// replaced without retargeting them.
 fn narrative_cites(repo: &Path, id: &str) -> Result<Vec<StoreFile>> {
     let mut out = Vec::new();
-    for path in store_paths(&repo.join("narrative"))? {
+    for path in narrative_unit_paths(repo)? {
         let parsed = slbl_core::schema::NarrativeFile::load(&path)?;
         let cites: Vec<Cite> = parsed
             .steps
@@ -366,6 +372,33 @@ fn narrative_cites(repo: &Path, id: &str) -> Result<Vec<StoreFile>> {
                 cites,
             });
         }
+    }
+    Ok(out)
+}
+
+/// Every unit file of every walk, in track then filename order.
+///
+/// `narrative/` holds a directory per walk since §13, and `track.toml` is the
+/// walk's identity rather than one of its units.
+fn narrative_unit_paths(repo: &Path) -> Result<Vec<PathBuf>> {
+    let root = repo.join("narrative");
+    if !root.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut dirs: Vec<PathBuf> = std::fs::read_dir(&root)?
+        .collect::<std::io::Result<Vec<_>>>()?
+        .into_iter()
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
+    dirs.sort();
+    let mut out = Vec::new();
+    for dir in dirs {
+        out.extend(
+            store_paths(&dir)?
+                .into_iter()
+                .filter(|p| p.file_name().is_some_and(|n| n != "track.toml")),
+        );
     }
     Ok(out)
 }
@@ -1465,12 +1498,17 @@ mod tests {
     /// one owns is its own directory: a `serde_core` bump must not open a file
     /// under `annotations/serde_derive/`, whose ranges were read against a
     /// different tree.
+    ///
+    /// Since §13 a walk's directory is its track id, so the directory named
+    /// here is `derive` rather than `narrative` — and a bump reaches *every*
+    /// walk, because a crossing into the crate being moved is a crossing
+    /// whichever story made it.
     #[test]
     fn which_stores_a_bump_rewrites_follows_from_the_role() {
         let coverage = stores("serde_core");
         assert_eq!(
             dirs(&coverage),
-            ["serde_core", "narrative"]
+            ["serde_core", "derive"]
                 .map(String::from)
                 .into_iter()
                 .collect()
@@ -1482,7 +1520,7 @@ mod tests {
         let derive = stores("serde_derive");
         assert!(
             dirs(&derive).is_subset(
-                &["serde_derive", "narrative"]
+                &["serde_derive", "derive"]
                     .map(String::from)
                     .into_iter()
                     .collect()
@@ -1491,7 +1529,7 @@ mod tests {
             dirs(&derive)
         );
         assert!(!dirs(&derive).contains("serde_core"));
-        assert!(dirs(&derive).contains("narrative"));
+        assert!(dirs(&derive).contains("derive"));
 
         let glossary = stores("syn");
         assert_eq!(

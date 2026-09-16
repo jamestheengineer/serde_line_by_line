@@ -640,7 +640,7 @@ Two things were wrong with that, and only one of them was the obvious one.
 tool at all. `syn` had in fact already moved — 3.0.3 → 3.0.5 — with nothing in
 the repo able to notice or act on it.
 
-**The silent half-migration.** `narrative/*.toml` is keyed to *two* sources at
+**The silent half-migration.** `narrative/<track>/*.toml` is keyed to *two* sources at
 once: 76 steps cite `serde_derive`, nine cross into `serde_core`. A
 `serde_core` bump rewrote `annotations/` and left those nine crossings pointing
 into a tree that no longer existed. Nothing would have failed: the ranges still
@@ -656,7 +656,7 @@ bump has to rewrite:
 | role | stores keyed to it |
 |---|---|
 | `coverage` | `annotations/`, **and the narrative's crossings into it** |
-| `narrative` | `narrative/` |
+| `narrative` | `narrative/<track>/` |
 | `glossary` | the one `glossary/` file that quotes it |
 
 Three consequences, all of them in the rewriter:

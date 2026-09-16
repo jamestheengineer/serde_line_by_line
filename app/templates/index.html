@@ -35,12 +35,14 @@
     claims every line of them. The
     <a href="{{ root }}course/index.html"><b>course track</b></a> is the same
     annotations in teaching order &mdash; {{ course_units }} units, from why a
-    data model exists to writing the procedural macro that generates one. The
-    <a href="{{ root }}derive/index.html"><b>derive track</b></a> follows one
-    struct and one enum through <code>serde_derive</code>
-    {{ derive.version }} &mdash; {{ derive.units }} units, {{ derive.steps }}
-    stops &mdash; ending with the expansion
+    data model exists to writing the procedural macro that generates one.
+    {%- for w in walks %}
+    <a href="{{ root }}{{ w.id }}/index.html"><b>{{ w.title }}</b></a>
+    follows one route through <code>{{ w.crate_name }}</code> {{ w.version }}
+    &mdash; {{ w.units }} units, {{ w.steps }} stops&nbsp;&mdash; ending with
+    the expansion
     <a href="{{ root }}expand/index.html">running in your browser</a>.
+    {%- endfor %}
   </p>
 
   <h2>What each of them claims</h2>
@@ -59,12 +61,14 @@
     (<a href="https://github.com/jamestheengineer/serde_line_by_line/blob/main/docs/decisions.md">D12</a>).
   </p>
   <p>
-    The <a href="{{ root }}derive/index.html">derive walk</a> makes no coverage
-    claim of its own and never did. It is a path: {{ derive.units }} units and
-    {{ derive.steps }} stops picking one route through
-    <code>serde_derive</code>, and all {{ derive.crossings }} of them now land
-    inside an annotation and link there. The percentage belongs to the track
-    underneath it.
+    {%- for w in walks %}
+    <a href="{{ root }}{{ w.id }}/index.html">{{ w.title }}</a> makes
+    no coverage claim of its own and never did. It is a path:
+    {{ w.units }} units and {{ w.steps }} stops picking one route through
+    {{ w.source_lines }} lines of <code>{{ w.crate_name }}</code>, and all
+    {{ w.crossings }} of them land inside an annotation and link there. The
+    percentage belongs to the track underneath it.
+    {%- endfor %}
   </p>
   <p>
     Borrowed vocabulary is quoted, pinned, and named as borrowed. The

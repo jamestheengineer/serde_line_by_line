@@ -4,7 +4,7 @@
     <ul class="unitnav">
     {% for u in units %}
       <li{% if u.id == unit.id %} class="here"{% endif %}>
-        <a href="{{ root }}derive/{{ u.href }}">
+        <a href="{{ root }}{{ track }}/{{ u.href }}">
           <span class="unum">{{ u.number }}</span>
           <span class="fname">{{ u.title }}</span>
         </a>
@@ -70,7 +70,7 @@
     <a class="expands" href="{{ root }}file/{{ s.annotation_href }}">annotated in the reference track: {{ s.annotation_title }}</a>
     {% endif %}
     {% for l in s.leans_on %}
-    <p class="ahead back">Read after <a href="{{ root }}derive/{{ l.href }}">{{ l.title }}</a>.</p>
+    <p class="ahead back">Read after <a href="{{ root }}{{ track }}/{{ l.href }}">{{ l.title }}</a>.</p>
     {% endfor %}
     <div class="prose">{{ s.body_html|safe }}</div>
     {% if !s.glossary.is_empty() %}
@@ -83,7 +83,7 @@
 {% endfor %}
 
 <nav class="unitsteps">
-  {% for p in prev %}<a class="prev" href="{{ root }}derive/{{ p.href }}">← {{ p.number }} · {{ p.title }}</a>{% endfor %}
-  {% for n in next %}<a class="next" href="{{ root }}derive/{{ n.href }}">{{ n.number }} · {{ n.title }} →</a>{% endfor %}
+  {% for p in prev %}<a class="prev" href="{{ root }}{{ track }}/{{ p.href }}">← {{ p.number }} · {{ p.title }}</a>{% endfor %}
+  {% for n in next %}<a class="next" href="{{ root }}{{ track }}/{{ n.href }}">{{ n.number }} · {{ n.title }} →</a>{% endfor %}
 </nav>
 {% endblock %}

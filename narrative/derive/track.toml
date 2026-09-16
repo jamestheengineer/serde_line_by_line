@@ -1,0 +1,12 @@
+schema = 1
+
+[track]
+id = "derive"
+title = "The derive track"
+source = "serde_derive-1.0.229"
+lede = """
+One struct and one enum, followed through `serde_derive` from the tokens the
+compiler hands over to the `impl` it gets back. Every stop cites the pinned
+source as the path goes through it, and lands inside an annotation the
+reference track already wrote.
+"""

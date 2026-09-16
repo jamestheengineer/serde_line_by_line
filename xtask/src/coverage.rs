@@ -53,6 +53,21 @@ pub struct NarrativeUnitReport {
     pub crossings: usize,
 }
 
+/// One walk. There are two since §13, and nothing is summed across them for
+/// the same reason nothing is summed across the coverage sources (D12): they
+/// are separate stories about separate crates, and a total would describe
+/// neither.
+#[derive(Debug, Serialize)]
+pub struct NarrativeTrackReport {
+    pub id: String,
+    pub title: String,
+    /// The crate this walk is about, and how many lines of it there are — the
+    /// territory, against which `cited_lines` is a path and never a fraction.
+    pub source: String,
+    pub source_lines: u32,
+    pub units: Vec<NarrativeUnitReport>,
+}
+
 /// One annotated source's coverage.
 ///
 /// Every percentage in this report hangs off one of these, and none off the
@@ -92,7 +107,7 @@ pub struct Report {
     /// The annotated sources, in pin order.
     pub sources: Vec<SourceCoverage>,
     pub course: Vec<UnitCoverage>,
-    pub narrative: Vec<NarrativeUnitReport>,
+    pub narrative: Vec<NarrativeTrackReport>,
 }
 
 /// Errors are fatal; warnings are reported but do not fail the build.
@@ -731,10 +746,36 @@ fn check_narrative(
     glossary: &HashSet<String>,
     cases: &HashSet<String>,
     diag: &mut Diagnostics,
-) -> Result<Vec<NarrativeUnitReport>> {
-    let units = slbl_core::read_narrative(repo)?;
+) -> Result<Vec<NarrativeTrackReport>> {
+    let tracks = slbl_core::read_narrative(repo)?;
+    let mut out = Vec::new();
+    for track in &tracks {
+        out.push(check_narrative_track(track, by_id, glossary, cases, diag)?);
+    }
+    Ok(out)
+}
+
+/// One walk, checked against itself.
+///
+/// Everything here is scoped to the track, which is the whole of the §13
+/// change: step ids are unique within a walk and not across walks, unit order
+/// is compared within a walk, and a step may only lean on one that comes
+/// earlier in *this* story. Two walks through different crates have no reading
+/// order between them, and pretending they did would make D8's check compare
+/// positions in unrelated sequences.
+fn check_narrative_track(
+    track: &slbl_core::NarrativeTrackItem,
+    by_id: &HashMap<&str, &Annotation>,
+    glossary: &HashSet<String>,
+    cases: &HashSet<String>,
+    diag: &mut Diagnostics,
+) -> Result<NarrativeTrackReport> {
+    let units = &track.units;
     if units.is_empty() {
-        return Ok(Vec::new());
+        diag.error(format!(
+            "{}: a walk with no units — narrative/{}/ has a track.toml and nothing to read",
+            track.track.id, track.track.id
+        ));
     }
 
     // Position in the walk, for the forward-reference check. Steps are numbered
@@ -742,10 +783,13 @@ fn check_narrative(
     let mut position: HashMap<&str, usize> = HashMap::new();
     let mut unit_of: HashMap<&str, &str> = HashMap::new();
     let mut n = 0;
-    for unit in &units {
+    for unit in units {
         for step in &unit.steps {
             if position.insert(step.step.id.as_str(), n).is_some() {
-                diag.error(format!("duplicate narrative step id {:?}", step.step.id));
+                diag.error(format!(
+                    "{}: duplicate step id {:?}",
+                    track.track.id, step.step.id
+                ));
             }
             unit_of.insert(step.step.id.as_str(), unit.unit.id.as_str());
             n += 1;
@@ -754,14 +798,14 @@ fn check_narrative(
     for pair in units.windows(2) {
         if pair[0].unit.id >= pair[1].unit.id {
             diag.error(format!(
-                "narrative units out of order: {:?} before {:?}",
-                pair[0].unit.id, pair[1].unit.id
+                "{}: units out of order: {:?} before {:?}",
+                track.track.id, pair[0].unit.id, pair[1].unit.id
             ));
         }
     }
 
     let mut out = Vec::new();
-    for unit in &units {
+    for unit in units {
         let u = &unit.unit;
         if u.title.trim().is_empty() || u.summary.trim().is_empty() || u.body.trim().is_empty() {
             diag.error(format!("{}: empty title, summary or body", u.id));
@@ -891,7 +935,13 @@ fn check_narrative(
             crossings,
         });
     }
-    Ok(out)
+    Ok(NarrativeTrackReport {
+        id: track.track.id.clone(),
+        title: track.track.title.clone(),
+        source: slbl_core::vendor::source_id(&track.crate_name, &track.version),
+        source_lines: track.lines,
+        units: out,
+    })
 }
 
 /// The names of the committed expansion inputs, read off disk rather than from
@@ -1360,18 +1410,21 @@ fn print_report(report: &Report, diag: &Diagnostics) {
         }
     }
 
-    if !report.narrative.is_empty() {
-        let steps: usize = report.narrative.iter().map(|u| u.steps).sum();
-        let cited: u32 = report.narrative.iter().map(|u| u.cited_lines).sum();
+    for track in &report.narrative {
+        let steps: usize = track.units.iter().map(|u| u.steps).sum();
+        let cited: u32 = track.units.iter().map(|u| u.cited_lines).sum();
         println!(
-            "\nnarrative track: {} units, {steps} steps, {cited} lines cited\n",
-            report.narrative.len()
+            "\nnarrative track {}: {} units, {steps} steps, {cited} of {}'s {} lines cited\n",
+            track.id,
+            track.units.len(),
+            track.source,
+            track.source_lines
         );
         println!(
             "{:<32}{:>8}{:>8}{:>12}",
             "unit", "steps", "lines", "crossings"
         );
-        for u in &report.narrative {
+        for u in &track.units {
             println!(
                 "{:<32}{:>8}{:>8}{:>12}",
                 u.id, u.steps, u.cited_lines, u.crossings

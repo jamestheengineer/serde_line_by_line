@@ -13,7 +13,7 @@ use schema::{
     Annotation, AnnotationFile, CourseFile, CourseUnit, LineRange, Manifest, SCHEMA_VERSION,
 };
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// One annotation resolved against the pinned source: its parsed line range,
 /// and which annotated crate it claims a piece of.
@@ -476,18 +476,91 @@ pub struct NarrativeStepItem {
     pub quoted: String,
 }
 
-/// Reads every `narrative/*.toml`, in filename order, resolving each citation
+/// One walk: its identity, and its units in reading order.
+#[derive(Debug, Clone)]
+pub struct NarrativeTrackItem {
+    pub track: schema::NarrativeTrack,
+    pub units: Vec<NarrativeItem>,
+    /// The crate this walk is about, resolved from `track.source`. Held here
+    /// so the renderer can name it and say how large it is without going back
+    /// to the pin.
+    pub crate_name: String,
+    pub version: String,
+    pub lines: u32,
+}
+
+/// Reads every walk under `narrative/<track>/`, resolving each citation
 /// against the pinned tree it names.
 ///
-/// Filename order is reading order (see [`schema::NarrativeFile`]). What is
-/// enforced here rather than in the gate is what the site cannot render
-/// without: the named source must be pinned, it must not be a glossary source,
-/// and every line range must exist.
-pub fn read_narrative(repo: &Path) -> Result<Vec<NarrativeItem>> {
-    let dir = repo.join("narrative");
-    if !dir.is_dir() {
+/// Filename order is reading order *within a track* (see
+/// [`schema::NarrativeFile`]), and tracks come back in the pin order of the
+/// source each one is about (see [`schema::TrackFile`]). What is enforced here
+/// rather than in the gate is what the site cannot render without: the
+/// directory must name itself, the source it walks and every source it cites
+/// must be pinned, a cited source must not be a glossary one, and every line
+/// range must exist.
+pub fn read_narrative(repo: &Path) -> Result<Vec<NarrativeTrackItem>> {
+    let root = repo.join("narrative");
+    if !root.is_dir() {
         return Ok(Vec::new());
     }
+    let mut track_dirs: Vec<PathBuf> = std::fs::read_dir(&root)
+        .with_context(|| format!("reading {}", root.display()))?
+        .collect::<std::io::Result<Vec<_>>>()?
+        .into_iter()
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
+    track_dirs.sort();
+    let mut out = Vec::new();
+    for dir in track_dirs {
+        out.push(read_narrative_track(repo, &dir)?);
+    }
+    // Pin order, which is where this project's reading orders live.
+    let pin = vendor::load_pin(repo)?;
+    let rank = |id: &str| pin.sources.iter().position(|s| s.source_id() == id);
+    out.sort_by_key(|t| rank(&t.track.source).unwrap_or(usize::MAX));
+    Ok(out)
+}
+
+fn read_narrative_track(repo: &Path, dir: &Path) -> Result<NarrativeTrackItem> {
+    let track_path = dir.join("track.toml");
+    let track = schema::TrackFile::load(&track_path)?.track;
+    let stem = dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default()
+        .to_string();
+    anyhow::ensure!(
+        track.id == stem,
+        "{}: track id {:?} but the directory is {:?} — the directory name is the          track's URL, so they cannot disagree",
+        track_path.display(),
+        track.id,
+        stem
+    );
+    let pin = vendor::load_pin(repo)?;
+    let about = pin
+        .sources
+        .iter()
+        .find(|s| s.source_id() == track.source)
+        .with_context(|| {
+            format!(
+                "{}: walks {:?}, which is not pinned in vendor/pin.toml",
+                track_path.display(),
+                track.source
+            )
+        })?;
+    let units = read_narrative_units(repo, dir)?;
+    Ok(NarrativeTrackItem {
+        crate_name: about.name.clone(),
+        version: about.version.clone(),
+        lines: vendor::total_lines_in(&about.dir(repo))?,
+        track,
+        units,
+    })
+}
+
+fn read_narrative_units(repo: &Path, dir: &Path) -> Result<Vec<NarrativeItem>> {
     let pin = vendor::load_pin(repo)?;
     // Which files are claimed ground, by source id. Read once: a unit cites
     // both annotated crates and the answer cannot depend on which step asks.
@@ -497,12 +570,14 @@ pub fn read_narrative(repo: &Path) -> Result<Vec<NarrativeItem>> {
         claimed.insert(source.source_id(), manifest.complete);
     }
 
-    let mut paths: Vec<_> = std::fs::read_dir(&dir)
+    let mut paths: Vec<_> = std::fs::read_dir(dir)
         .with_context(|| format!("reading {}", dir.display()))?
         .collect::<std::io::Result<Vec<_>>>()?
         .into_iter()
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|e| e == "toml"))
+        // track.toml is the walk's identity, not one of its units.
+        .filter(|p| p.file_name().is_some_and(|n| n != "track.toml"))
         .collect();
     paths.sort();
 

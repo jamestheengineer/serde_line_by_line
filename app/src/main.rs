@@ -180,7 +180,9 @@ struct IndexPage {
     /// promise is hard-gated, which is the same fact for either crate.
     complete_files: usize,
     course_units: usize,
-    derive: Narrated,
+    /// One per walk, in track order. No figure spans them, for the reason no
+    /// figure spans the annotated crates (D12).
+    walks: Vec<Narrated>,
     glossary: Borrowed,
     source_id: String,
     root: String,
@@ -201,10 +203,20 @@ struct SourceSummary {
     complete_files: usize,
 }
 
-/// What the derive track came to, counted once and reported in two places: on
-/// its own index, and on the front page where the promise is restated.
-#[derive(Default)]
+/// What one walk came to, counted once and reported in two places: on its own
+/// index, and on the front page where the promise is restated.
+///
+/// The identity here — the id that is also the URL, the title, the lede, the
+/// crate being walked — is read from `narrative/<track>/track.toml` rather
+/// than written into a template, because there are two walks since §13 and a
+/// template that names one of them cannot render the other.
+#[derive(Default, Clone)]
 struct Narrated {
+    id: String,
+    title: String,
+    lede_html: String,
+    crate_name: String,
+    source_lines: u32,
     units: usize,
     steps: usize,
     cited_lines: u32,
@@ -332,8 +344,10 @@ struct NarrativePage {
     steps: usize,
     cited_lines: u32,
     crossings: usize,
-    derive_version: String,
-    derive_lines: u32,
+    /// The walk's own identity and figures, so the index page describes itself
+    /// from `track.toml` rather than from a template that knows which walk it
+    /// is rendering.
+    walk: Narrated,
     source_id: String,
     root: String,
     track: String,
@@ -396,6 +410,13 @@ struct EmitBlock {
     code: Vec<Line>,
 }
 
+/// Where a file is walked, for the link off its reference page.
+struct WalkedBy {
+    track: String,
+    unit: String,
+    title: String,
+}
+
 #[derive(Template)]
 #[template(path = "file.html")]
 struct FilePage {
@@ -405,12 +426,15 @@ struct FilePage {
     /// Which annotated crate this file belongs to. Shown on the page because
     /// `src/lib.rs` is now an ambiguous title (D12).
     source: String,
-    /// Where the derive walk goes through this file, if it does. Empty
-    /// otherwise — the template tests it rather than carrying an `Option`.
-    /// N5 called reference → derive the crossing that matters; this is it made
-    /// per file rather than per track.
+    /// Where a walk goes through this file, if one does. Empty otherwise — the
+    /// template tests it rather than carrying an `Option`. N5 called
+    /// reference → derive the crossing that matters; this is it made per file
+    /// rather than per track, and per walk now that there are two.
     walk_href: String,
     walk_title: String,
+    /// The walk's own id, so the link says which walk it leads to rather than
+    /// naming one of them in the template.
+    walk_name: String,
     file: String,
     percent: f64,
     percent_label: String,
@@ -450,7 +474,7 @@ fn main() -> Result<()> {
     // different bytes and disagree about what the crate emits.
     let narrative = slbl_core::read_narrative(&repo)?;
     let mut cases: BTreeSet<String> = BTreeSet::new();
-    for unit in &narrative {
+    for unit in narrative.iter().flat_map(|t| &t.units) {
         cases.extend(unit.unit.expand_case.iter().cloned());
         for step in &unit.steps {
             if step.step.emits.is_some() {
@@ -467,13 +491,20 @@ fn main() -> Result<()> {
 
     // Which narrative unit walks each file, for the link from a reference page
     // into the walk. First unit wins: a file walked by several is reached most
-    // naturally at the earliest stop.
-    let mut walked: BTreeMap<(String, String), (String, String)> = BTreeMap::new();
-    for unit in &narrative {
-        for step in &unit.steps {
-            walked
-                .entry((step.crate_name.clone(), step.step.file.clone()))
-                .or_insert_with(|| (unit.unit.id.clone(), unit.unit.title.clone()));
+    // naturally at the earliest stop — and with two walks, "first" is in track
+    // order, which is the order the sources are pinned.
+    let mut walked: BTreeMap<(String, String), WalkedBy> = BTreeMap::new();
+    for track in &narrative {
+        for unit in &track.units {
+            for step in &unit.steps {
+                walked
+                    .entry((step.crate_name.clone(), step.step.file.clone()))
+                    .or_insert_with(|| WalkedBy {
+                        track: track.track.id.clone(),
+                        unit: unit.unit.id.clone(),
+                        title: unit.unit.title.clone(),
+                    });
+            }
         }
     }
 
@@ -526,10 +557,13 @@ fn main() -> Result<()> {
                 source: source.name.clone(),
                 walk_href: walked
                     .get(&(source.name.clone(), file.clone()))
-                    .map_or(String::new(), |(id, _)| format!("{id}.html")),
+                    .map_or(String::new(), |w| format!("{}/{}.html", w.track, w.unit)),
                 walk_title: walked
                     .get(&(source.name.clone(), file.clone()))
-                    .map_or(String::new(), |(_, title)| title.clone()),
+                    .map_or(String::new(), |w| w.title.clone()),
+                walk_name: walked
+                    .get(&(source.name.clone(), file.clone()))
+                    .map_or(String::new(), |w| w.track.clone()),
                 percent: percent_of(units, *lines),
                 percent_label: format!("{:.1}", percent_of(units, *lines)),
                 lines: *lines,
@@ -548,14 +582,14 @@ fn main() -> Result<()> {
     }
 
     write_course(&out, &store, &ctx)?;
-    let derive = write_narrative(&out, &repo, &store, &pages, &expansions, &hl)?;
+    let walks = write_narrative(&out, &repo, &store, &pages, &expansions, &hl)?;
     let glossary = write_glossary(&out, &repo, &store, &hl)?;
     write_expand(&out, &repo, &store, &hl)?;
 
     // The front page is written last because it restates what every other
     // track claims, and those numbers are counted while the tracks are built
     // rather than kept in a second place that could disagree with them.
-    let narrative_units = derive.units;
+    let narrative_units: usize = walks.iter().map(|w| w.units).sum();
     let first = store.first();
     let index = IndexPage {
         page_title: "serde line by line".to_string(),
@@ -568,7 +602,7 @@ fn main() -> Result<()> {
             first.total_lines(),
             first.annotations(),
             store.course.len(),
-            derive.units,
+            narrative_units,
         )),
         nav: build_nav(&store, &pages),
         // One row per annotated crate, each with its own figure. There is no
@@ -592,7 +626,7 @@ fn main() -> Result<()> {
             .collect(),
         complete_files: store.sources.iter().map(|s| s.complete.len()).sum(),
         course_units: store.course.len(),
-        derive,
+        walks,
         glossary,
         source_id: first.source_id.clone(),
         root: "./".to_string(),
@@ -900,11 +934,29 @@ fn write_narrative(
     pages: &Pages,
     expansions: &Expansions,
     hl: &Highlighter,
-) -> Result<Narrated> {
-    let units = slbl_core::read_narrative(repo)?;
-    if units.is_empty() {
-        return Ok(Narrated::default());
+) -> Result<Vec<Narrated>> {
+    let mut out_stats = Vec::new();
+    for track in slbl_core::read_narrative(repo)? {
+        out_stats.push(write_walk(out, &track, store, pages, expansions, hl)?);
     }
+    Ok(out_stats)
+}
+
+/// One walk: an index and a page per unit, under the track's own directory.
+///
+/// Everything that used to be spelled "derive" in this function is now read
+/// off the track, which is the whole of the §13 change to the renderer: the
+/// URL prefix is the track id, the title and lede come from `track.toml`, and
+/// the crate being walked is whichever one that file names.
+fn write_walk(
+    out: &Path,
+    track: &slbl_core::NarrativeTrackItem,
+    store: &Store,
+    pages: &Pages,
+    expansions: &Expansions,
+    hl: &Highlighter,
+) -> Result<Narrated> {
+    let units = &track.units;
     let by_id: BTreeMap<&str, &Unit> = store
         .all_units()
         .map(|u| (u.annotation.id.as_str(), u))
@@ -940,17 +992,15 @@ fn write_narrative(
         })
         .collect();
 
-    let derive_source = vendor::load_pin(repo)?.get("serde_derive")?.clone();
-    let derive_root = derive_source.dir(repo);
-    let derive_lines: u32 = vendor::source_files_in(&derive_root)?
-        .iter()
-        .filter_map(|f| vendor::line_count_in(&derive_root, f).ok())
-        .sum();
-
-    let dir = out.join("derive");
+    let dir = out.join(&track.track.id);
     std::fs::create_dir_all(&dir)?;
 
     let stats = Narrated {
+        id: track.track.id.clone(),
+        title: track.track.title.clone(),
+        lede_html: markdown::render(&track.track.lede),
+        crate_name: track.crate_name.clone(),
+        source_lines: track.lines,
         units: units.len(),
         steps: nav.iter().map(|u| u.steps).sum(),
         cited_lines: units
@@ -959,27 +1009,27 @@ fn write_narrative(
             .map(|s| s.range.line_count())
             .sum(),
         crossings: nav.iter().map(|u| u.crossings).sum(),
-        version: derive_source.version.clone(),
+        version: track.version.clone(),
     };
 
     let index = NarrativePage {
-        page_title: "The derive track — serde line by line".to_string(),
+        page_title: format!("{} — serde line by line", track.track.title),
         description: one_line(&format!(
-            "One struct and one enum followed through serde_derive {}, from the tokens the \
-             compiler hands over to the impl it gets back — {} units citing the pinned source \
-             as the path goes through it.",
-            derive_source.version,
-            units.len()
+            "{} units and {} stops through {} {}, citing the pinned source as the path goes \
+             through it.",
+            units.len(),
+            stats.steps,
+            track.crate_name,
+            track.version,
         )),
         units: nav.iter().map(clone_nnav).collect(),
         steps: stats.steps,
         cited_lines: stats.cited_lines,
         crossings: stats.crossings,
-        derive_version: derive_source.version.clone(),
-        derive_lines,
+        walk: stats.clone(),
         source_id: store.first().source_id.clone(),
         root: "../".to_string(),
-        track: "derive".to_string(),
+        track: track.track.id.clone(),
     };
     write(&dir.join("index.html"), &index.render()?)?;
 
@@ -1067,7 +1117,7 @@ fn write_narrative(
             next: nav.get(i + 1).map(clone_nnav).into_iter().collect(),
             source_id: store.first().source_id.clone(),
             root: "../".to_string(),
-            track: "derive".to_string(),
+            track: track.track.id.clone(),
         };
         write(&dir.join(format!("{}.html", unit.unit.id)), &page.render()?)?;
     }
