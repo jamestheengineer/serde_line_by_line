@@ -393,6 +393,10 @@ struct NarrativeStepBlock {
     annotation_title: String,
     /// Steps this one leans on, as links within the walk.
     leans_on: Vec<StepLink>,
+    /// The produced output, sliced out of an example's checked transcript
+    /// (D13). A list of at most one, for the same reason `emits` is: Askama
+    /// tests emptiness more readably than it unwraps an `Option`.
+    produces: Vec<ProducesBlock>,
     /// The emitted code, sliced out of a real expansion.
     emits: Vec<EmitBlock>,
 }
@@ -408,6 +412,17 @@ struct EmitBlock {
     case: String,
     range_label: String,
     code: Vec<Line>,
+}
+
+/// What an example printed, quoted from its transcript rather than from the
+/// store (D13).
+///
+/// Not highlighted: this is program output, not source, and colouring it as
+/// Rust would be a small lie about what the reader is looking at.
+struct ProducesBlock {
+    example: String,
+    range_label: String,
+    text: String,
 }
 
 /// Where a file is walked, for the link off its reference page.
@@ -937,7 +952,7 @@ fn write_narrative(
 ) -> Result<Vec<Narrated>> {
     let mut out_stats = Vec::new();
     for track in slbl_core::read_narrative(repo)? {
-        out_stats.push(write_walk(out, &track, store, pages, expansions, hl)?);
+        out_stats.push(write_walk(out, repo, &track, store, pages, expansions, hl)?);
     }
     Ok(out_stats)
 }
@@ -950,6 +965,7 @@ fn write_narrative(
 /// the crate being walked is whichever one that file names.
 fn write_walk(
     out: &Path,
+    repo: &Path,
     track: &slbl_core::NarrativeTrackItem,
     store: &Store,
     pages: &Pages,
@@ -1061,6 +1077,15 @@ fn write_walk(
                 emits.push(emit_block(expansions, hl, &s.id, snippet, kind, case)?);
             }
 
+            let mut produces = Vec::new();
+            let example = s
+                .produces_example
+                .as_ref()
+                .or(unit.unit.run_example.as_ref());
+            if let (Some(snippet), Some(example)) = (&s.produces, example) {
+                produces.push(produces_block(repo, &s.id, snippet, example)?);
+            }
+
             steps.push(NarrativeStepBlock {
                 id: s.id.clone(),
                 title: s.title.clone(),
@@ -1072,6 +1097,7 @@ fn write_walk(
                 glossary: gloss_links(&s.glossary),
                 annotation_href,
                 annotation_title,
+                produces,
                 leans_on: s
                     .leans_on
                     .iter()
@@ -1166,6 +1192,32 @@ fn expansions_for<'a>(cases: impl Iterator<Item = &'a String>) -> Result<Expansi
 /// `who` names whatever made the claim — an annotation id or a step id — and
 /// appears in the error if the crate has stopped emitting it, which is the
 /// whole value of doing this at build time.
+/// One `produces` claim, located in the example's transcript and rendered from
+/// the transcript's own bytes.
+///
+/// The store holds a locator and never the output, which is D10's rule applied
+/// to the other kind of output a crate has. What makes the transcript itself
+/// true is two other gates: `cargo test` asserts it against a native run, and
+/// the wasm smoke test asserts it against the browser's — so the reader is
+/// shown bytes that three separate checks agree the code produces.
+fn produces_block(repo: &Path, who: &str, snippet: &str, example: &str) -> Result<ProducesBlock> {
+    let path = repo.join("examples").join(example).join("expected.txt");
+    let text = std::fs::read_to_string(&path)
+        .with_context(|| format!("{who}: reading {}", path.display()))?;
+    let (start, len) = slbl_core::locate(&text, snippet).with_context(|| {
+        format!(
+            "{who}: the output it says this code produces is not in {example}'s transcript \
+             — the store's claim and the example's output have parted company"
+        )
+    })?;
+    let lines: Vec<&str> = text.lines().collect();
+    Ok(ProducesBlock {
+        example: example.to_string(),
+        range_label: label(start as u32 + 1, (start + len) as u32),
+        text: lines[start..start + len].join("\n"),
+    })
+}
+
 fn emit_block(
     expansions: &Expansions,
     hl: &Highlighter,
@@ -1177,7 +1229,7 @@ fn emit_block(
     let expansion = expansions
         .get(&(case.to_string(), kind))
         .with_context(|| format!("{who}: no expansion computed for case {case:?}"))?;
-    let (start, len) = locate(expansion, snippet).with_context(|| {
+    let (start, len) = slbl_core::locate(expansion, snippet).with_context(|| {
         format!(
             "{who}: the code it says serde_derive emits is not in the {} expansion of {case} \
              — the store's claim and the crate's output have parted company",
@@ -1198,36 +1250,6 @@ fn emit_block(
         range_label: label(start as u32 + 1, (start + len) as u32),
         code: lines,
     })
-}
-
-/// Finds `snippet` in `text` as a contiguous run of lines, returning
-/// `(first line index, line count)`.
-///
-/// Lines are compared with surrounding whitespace stripped, and blank lines at
-/// the ends of the snippet are ignored. Generated code is reindented whenever
-/// anything above it changes shape, and a claim about what `serde_derive` emits
-/// should not break because a block moved one level deeper. A change in the
-/// tokens themselves still breaks it, which is the point.
-fn locate(text: &str, snippet: &str) -> Option<(usize, usize)> {
-    let want: Vec<&str> = snippet
-        .lines()
-        .map(str::trim)
-        .skip_while(|l| l.is_empty())
-        .collect();
-    let want: Vec<&str> = {
-        let mut w = want;
-        while w.last().is_some_and(|l| l.is_empty()) {
-            w.pop();
-        }
-        w
-    };
-    if want.is_empty() {
-        return None;
-    }
-    let have: Vec<&str> = text.lines().map(str::trim).collect();
-    have.windows(want.len())
-        .position(|w| w == want.as_slice())
-        .map(|at| (at, want.len()))
 }
 
 /// The borrowed-vocabulary page (D9).
@@ -1999,43 +2021,4 @@ fn repo_root() -> Result<PathBuf> {
         .parent()
         .context("app has no parent directory")?
         .to_path_buf())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::locate;
-
-    /// The point of matching on trimmed lines: `prettyplease` reindents
-    /// generated code whenever anything enclosing it changes shape, and a
-    /// claim about what `serde_derive` emits should survive that.
-    #[test]
-    fn indentation_does_not_affect_a_match() {
-        let expansion = "fn main() {\n    if x {\n        go();\n    }\n}\n";
-        let snippet = "if x {\n    go();\n}";
-        assert_eq!(locate(expansion, snippet), Some((1, 3)));
-    }
-
-    /// …and the other half: a change to the tokens themselves must fail, or
-    /// the check would be decorative.
-    #[test]
-    fn a_changed_token_does_not_match() {
-        let expansion = "fn main() {\n    go_away();\n}\n";
-        assert_eq!(locate(expansion, "go();"), None);
-    }
-
-    /// Blank lines around a `"""…"""` block in the store are an artifact of
-    /// writing toml, not part of the claim.
-    #[test]
-    fn surrounding_blank_lines_are_ignored() {
-        let expansion = "a;\nb;\nc;\n";
-        assert_eq!(locate(expansion, "\n\nb;\nc;\n\n"), Some((1, 2)));
-    }
-
-    /// A run has to be contiguous. Two lines that both appear but with
-    /// something between them are not the block the store described.
-    #[test]
-    fn a_run_must_be_contiguous() {
-        let expansion = "a;\nb;\nc;\n";
-        assert_eq!(locate(expansion, "a;\nc;"), None);
-    }
 }

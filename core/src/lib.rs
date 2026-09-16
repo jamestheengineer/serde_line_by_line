@@ -439,6 +439,42 @@ pub fn read_glossary(repo: &Path) -> Result<Vec<GlossaryItem>> {
     Ok(out)
 }
 
+/// Finds `snippet` in `text` as a contiguous run of lines, returning
+/// `(first line index, line count)`.
+///
+/// Lines are compared with surrounding whitespace stripped, and blank lines at
+/// the ends of the snippet are ignored. Generated code is reindented whenever
+/// anything above it changes shape, and a claim about what `serde_derive` emits
+/// should not break because a block moved one level deeper. A change in the
+/// tokens themselves still breaks it, which is the point.
+///
+/// Shared rather than duplicated because two things locate a quotation and
+/// they must agree: the coverage gate, which checks a `produces` claim against
+/// an example's transcript (D13), and the renderer, which slices an `emits`
+/// claim out of a real expansion (D10). A matching rule that drifted between
+/// them would pass one and fail the other over the same store.
+pub fn locate(text: &str, snippet: &str) -> Option<(usize, usize)> {
+    let want: Vec<&str> = snippet
+        .lines()
+        .map(str::trim)
+        .skip_while(|l| l.is_empty())
+        .collect();
+    let want: Vec<&str> = {
+        let mut w = want;
+        while w.last().is_some_and(|l| l.is_empty()) {
+            w.pop();
+        }
+        w
+    };
+    if want.is_empty() {
+        return None;
+    }
+    let have: Vec<&str> = text.lines().map(str::trim).collect();
+    have.windows(want.len())
+        .position(|w| w == want.as_slice())
+        .map(|at| (at, want.len()))
+}
+
 /// One narrative unit, resolved against the trees its steps cite.
 #[derive(Debug, Clone)]
 pub struct NarrativeItem {
@@ -651,6 +687,42 @@ fn read_narrative_units(repo: &Path, dir: &Path) -> Result<Vec<NarrativeItem>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The point of matching on trimmed lines: `prettyplease` reindents
+    /// generated code whenever anything enclosing it changes shape, and a
+    /// claim about what `serde_derive` emits should survive that. The same
+    /// tolerance is what lets a `produces` claim survive an example printing
+    /// its transcript one column further in (D13).
+    #[test]
+    fn indentation_does_not_affect_a_match() {
+        let expansion = "fn main() {\n    if x {\n        go();\n    }\n}\n";
+        let snippet = "if x {\n    go();\n}";
+        assert_eq!(locate(expansion, snippet), Some((1, 3)));
+    }
+
+    /// …and the other half: a change to the tokens themselves must fail, or
+    /// the check would be decorative.
+    #[test]
+    fn a_changed_token_does_not_match() {
+        let expansion = "fn main() {\n    go_away();\n}\n";
+        assert_eq!(locate(expansion, "go();"), None);
+    }
+
+    /// Blank lines around a `"""…"""` block in the store are an artifact of
+    /// writing toml, not part of the claim.
+    #[test]
+    fn surrounding_blank_lines_are_ignored() {
+        let expansion = "a;\nb;\nc;\n";
+        assert_eq!(locate(expansion, "\n\nb;\nc;\n\n"), Some((1, 2)));
+    }
+
+    /// A run has to be contiguous. Two lines that both appear but with
+    /// something between them are not the block the store described.
+    #[test]
+    fn a_run_must_be_contiguous() {
+        let expansion = "a;\nb;\nc;\n";
+        assert_eq!(locate(expansion, "a;\nc;"), None);
+    }
     use schema::{Kind, Track};
 
     fn annotation(id: &str, file: &str, line: u32, prereqs: &[&str]) -> Unit {

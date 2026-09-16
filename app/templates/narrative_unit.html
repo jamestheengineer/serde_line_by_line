@@ -49,6 +49,15 @@
       <div class="ln" id="{{ s.id }}-L{{ line.number }}" data-n="{{ line.number }}"><span class="num">{{ line.number }}</span><code>{{ line.html|safe }}</code></div>
     {%- endfor %}
     </div>
+    {% for p in s.produces %}
+    <div class="emits produces">
+      <div class="codehead">
+        <span class="range">produces · <code>{{ p.example }}</code></span>
+        <span class="origin">{{ p.range_label }} of its output</span>
+      </div>
+      <pre class="out">{{ p.text }}</pre>
+    </div>
+    {% endfor %}
     {% for e in s.emits %}
     <div class="emits">
       <div class="codehead">

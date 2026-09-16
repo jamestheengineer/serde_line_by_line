@@ -533,6 +533,10 @@ complete: two annotated crates at 100%, a course track spanning both, and a
 walk that became an ordering over the store rather than a track with citations
 of its own.
 
+D13 is PLAN.md §13's one question, and it is D10's asked about a crate that
+runs rather than one that generates: how a walk proves what it claims the code
+produces. It is answered below.
+
 **Still open: nothing.**
 
 ---
@@ -796,3 +800,79 @@ URLs. The first source keeps the unqualified page names the site already
 serves — `file/src-ser-mod.rs.html` — and only the newer crate is prefixed.
 `badge.json` likewise stays `serde_core`'s, with the other sources' badges
 named after them.
+
+---
+
+## D13 — a claim about what a crate produces is checked against a real run
+
+**Decision:** a narrative step may quote what the code it cites produces, and
+the quotation is a *locator*, not content — the same rule D10 made for
+generated code, applied to the other kind of output a crate has. The step names
+an `examples/*` crate, `cargo xtask coverage` finds the quoted run of lines in
+that example's transcript, and `cargo site` renders the transcript's own bytes.
+A quotation that no longer matches fails the build naming the step.
+
+No second harness was built. The mechanism is a way of *citing* one that has
+existed since phase 0.
+
+### The problem this is for
+
+D10 answered this question for `serde_derive`, whose output is generated at
+compile time: run the crate, find the lines, render them. The walk through
+`serde_json` (PLAN.md §13) makes a different claim — not *this code is
+emitted* but **this input produces this output** — and every field D10 built
+assumes an expansion. `expand_case` names a file in `expand/cases/`;
+`emits_from` names which half of a derive. A parser has no halves and no
+expansion.
+
+The claim is just as unprotectable by the pin, and for the same reason: nothing
+in `src_tree_sha256` knows that `serde_json` 1.0.152 rounds a float
+differently, or reports a trailing comma at a different column.
+
+### Why not expand D10's machinery to run the crate at build time
+
+That is the symmetric answer and it is the wrong one, because it rebuilds
+something this repo already has and gates twice.
+
+An example is a real crate returning a `String` (PLAN.md §6). `cargo test`
+asserts its output against `expected.txt` natively. `cargo xtask wasm` then
+runs every example out of the *built wasm module* under node and diffs the same
+file, because "compiles for wasm32" and "passes natively" do not add up to "the
+browser prints what the explanation claims". A transcript that has been through
+both is not stored output in the sense D10 refused — it is a checked artifact,
+and two gates fail if the code stops producing it.
+
+So the locator composes rather than duplicates:
+
+| what is checked | by | when |
+|---|---|---|
+| the quotation is in the transcript | `cargo xtask coverage`, and again at render | every push |
+| the transcript is what the code prints | `cargo test` | every push |
+| the transcript is what the *browser* prints | `cargo xtask wasm` | every push |
+
+A reader is shown bytes that three separate checks agree the code produces, and
+the reader can run the same example themselves on the page.
+
+### Why the gate checks it and not only the renderer
+
+`emits` is verified at render time because obtaining the expansion means
+compiling a patched `serde_derive`, which the coverage gate has no business
+doing. A transcript is a file. So `produces` is checked in both places, and the
+matching rule moved into `slbl_core::locate` so the two cannot drift: a rule
+that differed between them would pass one gate and fail the other over the same
+store.
+
+### What it does not do
+
+**It does not highlight the output.** A transcript is program output, not
+source, and colouring it as Rust would be a small lie about what the reader is
+looking at.
+
+**It does not claim the example is the crate.** An example is code this project
+wrote that calls the pinned crate. What is verified is that the crate, at the
+pinned version, really produces those bytes — not that the example is the only
+way to get them.
+
+**It does not replace `emits`.** Both fields stay, they mean different things,
+and a step may carry either. The symmetry is the argument for the naming:
+`run_example` is to `produces` what `expand_case` is to `emits`.

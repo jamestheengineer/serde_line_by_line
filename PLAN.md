@@ -1001,10 +1001,72 @@ not run a different release of any crate this repo pins.
 
 | phase | scope | exit criteria |
 |---|---|---|
-| **J1 — A second walk** | Pin `serde_json` 1.0.151 as `narrative`; `narrative/` becomes `narrative/<track>/`; step ids, unit ordering and the forward-reference check become per track; `NOTICE.md` gains the tree's second copyright holder; glossary sources pinned only for what the walk actually quotes (scope §5 lists four candidates; it may be none) | `cargo xtask coverage` reports the derive walk unchanged — 9 units, 85 steps, crossings 8, 9, 10, 7, 9, 10, 9, 12, 11 — beside an empty json walk, without error; a step id repeated across tracks is fine and a forward reference inside one still fails the build |
-| **J2 — D13: output that is run** | The json walk's analogue of D10, argued and built: a claim about what the crate produces, checked against the crate producing it | A step's claimed output is byte-identical to what the pinned `serde_json` produces on the host and in the browser; editing the expected text fails the build rather than the page |
+| **J1 — A second walk** ✅ | Pin `serde_json` 1.0.151 as `narrative`; `narrative/` becomes `narrative/<track>/`; step ids, unit ordering and the forward-reference check become per track; `NOTICE.md` gains the tree's second copyright holder; glossary sources pinned only for what the walk actually quotes (scope §5 lists four candidates; it may be none) | `cargo xtask coverage` reports the derive walk unchanged — 9 units, 85 steps, crossings 8, 9, 10, 7, 9, 10, 9, 12, 11 — beside an empty json walk, without error; a step id repeated across tracks is fine and a forward reference inside one still fails the build |
+| **J2 — D13: output that is run** ✅ | The json walk's analogue of D10, argued and built: a claim about what the crate produces, checked against the crate producing it | A step's claimed output is byte-identical to what the pinned `serde_json` produces on the host and in the browser; editing the expected text fails the build rather than the page |
 | **J3 — The walk** | 8–10 units, one document, bytes → `read.rs` → `Value` → `ser.rs`, and separately into a struct through §11's generated impl | Walkable start to finish; every cited range resolves; every crossing into either annotated crate names the annotation it lands in; no forward references |
 | **J4 — Ship** | Four tracks in the header, the restated promise, `README` | Each track reachable and each honest about what it claims; the front page says what `serde_json` is in the one-sentence-per-role form, with no third percentage |
+
+### What J1 shipped
+
+`serde_json` 1.0.151 is pinned as the `narrative` role's first source since R1
+took it off `serde_derive`, and adding a source is `cargo xtask vendor
+<name>@<version> --role <role>` rather than three commands with the important
+one easy to skip. `NOTICE.md` got the second copyright holder the scope doc
+predicted, by scanning each vendored tree for copyright lines its manifest does
+not account for — one hit across all six trees — rather than by the hardcoded
+table the generator was written to avoid.
+
+`narrative/` became `narrative/<track>/`, which is R1's shape one level down
+and was load-bearing in three places at once: a flat directory interleaved two
+walks by filename, step ids were unique across the store rather than within a
+walk, and D8's forward-reference check numbered steps "across units, because
+the walk is one sequence". All three are per track now, verified by probe
+before it was deleted — a step id shared with the derive walk is fine, a
+forward reference inside a walk still fails naming the unit, and leaning on a
+step in the *other* walk is an unknown id rather than a comparison between
+unrelated sequences.
+
+`track.toml` holds what the renderer used to hardcode: the id that is also the
+URL, the title, the lede, and the crate the walk is about. Not the order —
+tracks are presented in the pin order of the source each one walks, so the
+sequence lives where this project's reading orders already live.
+
+Two things fell out. `bump`'s `narrative_cites` walked the flat directory and
+would have found no unit files after the move, so a bump would have rewritten
+the annotations and left every crossing pointing into the old tree — the exact
+failure D11 exists to prevent. And the example pin check, which read
+`pin.coverage()?[0]`, now runs over every pinned source: the rule has nothing
+to do with roles, because an example may not run a different release of any
+crate this repo pins.
+
+### What J2 shipped
+
+**D13, and no second harness.** §13 guessed that the walk "may not need a
+second mechanism so much as a way to cite the one that exists", and that is how
+it landed. A step names an `examples/*` crate and quotes lines of its output;
+the gate and the renderer both locate the quotation in that example's
+transcript, and the reader is shown the transcript's bytes. `run_example` is to
+`produces` what `expand_case` is to `emits`, and the symmetry is the argument
+for the naming.
+
+The transcript is not stored output in the sense D10 refused. `cargo test`
+asserts it against a native run and `cargo xtask wasm` asserts it against the
+*browser's*, so a located quotation is output three separate gates agree on —
+which is a stronger claim than the derive walk's, and it cost nothing to make
+because phase 0 built both gates.
+
+Two differences from D10 worth naming. The coverage gate checks a `produces`
+claim as well as the renderer, because a transcript is a file where an
+expansion is a compilation; and the matching rule moved into
+`slbl_core::locate` so the two callers cannot drift into passing one gate and
+failing the other over the same store.
+
+**And the first example, so the mechanism has a user.** `examples/json_document`
+runs `{"a":[1,true],"b":"x"}` through `serde_json` 1.0.151 into a `Value` and
+back out, with the pretty printer and a trailing-comma error carrying its
+position. It compiles to `wasm32-unknown-unknown` untouched, exactly as the
+scope doc's spike measured, and the playground's node check now reports 13
+examples matching their transcripts in the browser rather than 12.
 
 ### Cost
 

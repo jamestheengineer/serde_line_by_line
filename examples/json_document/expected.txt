@@ -1,0 +1,24 @@
+input   {"a":[1,true],"b":"x"}
+
+value
+  Object, 2 keys
+    a: Array, 2 items
+      Number(1)
+      Bool(true)
+    b: String("x")
+
+to_string    {"a":[1,true],"b":"x"}
+round trips  true
+
+to_string_pretty
+  {
+    "a": [
+      1,
+      true
+    ],
+    "b": "x"
+  }
+
+input    {"a":[1,true,],"b":"x"}
+error    trailing comma at line 1 column 14
+at       line 1 column 14

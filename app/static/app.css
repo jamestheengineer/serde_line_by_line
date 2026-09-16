@@ -774,6 +774,21 @@ main { padding: 0 0 80px; min-width: 0; }
 }
 .emits .src { opacity: 0.92; }
 
+/* Program output, not source. Deliberately unhighlighted: colouring a
+   transcript as Rust would be a small lie about what the reader is reading
+   (D13). */
+.emits .out {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre;
+  color: var(--fg-muted);
+  background: var(--bg-code);
+  border-radius: 4px;
+}
+
 /* The input the unit follows, above its steps. */
 .walkcase {
   margin: 4px 32px 12px;

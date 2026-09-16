@@ -162,6 +162,9 @@ things that differ most from an annotation:
   ([PLAN.md §11](../PLAN.md)).
 - A step that crosses into `serde_core` must name the reference-track annotation
   it lands inside, and the gate checks the containment.
+- A step may quote what its citation **emits** (against a real expansion, D10)
+  or what it **produces** (against a real example's transcript, D13). Both are
+  locators: the store never holds the output the reader sees.
 - `emits` — generated code a step claims its citation produces — is verified
   against a real expansion by `cargo site`, which renders the expansion's own
   lines rather than the string in the store ([D10](decisions.md)).

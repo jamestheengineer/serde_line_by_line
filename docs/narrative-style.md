@@ -107,6 +107,28 @@ that appears twice will silently match the first. And the match is on the
 *formatted* expansion, so the easiest way to write one is to run
 `cargo test -p expand` once and copy out of `expand/expected.txt`.
 
+## Quoting what the code produces
+
+`produces` is the same idea about the other kind of output a crate has — not
+*this code is emitted* but *this input produces this output* — and it is
+checked the same way, with one extra gate behind it (D13):
+
+1. The unit names a `run_example`, an `examples/*` crate, or the step names a
+   `produces_example` for the rare step needing a different one.
+2. `cargo xtask coverage` locates `produces` in that example's `expected.txt`
+   as a contiguous run of lines, whitespace-stripped, by the same
+   `slbl_core::locate` the renderer uses. `cargo site` locates it again and
+   renders **the transcript's lines**, never the string in the store.
+3. What makes the transcript trustworthy is not this step. `cargo test` asserts
+   it against a native run of the example and `cargo xtask wasm` asserts it
+   against the browser's, so a located quotation is output three gates agree on.
+
+Write the example first, run `cargo test -p <example> -- --ignored` to generate
+its transcript, and copy out of that. The same practical note applies: include
+enough lines to be unique.
+
+Output is rendered unhighlighted, because it is program output and not source.
+
 ## Voice
 
 The same as an annotation ([annotation-style.md](annotation-style.md)), with one

@@ -382,6 +382,12 @@ pub struct NarrativeUnit {
     /// the unit is anchored to one worked example rather than to a mood.
     #[serde(default)]
     pub expand_case: Option<String>,
+    /// Name of an `examples/*` crate this unit is following. Every step that
+    /// quotes what the crate *produces* quotes it out of this example's real
+    /// output, the same way `expand_case` anchors a claim about emitted code
+    /// to one expansion (D13).
+    #[serde(default)]
+    pub run_example: Option<String>,
     pub body: String,
 }
 
@@ -428,6 +434,18 @@ pub struct NarrativeStep {
     /// second input. Saying which is better than quietly switching examples.
     #[serde(default)]
     pub emits_case: Option<String>,
+    /// Output this step claims the code it cites produces, located in a real
+    /// example's real output rather than stored here (D13). Matched
+    /// contiguously with leading and trailing whitespace stripped, exactly as
+    /// [`NarrativeStep::emits`] is matched against an expansion — the two
+    /// fields are the same idea about two kinds of output, one generated at
+    /// compile time and one computed at run time.
+    #[serde(default)]
+    pub produces: Option<String>,
+    /// An example other than the unit's own to quote from. Same rarity and the
+    /// same reason as [`NarrativeStep::emits_case`].
+    #[serde(default)]
+    pub produces_example: Option<String>,
     pub body: String,
 }
 

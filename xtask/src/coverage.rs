@@ -354,7 +354,7 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
 
     // 7. The narrative track, which is now an ordering over both annotated
     //    stores rather than a walk of an unclaimed one (PLAN.md §12).
-    let narrative = check_narrative(repo, &by_id, &glossary, &cases, &mut diag)?;
+    let narrative = check_narrative(repo, &by_id, &glossary, &cases, &examples, &mut diag)?;
 
     let report = Report {
         sources,
@@ -752,12 +752,15 @@ fn check_narrative(
     by_id: &HashMap<&str, &Annotation>,
     glossary: &HashSet<String>,
     cases: &HashSet<String>,
+    examples: &HashSet<String>,
     diag: &mut Diagnostics,
 ) -> Result<Vec<NarrativeTrackReport>> {
     let tracks = slbl_core::read_narrative(repo)?;
     let mut out = Vec::new();
     for track in &tracks {
-        out.push(check_narrative_track(track, by_id, glossary, cases, diag)?);
+        out.push(check_narrative_track(
+            repo, track, by_id, glossary, cases, examples, diag,
+        )?);
     }
     Ok(out)
 }
@@ -771,10 +774,12 @@ fn check_narrative(
 /// order between them, and pretending they did would make D8's check compare
 /// positions in unrelated sequences.
 fn check_narrative_track(
+    repo: &Path,
     track: &slbl_core::NarrativeTrackItem,
     by_id: &HashMap<&str, &Annotation>,
     glossary: &HashSet<String>,
     cases: &HashSet<String>,
+    examples: &HashSet<String>,
     diag: &mut Diagnostics,
 ) -> Result<NarrativeTrackReport> {
     let units = &track.units;
@@ -827,6 +832,14 @@ fn check_narrative_track(
             if !cases.contains(case) {
                 diag.error(format!(
                     "{}: expand_case {case:?} is not a file in expand/cases/",
+                    u.id
+                ));
+            }
+        }
+        if let Some(name) = &u.run_example {
+            if !examples.contains(name) {
+                diag.error(format!(
+                    "{}: run_example {name:?} is not a crate in examples/",
                     u.id
                 ));
             }
@@ -932,6 +945,52 @@ fn check_narrative_track(
             if s.emits.is_none() && s.emits_case.is_some() {
                 diag.error(format!("{}: has emits_case but no emits", s.id));
             }
+
+            // D13. A claim about what the crate produces is checked here, not
+            // only at render time as `emits` is, because the thing it is
+            // checked against is a file rather than an expansion somebody has
+            // to compile `serde_derive` to obtain. The transcript's own truth
+            // is the examples gate's job: `cargo test` asserts it against a
+            // native run and the wasm smoke test asserts it against the
+            // browser's, so a quotation located here is a quotation from
+            // output that two other gates have already proved is real.
+            match (
+                &s.produces,
+                s.produces_example.as_ref().or(u.run_example.as_ref()),
+            ) {
+                (Some(_), None) => diag.error(format!(
+                    "{}: quotes what the code produces, but neither it nor {} names an \
+                     example to quote it from",
+                    s.id, u.id
+                )),
+                (Some(snippet), Some(name)) => {
+                    if !examples.contains(name) {
+                        diag.error(format!(
+                            "{}: produces_example {name:?} is not a crate in examples/",
+                            s.id
+                        ));
+                    } else {
+                        match transcript(repo, name) {
+                            Err(e) => diag.error(format!("{}: {e:#}", s.id)),
+                            Ok(text) => {
+                                if slbl_core::locate(&text, snippet).is_none() {
+                                    diag.error(format!(
+                                        "{}: the output it says this code produces is not in \
+                                         {name}'s transcript — the store's claim and the \
+                                         example's output have parted company",
+                                        s.id
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+                (None, _) => {
+                    if s.produces_example.is_some() {
+                        diag.error(format!("{}: has produces_example but no produces", s.id));
+                    }
+                }
+            }
         }
 
         out.push(NarrativeUnitReport {
@@ -948,6 +1007,23 @@ fn check_narrative_track(
         source: slbl_core::vendor::source_id(&track.crate_name, &track.version),
         source_lines: track.lines,
         units: out,
+    })
+}
+
+/// One example's committed transcript.
+///
+/// Read off disk, not run: what makes it trustworthy is not this function but
+/// the two gates that assert it elsewhere — `cargo test` against a native run
+/// of the example, and the wasm smoke test against the browser's. D13 leans on
+/// that composition deliberately rather than compiling and running an example
+/// inside the coverage gate.
+fn transcript(repo: &Path, name: &str) -> Result<String> {
+    let path = repo.join("examples").join(name).join("expected.txt");
+    std::fs::read_to_string(&path).with_context(|| {
+        format!(
+            "reading {}, the transcript a produces claim is checked against",
+            path.display()
+        )
     })
 }
 
