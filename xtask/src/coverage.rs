@@ -138,11 +138,18 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
     let glossary = check_glossary(repo, &mut diag)?;
     let features = load_feature_vocabulary(repo)?;
     let examples = load_example_names(repo)?;
-    // The examples build against the first coverage source: they are
-    // `serde_core` programs, and `serde_derive` is not something an example
-    // calls, it is something the site expands.
-    let first = pin.coverage()?[0];
-    check_example_pins(repo, &first.name, &first.version, &mut diag)?;
+    // Every pinned source, not the first coverage one. That refusal was
+    // correct when it was written — the examples were `serde_core` programs
+    // and nothing else was pinned that an example could call — and it is the
+    // door §13 found open: a `serde_json` example is a `serde_json` program,
+    // and under a narrative role it is not a coverage source at all, so
+    // neither shape of that check would have looked at its version. What the
+    // rule actually is has nothing to do with roles: an example may not run a
+    // different release of a crate this repo pins, because the annotations,
+    // the walks and the glossary all describe the pinned one.
+    for source in &pin.sources {
+        check_example_pins(repo, &source.name, &source.version, &mut diag)?;
+    }
     check_harness_pins(repo, &pin, &mut diag)?;
 
     // 2. Each annotated source's store, loaded before anything is checked, so
@@ -1010,6 +1017,12 @@ fn load_feature_vocabulary(repo: &Path) -> Result<BTreeSet<String>> {
 /// release than the one being explained is the same drift the vendor checksum
 /// exists to prevent, arriving through the other door — and `cargo xtask bump`
 /// retargets these manifests, so a mismatch means a bump was left half-done.
+/// One pinned crate against every example that depends on it.
+///
+/// An example that names the crate at all must name the pinned version
+/// exactly. An example that does not depend on it is not this check's
+/// business, which is why a missing line is skipped rather than reported:
+/// most examples depend on one pinned crate and none depend on all of them.
 fn check_example_pins(
     repo: &Path,
     name: &str,

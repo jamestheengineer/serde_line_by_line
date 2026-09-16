@@ -989,11 +989,13 @@ derive walk ever got to make, because the walk that connects three crates is
 checked at every seam between them.
 
 One smaller thing, and it is the door the scope doc found open. The example pin
-check reads `pin.coverage()?[0]` with its reason in a comment: *"the examples
+check read `pin.coverage()?[0]` with its reason in a comment: *"the examples
 build against the first coverage source: they are `serde_core` programs"*. A
 `serde_json` example is a `serde_json` program, and under a narrative role it is
-not a coverage source at all, so today the check would not look at its version
-in either shape. Same refusal, correct when written, wrong for a third crate.
+not a coverage source at all, so neither shape of that check would have looked
+at its version. Same refusal, correct when written, wrong for a third crate —
+and closed in J1, because the rule has nothing to do with roles: an example may
+not run a different release of any crate this repo pins.
 
 ### Roadmap
 

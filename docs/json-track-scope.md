@@ -161,6 +161,13 @@ at the version it pins. That is the drift the vendor checksum exists to prevent,
 arriving through a door that is now open. Half a session, and it is the same
 shape as D12: a refusal written for one source, correct when written.
 
+> **Closed, 2026-09-15**, and the narrative shape needed it just as much: under
+> a narrative role a `serde_json` example is not a coverage source at all, so
+> neither reading of that check would have looked at it. The rule turned out to
+> have nothing to do with roles — an example may not run a different release of
+> any crate this repo pins — so the check now runs over every source in the
+> pin. Verified by mispinning one and watching it fail.
+
 **Examples are nearly free — measured, not assumed.** N3's expander cost a
 session and 253,693 gzipped bytes because `serde_derive` is a proc macro and had
 to be patched into a library. `serde_json` is an ordinary `no_std`-capable
