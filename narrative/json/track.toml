@@ -1,0 +1,12 @@
+schema = 1
+
+[track]
+id = "json"
+title = "The json track"
+source = "serde_json-1.0.151"
+lede = """
+One document — `{"a":[1,true],"b":"x"}` — followed through `serde_json` from
+the bytes to a `Value` and back out again, then straight into a struct through
+the `impl` the derive track watched being emitted. Every claim about what the
+crate produces is quoted out of a real run of the pinned version.
+"""

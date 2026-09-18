@@ -1,0 +1,240 @@
+schema = 1
+
+[unit]
+id = "01-into-the-deserializer"
+title = "Twenty-two bytes, and the four lines that accept them"
+run_example = "json_document"
+summary = """
+`from_str` is four lines. What they set up is a `Deserializer` over a sealed
+trait with three implementations, one of which exists only so the UTF-8 check
+can be skipped — and the reason the walk starts here is that the parser never
+sees a `&str` again.
+"""
+body = """
+The document this walk follows is twenty-two bytes:
+
+```json
+{"a":[1,true],"b":"x"}
+```
+
+It is deliberately dull, and it still contains every shape the parser has a
+separate path for: an object, an array, an integer, a boolean, a string. By the
+end of unit 06 it will be a `Value`; by the end of unit 07 it will be those
+same twenty-two bytes again; and in unit 09 it goes somewhere else entirely —
+straight into a struct, through the `Deserialize` impl the [derive
+track](../derive/index.html) watched `serde_derive` emit.
+
+`serde_json` is 18,329 lines of `src/`, and `src/lib.rs` is 441 of them with
+301 taken by the crate's front-page documentation. The module list at the
+bottom of it is the map for everything that follows: `read` produces bytes,
+`de` interprets them, `value` is what they become, `ser` turns them back, and
+`error` carries the position when one of those steps disagrees with the input.
+
+Start where a caller starts.
+"""
+
+[[step]]
+id = "s01-from-str"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "2709-2714"
+title = "from_str — a wrapper, a call, and no parsing at all"
+produces = 'input   {"a":[1,true],"b":"x"}'
+body = """
+The whole public entry point for parsing a string is one expression. `s` is
+wrapped in a `StrRead` and handed to `from_trait`, and every decision the
+function makes is in its signature rather than its body.
+
+`T: de::Deserialize<'a>` is the load-bearing part, and the lifetime is the same
+`'a` as the input's. That is what makes `serde_json::from_str::<&str>(...)`
+legal: the output may borrow from the bytes that went in. Swap `from_str` for
+`from_reader` and the bound becomes `DeserializeOwned` — not because the parser
+changes, but because a `std::io::Read` has no bytes for the result to point at.
+
+The first line of this walk's transcript is that call's input, printed before
+anything has looked at it.
+"""
+
+[[step]]
+id = "s01-from-trait"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "2507-2518"
+leans_on = ["s01-from-str"]
+title = "from_trait — construct, deserialize, and then insist the input is finished"
+body = """
+Three statements, and the third one is the interesting one.
+
+`Deserialize::deserialize(&mut de)` is the entire parse. It is called as an
+associated function on the *type being produced*, not as a method on the
+deserializer, which is the direction serde runs in: the type asks for what it
+wants and the format answers. Nothing in `serde_json` knows what `T` is.
+
+Then `de.end()`. A parser that stopped after the value would accept
+`{"a":1} garbage` and hand back a struct, because the struct was complete
+before the garbage started. `from_str` promises the whole string was JSON, so
+the check lives here, in the free function, and not in `Deserializer` — hold a
+`Deserializer` yourself and you may parse a prefix and keep the rest.
+
+`tri!` is the crate's own `?`. `lib.rs` says why in a comment: only one error
+type is ever involved, so the `From` conversion `?` performs is dead weight,
+and removing it is 4% of the crate's LLVM IR.
+"""
+
+[[step]]
+id = "s01-deserialize-trait"
+source = "serde_core-1.0.229"
+file = "src/de/mod.rs"
+lines = "555-563"
+annotation = "de-mod-0020"
+leans_on = ["s01-from-trait"]
+title = "…and the method it called is the one the reference track already read"
+body = """
+This is the seam. `from_trait` calls `Deserialize::deserialize`, and the
+definition it resolves to is nine lines in a crate this site annotates line by
+line — so the walk does not explain it a second time, it lands in the
+annotation and links there.
+
+Worth noting what the signature does *not* have: a `&self`. There is no value
+yet, which is the whole point of deserialization, so `deserialize` is an
+associated function that manufactures one. `D: Deserializer<'de>` is generic,
+so the call in `from_trait` is a static dispatch to whatever impl `T` has —
+including, in unit 09, an impl that did not exist until the compiler ran
+`serde_derive`.
+"""
+
+[[step]]
+id = "s01-deserializer-struct"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "30-39"
+leans_on = ["s01-from-trait"]
+title = "The Deserializer is four fields wide, and two of them are cfg'd away"
+body = """
+This is the parser's entire state. A reader, a scratch buffer, a depth counter,
+and — under features this build does not enable — two flags.
+
+`scratch: Vec<u8>` is one buffer for the whole parse, reused by every string
+that turns out to need unescaping. Unit 04 is about what it costs when it is
+untouched, which for this document is nothing: no string in it contains an
+escape, so the buffer is allocated once, never grown, and every string the
+parser hands out points into the original bytes.
+
+`remaining_depth: u8` is the recursion limit, counting down. The parser
+descends by recursive calls, so an unbounded nesting depth in the *input* is an
+unbounded stack depth in the process — a 128-deep budget in a `u8` is the
+cheapest possible defence against a document engineered to overflow the stack.
+"""
+
+[[step]]
+id = "s01-new"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "59-69"
+leans_on = ["s01-deserializer-struct"]
+title = "new — where 128 is written down"
+body = """
+The constructor is the only place the depth budget appears as a number, and it
+is a literal in the struct expression rather than a constant with a name.
+
+`scratch: Vec::new()` does not allocate. An empty `Vec` has no heap behind it
+until something is pushed, so a parse that never needs to unescape a string
+never asks the allocator for the buffer — which is the same reason the field
+can be unconditional while costing nothing on the common path.
+
+The `#[cfg]` attributes sit *inside* the struct expression, on individual
+fields. That is a small piece of Rust worth noticing: attributes are legal on
+struct-expression fields exactly as they are on struct definition fields, so
+the two lists stay in sync without a second `cfg_if`-style block.
+"""
+
+[[step]]
+id = "s01-read-trait"
+source = "serde_json-1.0.151"
+file = "src/read.rs"
+lines = "22-36"
+leans_on = ["s01-new"]
+title = "Read — a trait whose doc comment says it is a workaround"
+body = """
+The `R` in `Deserializer<R>` is this trait, and the comment above it is
+unusually candid: it is *manually specialized* for `&[u8]`, and it exists in
+this shape because `feature(specialization)` is not stable.
+
+The three methods here are the parser's whole view of the input. `next`
+consumes a byte, `peek` looks at one without consuming it, and `discard` throws
+away the byte `peek` just looked at. Every parse decision in `de.rs` is made by
+peeking and then either discarding or backing out — a one-byte lookahead is all
+JSON needs, because the grammar is decided by its first character.
+
+`Result<Option<u8>>` is two layers for two different things. `None` is
+end-of-input, which is not an error until somebody wanted a byte;
+`Err` is an I/O failure, which can only happen for one of the three
+implementations.
+"""
+
+[[step]]
+id = "s01-three-reads"
+source = "serde_json-1.0.151"
+file = "src/read.rs"
+lines = "146-179"
+leans_on = ["s01-read-trait"]
+title = "Three implementations, and the third is the second one with the checks removed"
+body = """
+`IoRead` pulls bytes from a `std::io::Read` through a line-and-column counting
+iterator, and holds the peeked byte in `ch` because an iterator cannot give one
+back. It is the only one of the three that can fail, and the only one whose
+output can never be borrowed from.
+
+`SliceRead` is a slice and an index. Its comment gives the reason it is worth
+having separately: `peek` is a read-only index into memory that is already
+there, and line and column need not be tracked at all — they are computed by
+walking the slice from the start, but only if an error happens.
+
+`StrRead` is a `SliceRead` and nothing else. The whole difference is a
+guarantee that is not in the type of the field: the bytes came from a `&str`,
+so they are valid UTF-8, so the checks `SliceRead` must perform when it hands
+out a string can be skipped. That is the `from_str`/`from_slice` distinction in
+full — same parser, same code path, one elided validation.
+"""
+
+[[step]]
+id = "s01-sealed"
+source = "serde_json-1.0.151"
+file = "src/read.rs"
+lines = "181-184"
+leans_on = ["s01-three-reads"]
+title = "Sealed — four lines that make the trait an implementation detail"
+body = """
+`Read` is `pub`, appears in the signature of `Deserializer<R>`, and cannot be
+implemented outside this crate: its supertrait is a trait in a private module,
+and a foreign crate cannot name it, let alone implement it.
+
+The pattern costs four lines and buys the freedom to add a method — or to
+change one of the `#[doc(hidden)]` ones — without it being a breaking change.
+It is also why the manual specialization above is safe to reason about: there
+are exactly three implementations, all of them in this file, and the parser can
+be tuned against all three at once.
+"""
+
+[[step]]
+id = "s01-end"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "143-151"
+leans_on = ["s01-from-trait", "s01-read-trait"]
+title = "end — the check from_trait insisted on, and the first sight of parse_whitespace"
+body = """
+Six lines, and they answer the question the entry point posed. After the value
+has been parsed, skip whitespace; if a byte comes back, the caller's string had
+something in it that was not the value, and that is `TrailingCharacters`.
+
+`parse_whitespace` returns `Result<Option<u8>>` — the next non-whitespace byte,
+*peeked*, not consumed. That signature is the one the rest of the parser is
+written against, and unit 02 follows it into the loop that skips the four bytes
+JSON calls whitespace.
+
+`peek_error` rather than `error`: the offending byte is the one that was peeked
+and not taken, so the position reported is where that byte is, not where the
+last consumed byte was. Unit 08 is about how much the crate invests in making
+that distinction come out right.
+"""

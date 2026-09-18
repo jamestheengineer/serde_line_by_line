@@ -1502,13 +1502,15 @@ mod tests {
     /// Since §13 a walk's directory is its track id, so the directory named
     /// here is `derive` rather than `narrative` — and a bump reaches *every*
     /// walk, because a crossing into the crate being moved is a crossing
-    /// whichever story made it.
+    /// whichever story made it. J3 is what makes that concrete: the json walk
+    /// crosses into `serde_core` from its first unit, so a `serde_core` bump
+    /// now rewrites three directories and the set says which.
     #[test]
     fn which_stores_a_bump_rewrites_follows_from_the_role() {
         let coverage = stores("serde_core");
         assert_eq!(
             dirs(&coverage),
-            ["serde_core", "derive"]
+            ["serde_core", "derive", "json"]
                 .map(String::from)
                 .into_iter()
                 .collect()
