@@ -1,0 +1,252 @@
+schema = 1
+
+[unit]
+id = "04-a-string-without-a-copy"
+title = "A string, and the copy that does not happen"
+run_example = "json_document"
+summary = """
+`"x"` comes out of the parser as a pointer into the caller's twenty-two bytes.
+The machinery that makes that possible — one scratch buffer, a `Reference`
+enum, and a SWAR scan for the next byte that would spoil it — is most of what
+`read.rs` is for.
+"""
+body = """
+JSON strings are *usually* their own bytes. `"hello"` means `hello`; the only
+reason a parser must build anything is an escape — `\\n`, `\\"`, `\\u00e9` —
+and most documents have none.
+
+`serde_json` takes the usual case seriously enough to organise the whole reader
+around it. The unit follows one string, `"x"`, from the `"` arm of unit 03's
+match to the `&str` the visitor receives, and the answer at every stage is that
+nothing was copied. What it costs to keep that promise — and what happens on
+the one path where it cannot be kept — is the rest of the unit.
+"""
+
+[[step]]
+id = "s04-string-arm"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "1425-1432"
+title = "The \" arm — and the one place scratch is cleared"
+produces = '''    b: String("x")'''
+body = """
+Eight lines, and two of them are the whole borrowing design.
+
+`self.scratch.clear()` runs before every string. The buffer is owned by the
+deserializer and reused for the entire parse, so clearing it is a length reset
+rather than an allocation — and its emptiness afterwards is what the reader
+uses, a few steps down, to decide whether anything had to be copied.
+
+Then the match on `Reference`. `Borrowed` means the `&str` points into the
+caller's input and lives as long as it, so the visitor is handed
+`visit_borrowed_str` — a stronger promise. `Copied` means it points into
+`scratch`, which the next string will overwrite, so `visit_str` it is.
+
+For our document the arm goes `Borrowed`, and then the `Value` being built
+copies the string anyway: `Value::String` owns its contents. The borrow is not
+wasted work — it is a choice offered and declined, and unit 09 is where a type
+accepts it.
+"""
+
+[[step]]
+id = "s04-reference"
+source = "serde_json-1.0.151"
+file = "src/read.rs"
+lines = "124-144"
+leans_on = ["s04-string-arm"]
+title = "Reference — two lifetimes, and a Deref so callers who do not care need not look"
+body = """
+`'b` is the input's lifetime and `'c` is the scratch buffer's, and the enum
+exists because a function that may return either cannot have one return type
+without them both.
+
+The `Deref` impl is the escape hatch for the many callers that only want to
+read the bytes: deref both variants to `&T` and the distinction disappears. The
+one caller that *must* look is the one in the previous step, because the choice
+between `visit_borrowed_str` and `visit_str` is exactly the distinction this
+enum encodes.
+
+`T: ?Sized` because the two instantiations are `str` and `[u8]` — neither has a
+size, and both are borrowed the same way.
+"""
+
+[[step]]
+id = "s04-parse-str-bytes"
+source = "serde_json-1.0.151"
+file = "src/read.rs"
+lines = "491-538"
+leans_on = ["s04-reference"]
+title = "parse_str_bytes — the loop, and the branch the whole file is arranged around"
+body = """
+The doc comment states the optimisation in one sentence, and the `b'"'` arm is
+where it is taken: if `scratch` is empty, nothing has been escaped, so the
+string is `&self.slice[start..self.index]` — a subslice of the caller's bytes,
+returned as `Borrowed` with no allocation, no copy, and no bounds walked twice.
+
+The `b'\\\\'` arm is the other half. Everything since `start` is flushed into
+`scratch`, the escape is decoded and appended, and `start` moves past it — so a
+string with escapes is assembled in the buffer and comes back `Copied`. Mixed
+strings work by alternating: raw runs are memcpy'd, escapes are expanded.
+
+`result: F` is a closure parameter rather than a fixed conversion because the
+same loop serves `parse_str` (which must end in a `&str`) and `parse_str_raw`
+(which must not). `for<'f>` in its bound is what lets the closure be applied to
+either the borrowed slice or the scratch buffer, whose lifetimes are different.
+"""
+
+[[step]]
+id = "s04-skip-to-escape"
+source = "serde_json-1.0.151"
+file = "src/read.rs"
+lines = "432-481"
+leans_on = ["s04-parse-str-bytes"]
+title = "skip_to_escape — 50 lines to find one of three bytes, and a citation from 1998"
+body = """
+The loop above needs the next byte that is `"`, `\\`, or a control character.
+The naive version is three comparisons per byte. This is not that.
+
+When control characters are allowed — the byte-string path — it is
+`memchr::memchr2`, vectorised and done. When they are not, `memchr` has no
+three-needle search, so the code does it a word at a time with a bit trick:
+subtract `0x01` from every byte in parallel and mask, and a byte that was zero
+before the subtraction borrows into the high bit. XOR against a repeated `"`
+turns "is this byte a quote" into "is this byte zero", and the same for
+backslash, and `wrapping_sub(ONE_BYTES * 0x20)` catches everything below
+`0x20`. Three tests, one 64-bit word at a time.
+
+The comment names its source — a 1998 Usenet post by Alan Mycroft — and says
+what it was measured against: faster than two `memchr2` passes plus SWAR, and
+portable, which vector intrinsics would not be. `Chunk` is `u64` or `u32`
+depending on a `fast_arithmetic` cfg the build script sets, so the same code
+compiles well on a 32-bit target.
+"""
+
+[[step]]
+id = "s04-skip-to-escape-slow"
+source = "serde_json-1.0.151"
+file = "src/read.rs"
+lines = "483-489"
+leans_on = ["s04-skip-to-escape"]
+title = "…and the byte loop that finishes the last seven bytes"
+body = """
+`chunks_exact` leaves a remainder of up to `STEP - 1` bytes, and this is it:
+the obvious loop, over at most seven bytes.
+
+`#[cold]` and `#[inline(never)]` together are doing something specific. Not
+"this is rare" — it runs on every string that is not a multiple of eight bytes,
+which is most of them — but "keep this out of the caller's body". Inlining it
+would bloat the hot function that ends in a `return` from the fast path, and the
+cost of a call at the tail of a string is nothing next to that.
+
+Our `"x"` never reaches the word loop at all: `rest` is shorter than a chunk,
+so `chunks_exact` yields nothing and the whole search is this function looking
+at one byte.
+"""
+
+[[step]]
+id = "s04-is-escape"
+source = "serde_json-1.0.151"
+file = "src/read.rs"
+lines = "836-838"
+leans_on = ["s04-skip-to-escape-slow"]
+title = "is_escape — one line, and a flag that means two different grammars"
+body = """
+Quote, backslash, or — only if the caller says so — anything below `0x20`.
+
+The flag is the difference between JSON's string grammar and a byte string's.
+An unescaped newline inside a JSON string is illegal, so `parse_str` passes
+`true` and gets `ControlCharacterWhileParsingString`. `parse_str_raw`, which
+exists for `&[u8]` fields, passes `false` and lets them through.
+
+Both callers of the word loop above use the same function to describe what they
+are looking for, which is the only reason the fast scan and the slow scan
+cannot disagree.
+"""
+
+[[step]]
+id = "s04-parse-escape"
+source = "serde_json-1.0.151"
+file = "src/read.rs"
+lines = "872-895"
+leans_on = ["s04-parse-str-bytes"]
+title = "parse_escape — eight one-byte answers and one that leaves"
+body = """
+JSON's escape list in full: the three self-referential ones, and `b`, `f`, `n`,
+`r`, `t`. Each pushes a single byte into `scratch`, which is why this function
+is a match and not a table — eight arms, each one instruction.
+
+`_ => InvalidEscape` is the rest of the ASCII range, including the one people
+expect to work: `\\'` is not a JSON escape. Single quotes are not special in
+JSON, so escaping one is an error rather than a no-op.
+
+`b'u'` returns rather than pushes, because what follows is not one byte and not
+necessarily one character.
+"""
+
+[[step]]
+id = "s04-unicode-escape"
+source = "serde_json-1.0.151"
+file = "src/read.rs"
+lines = "897-922"
+leans_on = ["s04-parse-escape"]
+title = "parse_unicode_escape — where JSON's UTF-16 heritage has to be undone"
+body = """
+JSON escapes are sixteen bits wide because JavaScript's strings are UTF-16, so
+anything above U+FFFF arrives as two escapes — a leading surrogate and a
+trailing one — that have to be recombined into a single code point.
+
+The function is a loop rather than a pair of ifs because the check after
+combining is the same check that started it. A trailing surrogate arriving
+first is a `LoneLeadingSurrogateInHexEscape` immediately; a leading one commits
+the parser to finding `\\u` again and complaining if it does not.
+
+`#[cold]`, again as a layout decision: escapes are rare, `\\u` escapes rarer,
+and every byte of this function that stays out of `parse_escape`'s body is a
+byte the common path does not have to page in.
+"""
+
+[[step]]
+id = "s04-from-utf8-unchecked"
+source = "serde_json-1.0.151"
+file = "src/read.rs"
+lines = "709-716"
+leans_on = ["s04-parse-str-bytes"]
+title = "StrRead's parse_str — the unsafe line that is the whole reason StrRead exists"
+body = """
+`SliceRead` finishes a string by running `str::from_utf8` over it, because a
+`&[u8]` might not be text. `StrRead` finishes it with `from_utf8_unchecked`,
+and the comment is the safety argument in two clauses: the input was a `&str`,
+so the raw runs are valid UTF-8, and `parse_unicode_escape` validates every
+byte it appends.
+
+That is unit 01's `StrRead`-is-`SliceRead`-with-the-checks-removed claim, in
+the one function where the removal is visible. For a string-heavy document it
+is the difference between walking the bytes once and walking them twice.
+
+It is the second `unsafe` block this unit has passed — the first was the
+pointer arithmetic that turns a chunk address back into an index — and the two
+are different kinds. That one is a calculation the compiler cannot see is
+in-bounds; this one is a claim about the caller, made safe by a type that can
+only be built from a `&str`.
+"""
+
+[[step]]
+id = "s04-visit-borrowed-str"
+source = "serde_core-1.0.229"
+file = "src/de/mod.rs"
+lines = "1533-1549"
+annotation = "de-mod-0051"
+leans_on = ["s04-string-arm"]
+title = "…and the method that accepts the offer, on the other side"
+body = """
+`visit_borrowed_str` takes a `&'de str` — the input's lifetime, not the
+visitor's — and its default implementation forwards to `visit_str`. That
+default is why the whole design is free: a visitor that cannot use a borrow
+ignores this method and gets the transient one, and `serde_json` never has to
+ask which kind it is talking to.
+
+The reference track's annotation calls it "the entire point of `'de`", which is
+where the lifetime on `Deserialize<'de>` from unit 01 comes back around: the
+bound `T: Deserialize<'a>` on `from_str` is the promise this method is allowed
+to keep.
+"""
