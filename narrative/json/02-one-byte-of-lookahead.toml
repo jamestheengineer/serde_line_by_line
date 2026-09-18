@@ -1,0 +1,209 @@
+schema = 1
+
+[unit]
+id = "02-one-byte-of-lookahead"
+title = "One byte of lookahead, and a position nobody computes until it is needed"
+run_example = "json_document"
+summary = """
+`SliceRead` is a slice and a `usize`. Everything the parser knows about where
+it is, is that `usize` — line and column do not exist until an error asks for
+them, and then they are found by scanning the input from the beginning.
+"""
+body = """
+JSON can be parsed with one byte of lookahead. Every value's type is decided by
+its first character — `{` is an object, `[` an array, `"` a string, `t` is
+`true` and nothing else starts with `t` — so a parser never needs to hold a
+token, back up, or look two bytes ahead to know what it is about to read.
+
+`serde_json` takes that literally. There is no lexer, no token type, no
+buffered token stream: there is `peek`, `next`, and `discard`, and the parse is
+a recursive descent written directly against them. This unit is the three of
+them, the `usize` behind them, and the two wrappers in `de.rs` that every rule
+in the grammar is phrased in terms of.
+"""
+
+[[step]]
+id = "s02-slice-new"
+source = "serde_json-1.0.151"
+file = "src/read.rs"
+lines = "410-419"
+title = "The whole of the reader's state: a borrow and an offset"
+body = """
+`slice` is the caller's bytes, borrowed for `'a` — nothing is copied on the way
+in, and `'a` is the lifetime that unit 04's borrowed strings come back with.
+`index` is where the next byte will come from.
+
+There is no line counter and no column counter. That is a decision, not an
+omission, and the comment on the struct in the previous unit gave the reason:
+tracking position costs something on every byte, and an error costs nothing
+until it happens.
+"""
+
+[[step]]
+id = "s02-next"
+source = "serde_json-1.0.151"
+file = "src/read.rs"
+lines = "543-555"
+leans_on = ["s02-slice-new"]
+title = "next — and a comment that says the obvious version is 10% slower"
+body = """
+The body is a bounds check, an index, and an increment. The comment above it
+gives the expression it replaced —
+`self.slice.get(self.index).map(|ch| { self.index += 1; *ch })` — and says it
+was about 10% slower.
+
+That is worth reading twice, because the two are the same program. The
+difference is what the optimiser does with `slice[index]` after an explicit
+`index < len` test versus what it does with `get`'s internal one, and the
+answer is measured rather than assumed. `#[inline]` on a three-line function in
+the hottest loop in the crate is the other half of the same decision.
+
+The return type carries `Result` even though this implementation cannot fail —
+it is `Ok(...)` unconditionally. `IoRead` is the one that can, and the trait
+has one signature.
+"""
+
+[[step]]
+id = "s02-peek"
+source = "serde_json-1.0.151"
+file = "src/read.rs"
+lines = "557-566"
+leans_on = ["s02-next"]
+title = "peek — the same four lines, without the increment"
+body = """
+`peek` is `next` with the `index += 1` removed, and it takes `&mut self`
+anyway. It does not need to: this implementation mutates nothing. The signature
+is `&mut self` because `IoRead` *must* mutate — it pulls a byte out of an
+iterator and stores it in `ch`, because an iterator has no way to put one back
+— and one trait cannot have two signatures.
+
+This is what the trait's doc comment means by manual specialization. The
+abstraction is shaped by the expensive implementation, and the cheap one pays a
+`&mut` it does not use.
+"""
+
+[[step]]
+id = "s02-discard"
+source = "serde_json-1.0.151"
+file = "src/read.rs"
+lines = "568-571"
+leans_on = ["s02-peek"]
+title = "discard — one line, and the contract that makes it safe"
+body = """
+`self.index += 1`, with no bounds check at all, which is only sound because of
+the rule written on the trait: *only valid after a call to peek()*. A peek that
+returned `Some` proves the byte is there; a peek that returned `None` means the
+caller has no business discarding.
+
+The pair is how the parser avoids reading anything twice. Peek to decide what a
+value is, discard to step over the byte the decision consumed, and the byte is
+never fetched again.
+"""
+
+[[step]]
+id = "s02-position-of-index"
+source = "serde_json-1.0.151"
+file = "src/read.rs"
+lines = "421-430"
+leans_on = ["s02-slice-new"]
+title = "position_of_index — line and column, scanned from the top of the input"
+body = """
+Here is what the missing counters cost when an error finally happens: a reverse
+search for the last newline before the offending byte, then a forward count of
+every newline before *that*. The whole input is walked to answer one question.
+
+`memchr::memrchr` and `memchr_iter` are why this is acceptable. They are
+vectorised byte searches, so the scan runs at memory bandwidth rather than a
+byte at a time, and it happens exactly once per parse — on the path where a
+parse has already failed and nothing else is going to be fast either.
+
+`column: i - start_of_line` looks zero-based, and the public accessor documents
+columns as one-based. Both are right, and the next step is why.
+"""
+
+[[step]]
+id = "s02-peek-position"
+source = "serde_json-1.0.151"
+file = "src/read.rs"
+lines = "573-585"
+leans_on = ["s02-position-of-index"]
+title = "position and peek_position — off by one, deliberately, in one direction"
+body = """
+`position` reports where `index` is: after the most recent `next`, that is the
+byte *after* the one consumed, which makes the column a one-based count of the
+byte that was read.
+
+`peek_position` is for the other case — the offending byte was peeked and not
+consumed, so `index` still points at it — and it adds one to get the same
+one-based count, capped at the end of the input in case the last `next` took
+the final byte.
+
+This walk's error comes out of that second function. The trailing comma in
+`{"a":[1,true,],"b":"x"}` is detected when the parser peeks `]` at index 13,
+and the reported column is 14.
+"""
+
+[[step]]
+id = "s02-de-wrappers"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "219-237"
+leans_on = ["s02-discard"]
+title = "Four wrappers, and a sentinel that turns end-of-input into an ordinary byte"
+body = """
+`de.rs` does not call `self.read.peek()` in its grammar rules. It calls these,
+and two of them do something the `Read` trait deliberately does not.
+
+`peek_or_null` and `next_char_or_null` replace `None` with a NUL byte. Almost
+every rule in the parser matches on a byte and has a fallback arm for *anything
+unexpected*, and end-of-input is unexpected in exactly the same way an `x`
+would be. Folding it into the match saves a second `match` on `Option` in every
+one of those rules, and NUL is safe to use as the sentinel because a literal
+NUL in JSON input is never valid where these are called.
+
+`eat_char` is `discard` under a name that says what the parser is doing rather
+than what the reader is doing, and it inherits the same contract: it is only
+called where a `peek` has just succeeded.
+"""
+
+[[step]]
+id = "s02-parse-whitespace"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "253-266"
+leans_on = ["s02-de-wrappers"]
+title = "parse_whitespace — four bytes are whitespace, and that is the whole list"
+body = """
+Space, newline, tab, carriage return. Not a form feed, not a vertical tab, and
+nothing above ASCII: JSON's grammar says these four and `serde_json` says these
+four, so a byte-oriented parser never has to decode UTF-8 to decide whether to
+skip something.
+
+The loop returns the first byte that is *not* whitespace without consuming it,
+which is why the return type is `Option<u8>` and not `()`. Every rule in the
+grammar starts with this call and then matches on what it gave back — one
+function that both skips and dispatches.
+
+`Some(b' ' | b'\\n' | b'\\t' | b'\\r')` is an or-pattern nested inside `Some`,
+stable since Rust 1.53. The older spelling repeated the `Some(...)` four times.
+"""
+
+[[step]]
+id = "s02-error-pair"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "239-251"
+leans_on = ["s02-peek-position"]
+title = "error and peek_error — two functions, marked cold, differing in one call"
+body = """
+The two constructors mirror the two position functions, and the doc comments
+say which is for which: an error about a byte that `next_char` consumed, and an
+error about a byte that `peek` is still looking at. Choosing the wrong one
+moves every reported column by one.
+
+`#[cold]` is a hint to the optimiser that these are not on the hot path, so the
+code they generate can be laid out away from the parse loop and the branches
+that reach them can be assumed untaken. It is the same argument as
+`position_of_index` making no effort: this is the failure path, and the failure
+path's job is to be out of the way.
+"""
