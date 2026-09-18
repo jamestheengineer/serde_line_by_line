@@ -1,0 +1,235 @@
+schema = 1
+
+[unit]
+id = "03-the-first-byte-decides"
+title = "The first byte decides, and the visitor is told rather than asked"
+run_example = "json_document"
+summary = """
+`deserialize_any` is one `match` on one peeked byte, and each arm ends in a
+call on the visitor. The parse of `{"a":[1,true],"b":"x"}` is that match
+entered four times, twice recursively, under a depth counter that a macro
+decrements and puts back.
+"""
+body = """
+Unit 02 left off with `parse_whitespace` returning the first byte that means
+something. This unit is what the parser does with it.
+
+`deserialize_any` is the method serde calls when the *input* decides the type —
+which is what happens when the thing being built is a `Value`, and it is the
+path this document takes in units 04 through 06. Unit 09 takes the other one,
+where the type decides and the parser is told what to expect. The two share
+almost everything below this match.
+
+The shape to hold on to: `serde_json` never builds a tree of its own. Each arm
+calls a method on the visitor it was handed and returns whatever comes back, so
+the same eight arms build a `Value`, a `String`, a struct, or nothing at all.
+"""
+
+[[step]]
+id = "s03-peek-or-eof"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "1393-1402"
+title = "Four lines of preamble, repeated in every deserialize_ method"
+body = """
+Skip whitespace, take the byte, and if there is no byte the input ended where a
+value was expected. This exact block opens `deserialize_bool`,
+`deserialize_str`, `deserialize_option` and a dozen more — `de.rs` is 2,714
+lines and a good share of them are this preamble written out again.
+
+That repetition is not an oversight; it is what falls out of the trait having
+one method per type. What varies underneath is which peeked bytes are accepted,
+and a shared helper would have to take that as a parameter and lose the `match`
+the optimiser wants.
+"""
+
+[[step]]
+id = "s03-literals"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "1404-1419"
+leans_on = ["s03-peek-or-eof"]
+title = "n, t, f — the three arms that already know what they are looking at"
+body = """
+One byte in, the value's type is settled. `n` can only be `null`, `t` can only
+be `true`, `f` can only be `false`, so the arm eats the byte it peeked and
+hands the *remaining* bytes to `parse_ident` — `ull`, `rue`, `alse`.
+
+Then `visitor.visit_unit()` or `visitor.visit_bool(true)`. Nothing is
+allocated, nothing is stored, and `serde_json` does not learn what the visitor
+did with it: the arm's value is the visitor's return value, whatever type that
+is.
+
+Our document contains `true` at byte 8, which is this match arriving at `b't'`
+and calling `visit_bool(true)`.
+"""
+
+[[step]]
+id = "s03-parse-ident"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "445-460"
+leans_on = ["s03-literals"]
+title = "parse_ident — a byte loop, because there is no string to compare"
+body = """
+Four lines of logic: for each expected byte, take one from the input and
+compare. No `starts_with`, no slice comparison — and it could not be one,
+because `IoRead` has no slice to compare against. A loop over `next_char` is
+the only shape that works for all three readers.
+
+The two failure arms are worth separating. Running out of input is
+`EofWhileParsingValue`; a byte that does not match is `ExpectedSomeIdent`,
+which is the error behind `nul`, `tru`, and the classic `True`. Both use
+`error` rather than `peek_error`, because the offending byte was consumed by
+`next_char` — the distinction unit 02 ended on.
+"""
+
+[[step]]
+id = "s03-visit-bool"
+source = "serde_core-1.0.229"
+file = "src/de/mod.rs"
+lines = "1344-1353"
+annotation = "de-mod-0045"
+leans_on = ["s03-literals"]
+title = "…and what visit_bool is, on the other side of the call"
+body = """
+The method the previous step called is a trait method with a default body, and
+the default is to fail. That is the seam's whole design: a visitor implements
+the `visit_*` methods for the JSON shapes its type accepts and inherits a type
+error for the rest, so `serde_json` can call `visit_bool` unconditionally and a
+visitor that wanted a struct produces "invalid type: boolean" without either
+side testing anything.
+
+The reference track's annotation has the argument in full. What matters here is
+that the parser is not checking whether the visitor wants a bool — it is
+reporting what the bytes said, and the refusal is somebody else's default.
+"""
+
+[[step]]
+id = "s03-check-recursion"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "1372-1387"
+leans_on = ["s03-peek-or-eof"]
+title = "check_recursion — a macro, because it has to wrap a body and still return"
+body = """
+Descending into `[` or `{` costs a stack frame, so the budget from unit 01 is
+spent here: decrement, refuse at zero, run the body, put it back.
+
+This is a `macro_rules!` and not a function for two reasons that are both
+visible in the four lines. The body it wraps *declares a variable the
+surrounding code uses* — `let ret = ...` is inside the macro and read after it
+— and the failure arm is a `return` out of the enclosing method, not a value.
+Neither survives being a closure.
+
+Note what the restore does not do: there is no `Drop` guard, so an error path
+that returns early leaves `remaining_depth` decremented. That is sound because
+the error path abandons the whole parse; the counter is never read again.
+"""
+
+[[step]]
+id = "s03-seq-arm"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "1433-1443"
+leans_on = ["s03-check-recursion"]
+title = "The [ arm — visit_seq, then a second result nobody may drop"
+body = """
+`visitor.visit_seq(SeqAccess::new(self))` hands control *to the visitor*. The
+parser does not loop over the array's elements; the visitor does, by calling
+`next_element_seed` as many times as it likes, and the parser only finds out
+the loop is over when the call returns.
+
+Then the closing bracket. `end_seq` checks it, and the `match (ret, ...)` is
+how both results are consulted: if the visitor failed, report that; if the
+visitor succeeded but the bracket is missing, report that instead. Writing it
+as `let ret = tri!(ret)` would have skipped `end_seq` entirely on the error
+path, which for a `StreamDeserializer` reading more values afterwards would
+leave the input mid-array.
+"""
+
+[[step]]
+id = "s03-visit-seq"
+source = "serde_core-1.0.229"
+file = "src/de/mod.rs"
+lines = "1679-1698"
+annotation = "de-mod-0058"
+leans_on = ["s03-seq-arm"]
+title = "…and the two methods that are the inversion of control"
+body = """
+`visit_seq` and `visit_map` receive an *accessor*, not data. Every other
+`visit_` method takes a finished value; these two take a handle and a licence to
+pull elements out of it one at a time, for as long as the visitor wants them.
+
+That is why `serde_json` can deserialize a 10 GB array into a `HashSet` without
+building the array: the sequence exists only as the accessor's willingness to
+produce another element. The reference track's annotation is where the rest of
+the argument lives.
+"""
+
+[[step]]
+id = "s03-has-next-element"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "1937-1962"
+leans_on = ["s03-seq-arm"]
+title = "has_next_element — the comma rule, written once, as a nested fn"
+produces = '''input    {"a":[1,true,],"b":"x"}
+error    trailing comma at line 1 column 14
+at       line 1 column 14'''
+body = """
+The grammar of a JSON array, in one function. `]` ends it. The first element
+needs no comma. Every later element needs one, and what follows the comma must
+not be `]`.
+
+It is a `fn` nested inside `next_element_seed` rather than a method, which
+keeps it out of the type's surface and — more usefully — keeps the borrow of
+`seq.de` inside a scope that ends before `seed.deserialize(&mut *self.de)`
+starts. Two `&mut` borrows of the same deserializer cannot overlap, and this
+shape makes the compiler agree without a `drop`.
+
+The trailing-comma arm is the one this walk's example trips. `[1,true,]` reaches
+the comma, eats it, peeks `]`, and returns `TrailingComma` from `peek_error` —
+which is how the transcript below gets a column of 14 for a byte at index 13.
+"""
+
+[[step]]
+id = "s03-has-next-key"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "1990-2018"
+leans_on = ["s03-has-next-element"]
+title = "has_next_key — the same shape, with one extra rule the array does not have"
+body = """
+Line for line the array's rule, plus a demand: what starts a key must be `"`.
+JSON has no unquoted keys, so `{a:1}` is `KeyMustBeAString` and not a generic
+syntax error, and the check appears twice — once for the first key, once after
+each comma.
+
+`next_value_seed` is the other half and it is three lines: consume the colon,
+then deserialize whatever comes next. The colon is checked between the key and
+the value rather than in either one, which is the only place that knows both
+have to exist.
+
+Our document enters this function three times: `"a"` as the first key, `"b"`
+after the comma, and a third call that peeks `}` and returns `false`.
+"""
+
+[[step]]
+id = "s03-fix-position"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "1458-1466"
+leans_on = ["s03-visit-bool"]
+title = "fix_position — where errors the parser did not raise get a line and column"
+body = """
+An error raised by the *visitor* — "invalid type: boolean, expected a string" —
+comes from a `de::Error::invalid_type` call in code that has never heard of
+this input and cannot know where it is. So `deserialize_any` catches every
+error on the way out and fills the position in from the parser's current index.
+
+The comment is honest about the seam: there is no way to tell whether the byte
+that offended was consumed or peeked, so it picks the one that is right more
+often and accepts being one column out in the other case. That is the price of
+the position living in the format and the complaint living in the data model.
+"""
