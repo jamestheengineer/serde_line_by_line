@@ -1,0 +1,472 @@
+schema = 1
+
+[unit]
+id = "06-a-tree-the-parser-never-built"
+title = "A tree the parser never built, and the two seeds that fill it"
+run_example = "json_document"
+summary = """
+`Value` is a six-variant enum and the code that assembles one is a hundred
+lines inside a function body. Units 02 through 05 produced a stream of
+`visit_` calls; this unit is the visitor on the other end of them, the two
+recursions that let it call itself, and the place where the type the parser
+chose stops mattering.
+"""
+body = """
+Everything so far has been push. `parse_whitespace` found a byte,
+`deserialize_any` matched on it, and each arm ended in a call on a visitor
+nobody has looked at. The tree in the transcript exists because *something*
+was on the receiving end of those calls, and this unit is that something.
+
+Two things are worth holding on to before the code. The first is that
+`serde_json`'s own data model is not privileged: `ValueVisitor` is an ordinary
+`Visitor` impl, written against the same trait a derived one implements, and
+unit 09 swaps it out for `serde_derive`'s without the parser noticing. The
+second is that the recursion is not in the parser. `deserialize_any` handled
+`[` by handing control away; the loop that comes back around to it lives here,
+in thirteen lines, and it goes through `serde_core` to get there.
+"""
+
+[[step]]
+id = "s06-value-enum"
+source = "serde_json-1.0.151"
+file = "src/value/mod.rs"
+lines = "112-176"
+title = "Value — six variants, and a recursion that needs no Box"
+produces = '''value
+  Object, 2 keys
+    a: Array, 2 items
+      Number(1)
+      Bool(true)
+    b: String("x")'''
+body = """
+Sixty-five lines, and eight of them are the type. The rest is a doc comment per
+variant with a `json!` example in it, which is the same ratio unit 01 found in
+`lib.rs` — this crate documents at the point of definition and pays for it in
+line count.
+
+The type is the JSON grammar with one variant per production, and the thing to
+notice is what makes it legal. `Value::Array(Vec<Value>)` and
+`Value::Object(Map<String, Value>)` are recursive — a `Value` contains
+`Value`s — and a recursive type needs a pointer somewhere or its size is
+infinite. There is no `Box` here because there does not need to be: `Vec` and
+`Map` are already one pointer and two words, so the indirection the compiler
+requires is supplied by the collections rather than announced by the type. An
+enum that wanted a single nested `Value` — `Some(Value)` — would have had to
+say `Box`.
+
+`#[derive(Clone, Eq, PartialEq, Hash)]` is the line to remember. `Eq` and
+`Hash` on a tree that can contain an `f64` is a claim most types cannot make,
+and the whole reason `Number` keeps its insides private is to be able to make
+it. That argument is four steps down.
+
+The transcript is the example walking a finished `Value` with a `match` on
+exactly these variants, one line per node. It is the shape of this enum, read
+back.
+"""
+
+[[step]]
+id = "s06-deserialize-for-value"
+source = "serde_json-1.0.151"
+file = "src/value/de.rs"
+lines = "22-35"
+leans_on = ["s06-value-enum", "s01-deserialize-trait"]
+title = "ValueVisitor — a type declared inside the function that uses it"
+body = """
+`impl Deserialize for Value` is one statement long, and the first thing it does
+is declare a struct.
+
+`struct ValueVisitor;` is a zero-sized type in a function body, which means it
+has no module path, no visibility, and no existence outside these hundred and
+thirty lines. That is the idiom serde's own derive output uses and unit 09 will
+read a generated instance of; the reason is that a visitor is an implementation
+detail of one `deserialize` call and giving it a name in the crate's namespace
+would commit to it. Nothing is stored in it — the state a visitor needs arrives
+as arguments.
+
+`type Value = Value;` reads like a tautology and is not. The left side is the
+associated type of the `Visitor` trait, meaning *what this visitor produces*;
+the right side is `serde_json::Value`, the enum from the previous step. Every
+`visit_` method below returns that type, which is how eight arms in a `match`
+the parser wrote can all be the same expression.
+
+`expecting` is the one method with no data in it. It writes "any valid JSON
+value", and that string only ever appears inside somebody else's error message:
+when a visitor refuses a call, `serde_core` builds "invalid type: X, expected
+Y" and this is the Y. A visitor that accepts everything still has to be able to
+say what it wanted.
+"""
+
+[[step]]
+id = "s06-scalar-arms"
+source = "serde_json-1.0.151"
+file = "src/value/de.rs"
+lines = "37-65"
+leans_on = ["s06-deserialize-for-value", "s05-visit-u64"]
+title = "The scalar arms — one line each, and the two that are not"
+produces = '''Bool(true)'''
+body = """
+`visit_bool` wraps its argument in `Value::Bool`. `visit_i64` and `visit_u64`
+wrap theirs in `Value::Number` through `.into()`. Three methods, three
+one-line bodies, each a constructor call under an `#[inline]` that says the
+author expects the call to disappear entirely.
+
+Our document's `true` arrives here. Unit 03 followed `b't'` through
+`parse_ident` to `visitor.visit_bool(true)` without saying where the call
+landed; this is where, and `Bool(true)` in the transcript is the return value
+of that one line.
+
+`visit_i128` and `visit_u128` break the pattern, and they are the two without
+`#[inline]`. There is no 128-bit variant to wrap them in, so instead of
+constructing they *deserialize*: the value is wrapped in an `I128Deserializer`
+and handed to `Number`'s own `Deserialize` impl, which accepts it if it fits in
+an `i64` or a `u64` and otherwise raises the custom error "JSON number out of
+range". A value too big for the data model has to fail, and the only code that
+knows the data model's limits is `Number` — so the arm asks it rather than
+duplicating the bounds.
+
+Note what none of these arms do: check anything. The parser has already decided
+this is a boolean, and the visitor's job is to say what a boolean *is* in this
+data model. Nothing here can fail, which is why the error type `E` appears in
+the signature and never in a body.
+"""
+
+[[step]]
+id = "s06-number-from"
+source = "serde_json-1.0.151"
+file = "src/number.rs"
+lines = "740-791"
+leans_on = ["s06-scalar-arms", "s05-parse-number"]
+title = "The From macros — where a signed one and an unsigned one become the same number"
+body = """
+This is where `.into()` goes, and it is two macros expanded over ten types so
+that `Number::from` exists for every integer width without ten copies of four
+lines.
+
+`impl_from_unsigned` is the simple one: widen to `u64`, store `N::PosInt`.
+`impl_from_signed` is the one with a decision in it — `if i < 0` store
+`N::NegInt`, otherwise widen to `u64` and store `N::PosInt`. A non-negative
+`i64` does not stay signed.
+
+Which settles something unit 05 left open. That unit spent four steps on
+`parse_number` choosing between `U64`, `I64` and `F64`, and for `1` the answer
+was `ParserNumber::U64(1)`. Had the document said `-1` and then `1` again, the
+parser would have gone down the signed path for one of them — and both would
+have arrived here as `N::PosInt(1)`. The parser's choice of signedness survives
+exactly as far as this function, and no further. What the parser is really
+deciding is *integer or float*, which does survive, and `-0` is the only case
+where those two questions have the same answer.
+
+Every branch ends in `Number { n }` with no validation, because validation is
+impossible to fail: a `u64` is always a valid `PosInt` and a negative `i64` is
+always a valid `NegInt`. The invariants are maintained by construction, which
+is the next step's subject.
+"""
+
+[[step]]
+id = "s06-n-invariants"
+source = "serde_json-1.0.151"
+file = "src/number.rs"
+lines = "20-70"
+leans_on = ["s06-number-from"]
+title = "N — two doc comments that are load-bearing, and a PartialEq written by hand"
+body = """
+`Number` is a newtype over a private enum, and the privacy is the feature. `N`
+is not `pub`, so no caller can construct one, match on one, or observe which
+variant a `Number` is using — they get `as_i64`, `as_f64`, `is_u64` and a
+`Display`. That leaves the crate free to hold the two invariants written as
+doc comments: *always less than zero* on `NegInt`, *always finite* on `Float`.
+
+Both are maintained where values are made, never checked where they are read.
+`impl_from_signed` is what keeps the first one true. The second is kept by
+`Number::from_f64` returning `Option` — a NaN or an infinity gets `None` rather
+than a `Number` — and by the parser never producing an infinity, which is where
+unit 05's `NumberOutOfRange` came from.
+
+`PartialEq` is written out rather than derived, and the behaviour is exactly
+what the derive would have produced: same variant, compare the payload;
+different variants, `false`. So `N::Float(1.0)` does not equal `N::PosInt(1)`,
+and `json!(1.0) != json!(1)` — the data model distinguishes them even though
+JSON's own grammar barely does.
+
+The reason it is hand-written is the variant it does not mention. `f64`
+implements neither `Eq` nor `Hash`, so neither of those can be derived here at
+all, and the three impls have to agree with each other about what equality
+means. Writing all three out together, each behind the same `cfg`, is the only
+arrangement where that agreement is visible in one place.
+
+Then `Eq`, with a comment that is the entire argument: *implementing Eq is fine
+since any float values are always finite*. `f64` is not `Eq` because NaN is not
+equal to itself; a float that cannot be NaN has no such problem. That one
+invariant, held three functions away, is what lets the enum in the first step
+derive `Eq` and `Hash` — a JSON document can be a `HashMap` key because
+`from_f64` returns an `Option`.
+
+`Hash` then pays the remaining debt by hand: `+0.0` and `-0.0` compare equal and
+have different bits, so the zero case hashes the bits of `+0.0` for both. Equal
+values hash equally, which is the contract, and nothing but the author checking
+would have caught it.
+"""
+
+[[step]]
+id = "s06-visit-f64"
+source = "serde_json-1.0.151"
+file = "src/value/de.rs"
+lines = "66-71"
+leans_on = ["s06-n-invariants"]
+title = "visit_f64 — the one arm that can lose information, and does it silently"
+body = """
+Four lines, and the only place in this visitor where an input does not survive:
+`Number::from_f64(value).map_or(Value::Null, Value::Number)`. `from_f64`
+returns `None` for NaN and for both infinities, and `map_or` turns that `None`
+into `Value::Null`.
+
+A NaN becomes `null`. No error, no `Result`, no log.
+
+Reading this from inside the walk, it looks unreachable — the JSON grammar has
+no way to write NaN, and unit 05 showed the parser raising `NumberOutOfRange`
+rather than producing an infinity, so `serde_json`'s own parser never calls
+this with a value `from_f64` would reject. But this visitor is not the
+parser's property. `Value` implements `Deserialize`, so *any* `Deserializer`
+can drive it — a CBOR or MessagePack reader, where NaN is a representable
+value, calls `visit_f64` with one and gets `Value::Null` back.
+
+That is a defensible choice and an undiscussed one: JSON genuinely has nowhere
+to put a NaN, and the alternative is an error from a conversion the caller did
+not know was happening. What the signature hides is that it happened at all.
+`visit_f64` returns `Result<Value, E>` and this arm never uses the error half.
+"""
+
+[[step]]
+id = "s06-visit-seq"
+source = "serde_json-1.0.151"
+file = "src/value/de.rs"
+lines = "106-118"
+leans_on = ["s06-deserialize-for-value", "s03-seq-arm"]
+title = "visit_seq — the loop unit 03 handed away, thirteen lines later"
+produces = '''a: Array, 2 items
+  Number(1)
+  Bool(true)'''
+body = """
+Unit 03 ended the `[` arm by saying the parser does not loop over an array's
+elements — the visitor does. This is the visitor doing it.
+
+`let mut vec = Vec::new()`, then `while let Some(elem) = tri!(visitor.next_element())`,
+then `Value::Array(vec)`. The accessor is asked for another element until it
+says there are none, and the loop has no idea how many there will be. It does
+not even ask: `SeqAccess` has a `size_hint` and this loop ignores it, which
+costs nothing, because `serde_json`'s implementation does not override the
+default and a parser that has not reached the closing bracket has nothing to
+report. The reallocations are real and unavoidable, and the crate does not
+pretend otherwise.
+
+`elem` has no type annotation and does not need one. `next_element` is generic
+over what it produces, the `vec` it is pushed into becomes the `Vec<Value>`
+inside `Value::Array`, and inference runs backwards from the return type to
+decide that `T` is `Value`. Which is the recursion, written as a type
+parameter: asking for the next element of this array means asking for a whole
+`Value`, and everything in this unit runs again one level down.
+
+The error path is the `tri!` unit 01 already accounted for, and what it does
+here is nothing: an error returns, the partially built `Vec` is dropped, and no
+attempt is made to say how far the array got. A parser that wanted to report
+`[1,tru` as *two elements in, then this* would need the count threaded through
+the error, and `serde_json` reports a byte position instead — which unit 08 is
+about, and which is cheaper precisely because the visitor never has to
+cooperate.
+
+Our `[1,true]` runs this loop three times: `Number(1)`, `Bool(true)`, and a
+third call that finds `]` and returns `None`.
+"""
+
+[[step]]
+id = "s06-next-element"
+source = "serde_core-1.0.229"
+file = "src/de/mod.rs"
+lines = "1749-1782"
+annotation = "de-mod-0061"
+leans_on = ["s06-visit-seq", "s03-visit-seq"]
+title = "…and what next_element is — a default that exists to hide a seed"
+body = """
+Two methods that return the same thing, and the comment says which one is
+yours: `SeqAccess` implementations write `next_element_seed`, `Deserialize`
+implementations call `next_element`, and implementations *should not override
+the default*.
+
+The default is one line — `self.next_element_seed(PhantomData)`. So the
+convenience method is not a simplification of the seeded one, it is the seeded
+one with a particular seed passed in, and the previous step's `next_element()`
+is `next_element_seed(PhantomData)` after inlining.
+
+This is the seam the two halves of the walk meet at. `serde_json`'s
+`SeqAccess` impl, which unit 03 read as `has_next_element` and the comma rule,
+implements the method with the seed. `serde_json`'s `Value` visitor, in this
+unit, calls the one without. Neither knows the other is `serde_json` — they are
+talking through a trait, and unit 09 changes one side without touching the
+other.
+
+`size_hint` returning `None` by default is what the previous step's loop would
+have been told had it asked, and why not asking costs nothing. The reference
+track's annotation has the rest of the argument.
+"""
+
+[[step]]
+id = "s06-phantom-seed"
+source = "serde_core-1.0.229"
+file = "src/de/mod.rs"
+lines = "814-827"
+annotation = "de-mod-0026"
+leans_on = ["s06-next-element"]
+title = "PhantomData as a seed — and the loop, closed"
+body = """
+`impl DeserializeSeed for PhantomData<T> where T: Deserialize`, and the body is
+`T::deserialize(deserializer)`.
+
+A seed is a value carried into deserialization, for when the type alone does not
+say enough. `PhantomData` is the seed that carries nothing, and this impl is the
+bridge back: *no data* is a special case of *some data*, so everything can be
+written once against seeds and the stateless case costs a zero-sized type.
+
+Follow it and the circle closes. `visit_seq` calls `next_element::<Value>()`,
+which calls `next_element_seed(PhantomData::<Value>)`, which `serde_json`
+implements by calling `seed.deserialize(&mut *self.de)`, which is this line,
+which is `Value::deserialize(deserializer)` — the impl three steps back — which
+calls `deserializer.deserialize_any(ValueVisitor)` — the `match` unit 03 walked.
+
+That is the only recursion in the walk, and it leaves `serde_json` for
+`serde_core` and comes back twice to get from a `Vec` push to a peeked byte. It is also
+what unit 01's depth budget is counting: every trip around this loop through a
+`[` or a `{` is one `check_recursion` decrement, because the stack frames are
+real.
+"""
+
+[[step]]
+id = "s06-visit-map"
+source = "serde_json-1.0.151"
+file = "src/value/de.rs"
+lines = "120-148"
+leans_on = ["s06-visit-seq", "s03-has-next-key"]
+title = "visit_map — the first key is special, and the second one is a discarded Option"
+produces = '''Object, 2 keys
+  a: Array, 2 items'''
+body = """
+Twice the length of `visit_seq` for the same job, and the extra lines are all
+downstream of one call: `visitor.next_key_seed(KeyClassifier)`.
+
+The first key is fetched on its own, with a seed, and matched. `None` means the
+object was empty and the answer is an empty `Map`. `Some(KeyClass::Map(k))` is
+an ordinary key, and only then does the map get allocated — an empty object
+never touches the allocator. The other two arms are feature-gated sentinels and
+are the entire reason the first key is treated differently; the next step is
+about them.
+
+After the first entry the loop drops the seed and becomes `visitor.next_entry()`,
+which is `next_entry_seed(PhantomData, PhantomData)` — the key and the value in
+one call, each with the seed that carries nothing. So an object's first key is
+deserialized by one mechanism and its remaining keys by another, and the two
+produce the same `String` in every case but the ones a feature flag turns on.
+
+`values.insert(first_key, tri!(visitor.next_value()))`, and then the same inside
+the loop — as a statement, with the return value dropped. `Map::insert` hands
+back `Option<Value>`, the value that was already at that key, and dropping it
+is how this crate answers a question JSON's grammar leaves open: `{"a":1,"a":2}`
+parses, the second insert replaces the first value, and the last one wins. No
+error, no warning, and the decision is invisible at the call site because a
+discarded `Option` looks like nothing at all.
+
+Our document enters this function once, at depth zero: `"a"` through the
+classifier, `"b"` through `next_entry`, and a third call that peeks `}` and
+ends the loop.
+"""
+
+[[step]]
+id = "s06-key-classifier"
+source = "serde_json-1.0.151"
+file = "src/value/de.rs"
+lines = "1329-1383"
+leans_on = ["s06-visit-map", "s06-phantom-seed"]
+title = "KeyClassifier — a seed that carries no data and still is not PhantomData"
+body = """
+The other kind of seed. `KeyClassifier` is zero-sized like `PhantomData`, but
+its `DeserializeSeed` impl does not forward to `T::deserialize` — it calls
+`deserializer.deserialize_str(self)` and then acts as its own `Visitor`. The
+seed *is* the visitor, which is the trick worth taking away: the two traits have
+disjoint method sets, so one unit struct can implement both and the plumbing
+disappears.
+
+What it decides is three-way. A key equal to `$serde_json::private::Number` or
+`$serde_json::private::RawValue` is not a key at all; it is a sentinel that the
+`arbitrary_precision` and `raw_value` features use to smuggle a non-JSON payload
+through a map that the rest of serde believes is an ordinary object. Anything
+else is `KeyClass::Map(the string)`.
+
+With this build's features, both sentinel arms are compiled out and the whole
+type collapses to "read a string, wrap it in `KeyClass::Map`". It is still worth
+reading, because it explains the shape of `visit_map`: the first key gets the
+classifier *because a sentinel can only be the first key*, and after that there
+is nothing left to classify.
+
+`visit_str` and `visit_string` are both implemented, and the difference between
+them is what unit 04 was about. A borrowed key compares against the sentinels and
+then pays `to_owned`; an owned key — which is what an escaped key produces,
+built in the scratch buffer — compares and moves. Two methods to avoid one
+allocation in the case where the parser already did the work.
+"""
+
+[[step]]
+id = "s06-map-impl"
+source = "serde_json-1.0.151"
+file = "src/map.rs"
+lines = "28-36"
+leans_on = ["s06-visit-map"]
+title = "Map — nine lines, a newtype, and the only feature flag a reader can see"
+body = """
+`pub struct Map<K, V> { map: MapImpl<K, V> }`, and `MapImpl` is a `BTreeMap`
+or an `IndexMap` depending on `preserve_order`. Everything else in this
+1,181-line file is a method forwarding to whichever one is compiled.
+
+The newtype is doing work no wrapper of a `BTreeMap` normally has to. It keeps
+the choice out of the public type — `Map<String, Value>` names neither backing
+store — so enabling the feature does not change any signature in the crate, in
+the caller, or in the `Value` enum. A `pub type Map = BTreeMap<String, Value>`
+would have leaked it into every one of them and made the feature a breaking
+change to turn on.
+
+What the flag changes is what comes *out*. By default keys are sorted, so a
+document read and written back has its object keys in `BTreeMap` order rather
+than input order; with `preserve_order` it round-trips. The walk's document
+cannot show you this, and saying so is the honest thing: its keys are `a` then
+`b`, which is both the input order and the sorted order. Put `b` first in the
+input and the default build still prints `a` first.
+
+Which gives this flag an unusual shape. It changes no type, no signature and no
+error, and it changes the bytes of every document with more than one object
+key. That is why the enum's doc comment in the first step spends a paragraph on
+it rather than leaving it to the feature list.
+"""
+
+[[step]]
+id = "s06-the-visitor-passed"
+source = "serde_json-1.0.151"
+file = "src/value/de.rs"
+lines = "149-153"
+leans_on = ["s06-deserialize-for-value", "s06-key-classifier", "s06-map-impl"]
+title = "deserializer.deserialize_any(ValueVisitor) — one line, and the walk's halfway point"
+body = """
+After a hundred and twenty lines of visitor, the impl's actual body is one
+expression: construct the zero-sized struct and hand it to the deserializer.
+
+It is worth seeing how little is said here. Not *parse this*; not a reference,
+a buffer or a length — a value of a type with no fields, passed by value to a
+method on a trait. Everything unit 02 through unit 05 did was the other side of
+this call deciding, byte by byte, which of the visitor's methods to invoke, and
+this line is the entire interface between them.
+
+`deserialize_any` and not `deserialize_map`, because `Value` accepts whatever
+is there. That is the choice unit 03 opened with — the input decides the type —
+and it is the choice unit 09 reverses, where a generated `Deserialize` calls
+`deserialize_struct` and tells the parser what to expect.
+
+The twenty-two bytes are now a `Value`: an `Object` of two keys, holding an
+`Array` of a `Number` and a `Bool`, and a `String`. Unit 07 turns it back into
+twenty-two bytes.
+"""
