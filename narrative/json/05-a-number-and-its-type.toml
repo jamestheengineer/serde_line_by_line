@@ -1,0 +1,370 @@
+schema = 1
+
+[unit]
+id = "05-a-number-and-its-type"
+title = "A number, and a type chosen before anyone asked for one"
+run_example = "json_document"
+summary = """
+JSON has one number. serde has twelve. The `1` in our array reaches the visitor
+as a `u64`, and the parser decided that from the bytes alone — no sign, no
+point, no exponent — before knowing what the caller wanted. The decision, the
+overflow check that never multiplies, and the float path this build does not
+even compile.
+"""
+body = """
+JSON's grammar has a single number production. `1`, `1.0`, `1e0` and
+`10e-1` are four spellings of it, and the specification is silent on what any
+of them is worth: it describes the characters, not a value.
+
+serde's data model is not silent. `visit_i8` through `visit_i128`, `visit_u8`
+through `visit_u128`, `visit_f32`, `visit_f64` — twelve methods, and a format
+calling into a visitor has to pick one.
+
+So the parser guesses, from syntax and nothing else. A run of digits with no
+sign is a `u64`; with a sign it is an `i64`; a point or an exponent anywhere in
+it makes it an `f64`. That is the whole rule, and it is made before the
+deserializer has any idea whether the caller wanted a `u8`, a `String` or an
+enum. This unit follows the `1` in `[1,true]` through it, and then follows the
+three paths our document does not take — because two of them are where the
+interesting failures live.
+"""
+
+[[step]]
+id = "s05-number-arms"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "1420-1424"
+title = "Two arms of the match, and only one of them eats a byte"
+body = """
+Unit 03 left four arms of `deserialize_any` unread. Two of them are numbers,
+and they differ by one line.
+
+`b'-'` calls `eat_char` and then `parse_any_number(false)`. `b'0'..=b'9'` calls
+`parse_any_number(true)` and consumes nothing, because the digit it peeked is
+still part of the number and the next function will want it. The sign is not:
+it has been turned into that `bool` and the parser never looks at the byte
+again.
+
+`positive` is therefore the entire memory of the minus, threaded by hand
+through every function this unit visits. It could have been an `i64` accumulator with a sign
+instead, and it is not, for the reason the next few steps keep running into:
+the widest useful integer here is `u64`, and the moment the accumulator is
+signed, half its range is gone.
+
+`b'0'..=b'9'` is a range pattern over `u8`: one arm rather than ten, matching
+a contiguous span of byte values. Every arm of this match is a literal or a
+range over the same `u8`, which is why a match with eight arms reads as a table
+of the grammar rather than as a sequence of tests.
+"""
+
+[[step]]
+id = "s05-parse-any-number"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "932-935"
+leans_on = ["s05-number-arms"]
+title = "parse_any_number — a function body of one line, and the seam it holds open"
+body = """
+Four lines, three of them signature and attribute. Under the default feature
+set `parse_any_number` *is* `parse_integer`, and the indirection buys nothing
+at all.
+
+What it buys is the `#[cfg]`. Twenty lines below sits a second
+`parse_any_number`, compiled instead when `arbitrary_precision` is on, which
+scans the number into a `String` and keeps the digits verbatim — because a
+caller who enables that feature is saying the `u64`/`i64`/`f64` triage this
+unit is about loses information they care about.
+
+Two whole numeric strategies, swapped at one call site, because the call site
+was given a name of its own. It is the same move as `StrRead` in unit 01: the
+cheap version and the careful version behind one identifier, chosen at compile
+time, with everything downstream written against the name.
+"""
+
+[[step]]
+id = "s05-parse-integer"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "462-507"
+leans_on = ["s05-parse-any-number"]
+title = "parse_integer — the leading-zero rule, and a loop that can give up"
+body = """
+`next_char` this time, not `peek`: the digit is being taken.
+
+The `b'0'` arm is a grammar rule made explicit. JSON does not allow `01`, so a
+zero that is followed by another digit is `InvalidNumber` — reported with
+`peek_error`, because the offending byte is the one that was looked at and not
+consumed, which is unit 02's distinction being spent. A zero followed by
+anything else is a perfectly good `0` and goes to `parse_number`.
+
+The `c @ b'1'..=b'9'` arm is the real one. Bind the byte, subtract `b'0'` to
+get its value, then loop: peek, and while the peeked byte is a digit,
+`significand = significand * 10 + digit`.
+
+And before every one of those multiplications, the `overflow!` check — with the
+`return` inside it. When the accumulator can no longer hold what the next digit
+would make it, the function does not truncate, saturate or error. It hands the
+rest of the number to `parse_long_integer` and comes back with an `f64`. The
+last step of this unit is that function, and the shape to notice here is that
+the escape is written as an early return out of the middle of a loop: there is
+no state to unwind, because the reader's position *is* the state and it is
+already exactly where the other function needs it.
+"""
+
+[[step]]
+id = "s05-overflow-macro"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "101-107"
+leans_on = ["s05-parse-integer"]
+title = "overflow! — the check, done by division, because the multiplication is the thing being feared"
+body = """
+Seven lines, and the entire trick is that `a * 10 + b` never appears.
+
+Asking "does `a * 10 + b` exceed `u64::MAX`" by computing `a * 10 + b` is
+asking a question whose answer is a panic in debug and a wrong number in
+release. So the comparison is rearranged into one the arithmetic can survive:
+`a >= c / 10 && (a > c / 10 || b > c % 10)`. For `u64::MAX` that is
+`1844674407370955161` and `5`, both constants the compiler folds, so the whole
+check is a compare, a branch, and on the false path nothing.
+
+The `$a:ident * 10 + $b:ident` matcher is worth a second look. `macro_rules!`
+patterns match token trees, not expressions, so a macro is free to demand that
+its argument be *written* in a particular shape — here, literally the
+expression the caller is about to evaluate. The call site reads
+`overflow!(significand * 10 + digit, u64::MAX)` and the macro takes it apart
+and never puts it back together. The text says what is being guarded against;
+the expansion makes sure it does not happen.
+
+`match $c { c => ... }` is the other half: binding `$c` once so a caller passing
+an expression does not get it evaluated three times.
+"""
+
+[[step]]
+id = "s05-parse-number"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "509-528"
+leans_on = ["s05-parse-integer"]
+title = "parse_number — where the type is chosen, and where -0 stops being an integer"
+produces = '''      Number(1)'''
+body = """
+The digits are gone and one byte of lookahead settles it. A `.` means
+`parse_decimal`; an `e` or `E` means `parse_exponent`; anything else — a comma,
+a `]`, end of input — means the number is over and it is an integer.
+
+For `1` the peeked byte is `,`, `positive` is true, and the answer is
+`ParserNumber::U64(1)`. That is the line that makes the transcript say
+`Number(1)`: not the `Value` code, which only stores what it is handed, and not
+the visitor, which only widens it.
+
+The negative branch is five lines and two of them are a subtlety.
+`(significand as i64).wrapping_neg()` negates in the domain where it might
+overflow, deliberately, and then *inspects the result*: if the negation of a
+number that was supposed to become negative is not negative, something did not
+fit. That covers both cases at once. `-9223372036854775809` wraps around to a
+positive value, so it becomes an `f64` and loses precision instead of lying.
+And `-0` negates to `0`, which is also not negative, so it too becomes an
+`f64` — `-0.0`, sign bit intact.
+
+That second one is not a fallback, it is the only correct answer. `i64` has no
+negative zero to hold it, `f64` does, and JSON's `-0` means it. The check that
+catches an out-of-range magnitude catches the sign of zero for free, which is
+the kind of coincidence that only looks like one until you notice both are the
+same question: *is the negation of this representable?*
+"""
+
+[[step]]
+id = "s05-parser-number"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "109-129"
+leans_on = ["s05-parse-number"]
+title = "ParserNumber — a three-variant enum whose only job is to be one call away from a visitor"
+body = """
+This is the type every path in this unit returns, and it exists because the
+parse and the delivery have to be separable.
+
+`parse_integer` cannot call `visitor.visit_u64` itself: it is called from
+places that do not have a visitor, and from `Number`'s own `FromStr`, which
+wants the value rather than a visit. So the parser produces a small tagged
+union and the caller performs the visit — which in `deserialize_any` is that
+`.visit(visitor)` on the end of both number arms, three steps back.
+
+`visit` is the dispatch, and it is three lines because the enum was designed to
+make it three lines: one variant per method the data model has for numbers the
+parser can produce. `#[cfg(feature = "arbitrary_precision")]` adds a fourth
+that is a `String` and goes to `visit_map` instead — the escape hatch from the
+previous step, surfacing here as the one variant that does not correspond to a
+number at all.
+
+`pub(crate)`, and the file does not export it. It is the seam between two
+halves of one crate, not a type anybody outside gets to name.
+"""
+
+[[step]]
+id = "s05-visit-u64"
+source = "serde_core-1.0.229"
+file = "src/de/mod.rs"
+lines = "1446-1461"
+annotation = "de-mod-0048"
+leans_on = ["s05-parser-number"]
+title = "…and the method that receives it, which by default refuses"
+body = """
+The other side of the call. `visit_u64`'s default implementation is
+`Err(invalid_type(Unsigned(v)))` — a visitor that does not override it rejects
+every unsigned number a format hands it, with a message naming what arrived.
+
+`visit_u32` just above it forwards to `visit_u64`, as `visit_u8` and
+`visit_u16` do in turn. Widening is free and automatic; the reference track's
+annotation is about the direction that is not. `visit_u64` does not forward to
+`visit_i64`, so a visitor implementing only the signed side refuses `1` — a
+value that fits it perfectly — because serde declines to guess at a conversion
+that is lossy in one direction.
+
+Which is exactly the exposure `parse_number` created two steps ago. `1` and
+`-1` in the same array arrive at different methods, and a hand-written visitor
+that implements one of them works on half the document. Derive-generated
+visitors implement both sides and range-check, which is why nobody usually
+meets this — and why unit 09, reading one of those visitors, is where the
+handling of it is finally visible as code.
+"""
+
+[[step]]
+id = "s05-parse-decimal"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "530-565"
+leans_on = ["s05-parse-number"]
+title = "parse_decimal — the same loop again, with a counter running the other way"
+body = """
+Our document never reaches this function. It is worth reading anyway, because
+it is `parse_integer`'s loop with one line added and it shows what that line is
+for.
+
+The digits after the point go into the *same* `significand`, by the same
+`significand * 10 + digit`, guarded by the same `overflow!`. Nothing about the
+accumulator knows there was a point. What knows is
+`exponent_after_decimal_point`, which is decremented once per digit — so
+`1.25` accumulates to `125` with an exponent of `-2`, and the value is
+recovered at the end by scaling. A decimal fraction is an integer and a shift,
+and the parser never handles anything else.
+
+The `exponent_after_decimal_point == 0` check is the grammar again: JSON
+requires a digit after the point, so `1.` is `InvalidNumber` and `1.` at end of
+input is `EofWhileParsingValue`. Two error codes for the same missing byte,
+distinguished by whether there is a byte at all — the parser tells you it ran
+out rather than that you wrote something wrong, because those are different
+things to a caller streaming input.
+
+Then the tail: an `e` continues into the exponent carrying the accumulated
+shift, anything else goes to `f64_from_parts`. Both are the last thing the
+function does, and neither is a loop iteration — the number is finished by
+whoever is called, not by returning here.
+"""
+
+[[step]]
+id = "s05-parse-exponent"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "567-621"
+leans_on = ["s05-parse-decimal"]
+title = "parse_exponent — a third accumulator, in i32, and two ways of refusing to overflow"
+body = """
+The longest of the numeric functions, and most of it is the exponent's own
+small grammar: an optional `+` or `-`, then at least one digit. `_ => true`
+makes the sign optional by treating its absence as `+`, without consuming
+anything — the same shape as the string parser's default cases, a match arm
+that declines to act.
+
+`next_char` for the first digit and a `match` that errors on anything else, so
+`1e` and `1e+` fail; then the familiar loop, this time accumulating into an
+`i32` and guarded by `overflow!` against `i32::MAX`. The same macro, a
+different type, which works because the matcher never mentioned one.
+
+The two overflow strategies here are different and both are correct. Too many
+*digits* in the exponent goes to `parse_exponent_overflow`, which never
+computes the value: past that magnitude the answer is a zero or an infinity and
+no further digit can change which, so it consumes the rest, hands back a signed
+zero, and raises `NumberOutOfRange` rather than returning an infinity. Combining the exponent with the one from the
+fraction uses `saturating_add`/`saturating_sub` instead — no branch, no error,
+because a saturated `i32` exponent is already so far outside the range of an
+`f64` that clamping it changes nothing about the result.
+
+That is the distinction worth taking away. `overflow!` guards a value that
+matters; saturation is fine where the number has already left the region where
+precision exists.
+"""
+
+[[step]]
+id = "s05-f64-from-parts"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "638-672"
+leans_on = ["s05-parse-exponent"]
+title = "f64_from_parts — a table of 309 doubles, and the 3,708 lines this build does not compile"
+body = """
+Every float path in this unit ends here: a significand and a base-ten exponent,
+to be turned into one `f64`.
+
+The default implementation is a lookup and a multiply. `POW10` is a static
+array of 309 `f64`s — `1e0` through `1e308`, written out as literals — so
+scaling is `f *= POW10[exponent]` for a positive exponent and `f /= POW10[-e]`
+for a negative one, with `is_infinite` afterwards as the overflow check, since
+that is what an `f64` does when it overflows rather than panicking. Exponents
+beyond the table loop: divide by `1e308`, add 308, try again, and give up with
+`NumberOutOfRange` only if the significand was not already zero.
+
+It is fast, it is 35 lines, and it is not exactly right. `significand as f64`
+rounds once above 2^53 and the scaling rounds again, so a long decimal can come
+back a bit or two off the nearest representable double.
+
+Which is what the other `f64_from_parts` is for, the one above this under
+`#[cfg(feature = "float_roundtrip")]`, calling into `lexical::parse_concise_float`.
+`src/lexical/` is 3,708 lines of correctly-rounded float parsing — the largest
+single thing in the crate, larger than `de.rs` — and `mod lexical` in `lib.rs`
+carries the same `cfg`. This site's build does not enable the feature, so those
+3,708 lines are vendored, present, and never compiled.
+
+The scope doc called that directory the hard question for a track that claims
+every line of a crate. It is not one here, and the reason is sharper than "the
+walk goes elsewhere": the two functions are a documented trade between speed
+and last-bit accuracy, the pinned build takes the fast side, and a walk that
+follows what runs has nothing to follow into it.
+"""
+
+[[step]]
+id = "s05-parse-long-integer"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "714-738"
+leans_on = ["s05-parse-integer", "s05-f64-from-parts"]
+title = "parse_long_integer — cold, never inlined, and it throws the digits away"
+body = """
+Back to the escape hatch from `parse_integer`, now that there is somewhere for
+it to land.
+
+The `u64` is full and the input still has digits. This function reads the rest
+of them and *counts* them — `exponent += 1` per digit, and the digit itself is
+discarded. Which is right: once the significand has no more room, the twentieth
+digit of an integer cannot survive into an `f64` anyway, and all it can still
+contribute is magnitude. `123456789012345678901` becomes `1234567890123456789`
+with an exponent of `2`, and the last two digits were never representable.
+
+The comment on the counter is the crate in one line: *this could overflow… if
+your integer is gigabytes long. Ignore that possibility.* An `i32` exponent
+overflows after two billion digits, which is a two-gigabyte number, and a
+parser that has read two gigabytes of one integer has a different problem.
+
+`#[cold]` and `#[inline(never)]`, together. Unit 04 met `#[cold]` on the escape
+handlers for the same reason: this is a branch taken by almost no real
+document, and every byte of it that stays out of `parse_integer` is a byte the
+common path does not pay for in instruction cache. `#[inline(never)]` says it
+twice, for the case where the optimiser would otherwise decide a 25-line
+function is small enough to paste in.
+
+And then the same three-way dispatch `parse_number` did — point, exponent, or
+done — except every arm returns an `f64`. From here on the number is a float
+whatever the rest of it says, which is the one-way door the `overflow!` check
+opened.
+"""
