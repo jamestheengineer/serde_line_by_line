@@ -22,3 +22,9 @@ to_string_pretty
 input    {"a":[1,true,],"b":"x"}
 error    trailing comma at line 1 column 14
 at       line 1 column 14
+category Syntax
+debug    Error("trailing comma", line: 1, column: 14)
+
+as       BTreeMap<String, Vec<String>>
+error    invalid type: integer `1`, expected a string at line 1 column 7
+category Data

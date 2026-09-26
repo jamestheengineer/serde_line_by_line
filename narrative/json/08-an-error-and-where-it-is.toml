@@ -1,0 +1,371 @@
+schema = 1
+
+[unit]
+id = "08-an-error-and-where-it-is"
+title = "An error one pointer wide, and a position it sometimes reads back out of its own message"
+run_example = "json_document"
+summary = """
+The walk's one failure, `trailing comma at line 1 column 14`, taken apart. An
+error is a `Box` so that the success path stays small, a position is two
+integers where zero means *nowhere*, and the complaints that come from the data
+model rather than the grammar get their position filled in afterwards — or, in
+one corner, parsed back out of their own text.
+"""
+body = """
+Units 02 and 03 built the machinery that notices a problem: `peek_position`
+and its deliberate off-by-one, `peek_error` marked `#[cold]`, the trailing-comma
+arm of `has_next_element`. What they produced was handed to a constructor this
+walk has not opened. This unit opens it, and follows the error from the moment
+it exists to the moment somebody prints it.
+
+The transcript has two failures now, and they come from opposite sides of
+serde. `{"a":[1,true,],"b":"x"}` is not JSON, and the *parser* says so — it
+knows exactly where it is. Our real document read into a
+`BTreeMap<String, Vec<String>>` is perfectly good JSON with the wrong shape, and
+the complaint comes from a `Deserialize` impl for `String` that has never heard
+of line numbers. Both messages end in a position. How the second one gets there
+is most of what `error.rs` is for.
+
+`error.rs` is 541 lines, and 143 of them are doc comments on a public surface
+that fits in a sentence: everything a caller can do with a `serde_json::Error`
+is ask where, ask what kind, and print it. What went wrong, precisely, is an
+enum the crate does not export.
+"""
+
+[[step]]
+id = "s08-error-struct"
+source = "serde_json-1.0.151"
+file = "src/error.rs"
+lines = "15-25"
+leans_on = ["s02-error-pair", "s01-from-trait"]
+title = "Error — one field, a Box, and a comment about everybody else's Result"
+body = """
+The whole public type is a pointer. The comment says why, and the reason is not
+about errors at all: it is about the `Result<T, Error>` returned by every
+function in the parser, which is almost always `Ok`.
+
+A `Result` is as large as the larger of its two sides. Put the error's code, line
+and column inline and every `Result<u8, Error>` that `parse_whitespace` hands
+back, every `Result<()>` that `end` returns, is several words wide — copied,
+moved and checked on the hot path for the sake of a value that is never there.
+Boxed, `Error` is eight bytes on a 64-bit target, and `Result<(), Error>` is
+*also* eight, because a `Box` is never null and the compiler uses the null
+pattern to mean `Ok`. The success path pays for one pointer-sized word and no
+allocation; the failure path pays for one allocation, once, on a path already
+marked `#[cold]`.
+
+`pub type Result<T>` shadows the prelude's `Result` everywhere in this crate. It
+is why unit 01's `from_trait` could say `Result<T>` with one parameter, and it
+is the other half of `tri!`: with one error type fixed in the alias, the
+conversion `?` would perform has nothing to convert.
+"""
+
+[[step]]
+id = "s08-error-code"
+source = "serde_json-1.0.151"
+file = "src/error.rs"
+lines = "230-311"
+leans_on = ["s08-error-struct"]
+title = "ErrorImpl and ErrorCode — twenty-five variants, twenty-three of them carrying nothing"
+body = """
+What the `Box` points at: a code and two integers. No input excerpt, no path of
+keys from the root, no byte offset — the offset was turned into a line and
+column by `position_of_index` in unit 02 and then dropped.
+
+`ErrorCode` is `pub(crate)`. Every variant is a thing the grammar can object to
+by name — `TrailingComma` is the one our transcript hits — and none of them is
+reachable from outside the crate, so a caller cannot `match` on *which* syntax
+error it got. That is a compatibility decision: a public enum's variants are a
+promise, and a private list can grow with every release that tightens the
+grammar without any of them being a breaking one.
+
+Two variants carry data. `Io` wraps a real `io::Error`, the one case where the
+problem is not in the bytes but in getting them. `Message(Box<str>)` is the
+catch-all, and it is not a syntax error despite the doc comment's claim: it is
+where every complaint from *outside* the parser lands — `invalid type`,
+`missing field`, anything a `Deserialize` impl says through `de::Error::custom`.
+`Box<str>` rather than `String` is two words instead of three, and the message is
+never appended to once built.
+"""
+
+[[step]]
+id = "s08-syntax"
+source = "serde_json-1.0.151"
+file = "src/error.rs"
+lines = "313-347"
+leans_on = ["s08-error-code", "s03-fix-position", "s07-map-key-serializer"]
+title = "syntax, io, fix_position — and line 0, which means nowhere"
+body = """
+`syntax` is what unit 02's `peek_error` called: box the three fields and return.
+Our trailing comma arrives here as `(TrailingComma, 1, 14)`.
+
+`io` does the same with the position hard-coded to `0, 0`, and so does every
+serializer error unit 07 met in `MapKeySerializer`. That is the convention the
+whole file hangs on. Lines are one-based, so line 0 cannot be a real place in
+any input, and the crate uses it to mean *this error has no position* without
+spending an `Option` on saying so.
+
+`fix_position` is where the convention pays. It is the other half of the
+`deserialize_any` step in unit 03: the parser catches every error on the way
+out and passes a closure that would build a positioned one. If the error
+already has a line, it is returned untouched. If it has line 0, its code is
+moved out of the old box into the closure, which calls `self.error(code)` and
+boxes it again with the parser's current position.
+
+So an error gets a position from the innermost `fix_position` that sees it and
+keeps it through every outer one. That matters, because on the path this unit
+follows next the same error passes through two.
+"""
+
+[[step]]
+id = "s08-display"
+source = "serde_json-1.0.151"
+file = "src/error.rs"
+lines = "399-417"
+leans_on = ["s08-syntax", "s02-peek-position"]
+title = "Display — the code, then the position, unless the position is nowhere"
+produces = '''
+error    trailing comma at line 1 column 14
+'''
+body = """
+`Display for Error` forwards through the box, and `Display for ErrorImpl` is
+the one place the sentence is assembled: the code's own text — `"trailing
+comma"`, from the `match` just above this range, one `write_str` per variant —
+then ` at line {} column {}`.
+
+Unless the line is 0, in which case the position is left off entirely. This is
+what unit 07's `MapKeySerializer` was owed. A serializer error has no input to
+point into, so it prints as the bare `key must be a string`, and nothing in the
+output claims a place that does not exist.
+
+The format string is worth remembering exactly, spaces and all. The last step of
+this unit is a function that parses it back.
+"""
+
+[[step]]
+id = "s08-line-column"
+source = "serde_json-1.0.151"
+file = "src/error.rs"
+lines = "27-46"
+leans_on = ["s08-display"]
+title = "line and column — one-based, and a doc comment that admits to column 0"
+produces = '''
+at       line 1 column 14
+'''
+body = """
+The two accessors are field reads through the box, and they return the same
+numbers the message printed. Both are documented as one-based: column 14 is the
+fourteenth byte of the line, which in our input is the `]` at index 13 that
+`peek_position` was looking at.
+
+The second doc comment is the interesting one. A column of 0 is possible — an
+I/O read that fails right after a newline has consumed the newline and nothing
+else, so `position` reports the start of a line with nothing on it yet. The
+crate documents the edge instead of clamping it to 1, because clamping would
+report a byte that was never read.
+
+What neither doc comment says is that line 0, column 0 is also what every error
+without a position reports. A caller who wants to know whether the position
+means anything checks `line() == 0`, the same test `Display` performs.
+
+*Byte*, not character. The column is `index - start_of_line` over a byte slice,
+so a line containing `é` before the error reports a column one higher than an
+editor that counts characters would.
+"""
+
+[[step]]
+id = "s08-classify"
+source = "serde_json-1.0.151"
+file = "src/error.rs"
+lines = "48-112"
+leans_on = ["s08-error-code"]
+title = "classify — the private enum folded into a public one with four answers"
+produces = '''
+category Syntax
+'''
+body = """
+This is the only public view of `ErrorCode`, and it is a `match` with no
+wildcard: add a variant and the crate does not compile until someone decides
+which of four categories it belongs to. That is how a private enum stays
+honestly summarised by a public one.
+
+The four are chosen for what a caller would *do* differently. `Io` — retry, or
+give up on the stream. `Eof` — the doc comment says it outright: a streaming
+reader may want to wait for more bytes and try again, which is why the four
+`EofWhileParsing…` variants are split out from syntax errors they otherwise
+resemble. `Data` — the JSON was fine and the program's type was wrong, and it
+is exactly `Message`. `Syntax` — everything else, nineteen variants.
+
+Our trailing comma is `Syntax`. So, the transcript cannot show but the pinned
+crate confirms, is `key must be a string` from the serializer, at line 0 — a
+category named for input, reported by code that never read any. Four buckets
+chosen for deserialization, and the serializer's few errors were filed in the
+nearest one.
+
+The `is_*` predicates below each call `classify` and compare, so the `match`
+stays the single place the mapping lives.
+"""
+
+[[step]]
+id = "s08-debug"
+source = "serde_json-1.0.151"
+file = "src/error.rs"
+lines = "419-431"
+leans_on = ["s08-display", "s08-error-struct"]
+title = "Debug — written by hand, because unwrap() is how most people meet it"
+produces = '''
+debug    Error("trailing comma", line: 1, column: 14)
+'''
+body = """
+A derived `Debug` would print `Error { err: ErrorImpl { code: TrailingComma,
+line: 1, column: 14 } }` — two layers of wrapper a user did not write and cannot
+name, and a variant identifier instead of the sentence. The comment gives the
+reason for not deriving: *humans often end up seeing this representation because
+it is what `unwrap()` shows*. A panic message is a user interface.
+
+So the code is rendered through its `Display` and then quoted by `{:?}`, which
+is why the transcript shows `"trailing comma"` in quotes. The price is one
+`to_string` allocation per `Debug` call, which is paid only by a program that is
+already printing an error.
+"""
+
+[[step]]
+id = "s08-peek-invalid-type"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "269-317"
+leans_on = ["s08-syntax", "s05-parse-any-number", "s03-parse-ident", "s04-string-arm"]
+title = "peek_invalid_type — reading the wrong value to the end, so the message can quote it"
+produces = '''
+as       BTreeMap<String, Vec<String>>
+error    invalid type: integer `1`, expected a string at line 1 column 7
+category Data
+'''
+body = """
+The second failure. The map asks for a key and gets `"a"`; asks for a
+`Vec<String>` and gets `[`; asks for a `String` and `deserialize_str` peeks a
+`1`. Nothing about the byte is wrong. It just is not a `"`, and every
+`deserialize_*` method that expects one shape sends every other shape here.
+
+This function could raise an error at the byte. It parses the value instead —
+`parse_any_number` for our `1`, `parse_ident` for the literals, the whole
+string for a string — so that the message can say `` integer `1` `` rather than
+*something that is not a string*. The four arms in the middle are units 03, 04
+and 05 run again for the sake of a sentence. `[` and `{` are not parsed, because
+`Unexpected::Seq` has no contents to quote, and a failure *while* parsing the
+wrong value — `tru` where a `true` was going — returns that syntax error
+instead, since it is the truer one.
+
+`de::Error::invalid_type` builds a `Message` with line 0: the data model's error
+constructor has no idea there is an input. Then `self.fix_position(err)` fills
+it in from `position` — the index *after* the `1`, which as a one-based column
+is the `1` itself, column 7. That is `error` rather than `peek_error`'s
+arithmetic, and it is correct here because the offending value was consumed.
+Unit 03's `fix_position` step said the crate picks the one that is right more
+often; this is a case where it is right.
+
+`deserialize_str` then calls `fix_position` a second time on the same error. It
+has a line now, so the second call is the untouched branch — which is why
+positions are filled from the inside out and never overwritten.
+
+`category Data`: the code is `Message`. The same document that round-trips in
+unit 07 is, read as this type, a data error and not a syntax error, and the
+category says so.
+"""
+
+[[step]]
+id = "s08-de-error"
+source = "serde_json-1.0.151"
+file = "src/error.rs"
+lines = "433-479"
+leans_on = ["s08-peek-invalid-type", "s08-error-code"]
+title = "impl de::Error — custom, and two defaults overridden to say null"
+body = """
+`custom` is the one method serde requires of a format's error type, and here it
+is `make_error(msg.to_string())` — the `Display` value rendered into a
+`String`, and the `String` handed to a function this unit reaches last.
+
+`invalid_type` and `invalid_value` have defaults in `serde_core`, and
+`serde_json` overrides both to change one word. The defaults print the data
+model's description of what was found; serde's data model calls the absent
+value *unit*, so the default would say `invalid type: unit value, expected a
+string` for a JSON `null`. `JsonUnexpected` wraps the `Unexpected` and
+intercepts two cases: `Unit` prints as `null`, which is what the user typed, and
+`Float` is formatted by `zmij` — the crate unit 07 found writing floats on the
+way out — so a float in an error message is spelled the way the serializer
+would spell it. Everything else falls through to the data model's own text,
+which is where our transcript's `` integer `1` `` comes from.
+
+A newtype over a borrowed enum, with a `Display` that handles two variants and
+delegates the rest, is a pattern worth keeping: it changes how a foreign type
+prints without touching the foreign type.
+
+`ser::Error::custom` is the same one line. Errors in both directions become a
+`Message` through the same function.
+"""
+
+[[step]]
+id = "s08-invalid-type-default"
+source = "serde_core-1.0.229"
+file = "src/de/mod.rs"
+lines = "198-233"
+annotation = "de-mod-0009"
+leans_on = ["s08-de-error"]
+title = "…and the defaults it replaced, in a crate that says unit value"
+body = """
+The originals. Both funnel into `custom(format_args!(...))` with the same
+sentence shape `serde_json` copied character for character, and the reference
+track's annotation makes the point this unit has now seen from the other side:
+a format that implements only `custom` gets every serde format's phrasing for
+free.
+
+`serde_json` gives up that free phrasing in exactly one respect and keeps the
+rest. Its overrides are the defaults with the `Unexpected` wrapped, so the
+sentence still begins `invalid type:` and still ends `expected` and whatever the
+visitor's `Expected` said — `a string`, supplied by `String`'s visitor, a crate
+away from the word `null` it is being compared against.
+
+What neither version does is add a position. It cannot: `Self` is an unknown
+format's error type, and the trait gives no way to ask it where it is. That is
+the seam `fix_position` sits in, and the reason `Message` exists as a variant
+whose line is 0 until somebody who knows says otherwise.
+"""
+
+[[step]]
+id = "s08-make-error"
+source = "serde_json-1.0.151"
+file = "src/error.rs"
+lines = "481-541"
+leans_on = ["s08-de-error", "s08-display", "s08-syntax"]
+title = "make_error — parsing \" at line N column M\" back out of its own message"
+body = """
+The comment names the reason in one line: *erased-serde round-tripping the error
+through `de::Error::custom`*. `erased-serde` makes `Deserializer` usable as a
+trait object, and to cross that boundary a concrete error is flattened to its
+`Display` text and rebuilt on the far side through `custom`. For a
+`serde_json::Error`, the far side is this function, and the text it receives is
+`trailing comma at line 1 column 14`.
+
+Without this function that string becomes a `Message` at line 0, `fix_position`
+stamps the parser's current position onto it, and `Display` prints the
+suffix twice — `trailing comma at line 1 column 14 at line …`, the second
+position being wherever the parser had got to by the time it heard. So `make_error` looks for the
+suffix `Display` writes — `rfind(\" at line \")`, digits, `\" column \"`,
+digits, and nothing after — and if it is there, cuts it off and restores it as
+the error's line and column. The format string from the `Display` step is being
+parsed by the crate that wrote it.
+
+`parse_line_col` is written by hand with `starts_with_digit` rather than a
+regex or a `split`: no dependency, no allocation, and it rejects anything that
+is not exactly the crate's own format. `end_of_column < msg.len()` is the
+*nothing after* rule, so a message with the phrase in the middle is left alone.
+
+What it cannot tell is who wrote the suffix. A `Deserialize` impl that calls
+`custom("bad date at line 3 column 4")` — its own text, about some other file —
+gets its message truncated to `bad date`, its line and column set to 3 and 4,
+and `fix_position` then leaves them there because the line is no longer 0. The
+pinned crate confirms it: the printed message looks unchanged, and `line()` and
+`column()` report a place in the wrong document. A workaround for one caller,
+paid for by any message that happens to share its grammar — and, in practice,
+by nobody, which is why it has lasted.
+"""

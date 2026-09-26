@@ -11,6 +11,7 @@
 //! somebody typed (PLAN.md §6).
 
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 /// The one document this walk follows.
@@ -57,6 +58,21 @@ pub fn run() -> String {
             writeln!(out, "input    {bad}").unwrap();
             writeln!(out, "error    {e}").unwrap();
             writeln!(out, "at       line {} column {}", e.line(), e.column()).unwrap();
+            writeln!(out, "category {:?}", e.classify()).unwrap();
+            writeln!(out, "debug    {e:?}").unwrap();
+        }
+    }
+    writeln!(out).unwrap();
+
+    // The same valid document, asked for a type it does not fit. The parser
+    // has nothing to object to; the complaint comes from the visitor, which
+    // does not know where it is, and the position is filled in afterwards.
+    match serde_json::from_str::<BTreeMap<String, Vec<String>>>(INPUT) {
+        Ok(_) => writeln!(out, "error    none").unwrap(),
+        Err(e) => {
+            writeln!(out, "as       BTreeMap<String, Vec<String>>").unwrap();
+            writeln!(out, "error    {e}").unwrap();
+            writeln!(out, "category {:?}", e.classify()).unwrap();
         }
     }
     out
