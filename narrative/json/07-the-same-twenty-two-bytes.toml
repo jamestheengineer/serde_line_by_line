@@ -1,0 +1,585 @@
+schema = 1
+
+[unit]
+id = "07-the-same-twenty-two-bytes"
+title = "The same twenty-two bytes, and the trait that writes the punctuation"
+run_example = "json_document"
+summary = """
+The `Value` unit 06 assembled goes back out. Serialization is the walk in
+reverse and a third the size, because nothing has to be decided: the value
+knows what it is and the serializer is told. What is left is a writer, a
+formatter, and the question of where a comma goes — which is the only question
+the pretty printer answers differently.
+"""
+body = """
+Everything through unit 06 was pull. The parser looked at a byte, decided what
+it meant, and called a method on a visitor that had no say in the matter. This
+unit is push, and the reversal is total: the `Value` walks itself, calls a
+method per shape, and the serializer writes what it is told.
+
+That makes the code much smaller. `de.rs` is 2,714 lines; `ser.rs` is 2,285, and
+four hundred of those are a single trait whose every method has a default. There
+is no lookahead,
+no scratch buffer, no recursion guard and no position, because nothing can be
+ambiguous and nothing can be malformed — the only errors reachable on our
+document's path are an `io` failure and a key that is not a string.
+
+Two things are worth holding before the code. The first is that the round trip
+in the transcript is a claim about *this document*, not about JSON: it has no
+float to reformat, no escape to normalise, and two keys whose sorted order is
+also their input order, which unit 06 showed is not a coincidence anyone should
+rely on. The second is that the compact and pretty outputs below come from one
+traversal, run twice with one type parameter changed, and the last step of this
+unit is where that becomes visible as code.
+"""
+
+[[step]]
+id = "s07-to-string"
+source = "serde_json-1.0.151"
+file = "src/ser.rs"
+lines = "2206-2255"
+leans_on = ["s01-new", "s04-from-utf8-unchecked"]
+title = "to_vec and to_string — a Vec of 128, and an unsafe that spends a promise"
+produces = '''
+to_string    {"a":[1,true],"b":"x"}
+round trips  true
+'''
+body = """
+Three public functions and seven lines of code between them.
+
+`to_vec` allocates `Vec::with_capacity(128)`. It is the same 128 unit 01 found
+on the way in, doing the same job for the opposite reason: there the scratch
+buffer guessed how long an escaped string might be, here the output buffer
+guesses how long a document might be. Both are a bet that reallocating is worse
+than over-allocating a little, and neither number is configurable.
+
+`to_string` is where the walk's one interesting `unsafe` on this side lives.
+`String::from_utf8_unchecked(vec)`, with a four-word comment: *we do not emit
+invalid UTF-8*. Unit 04's `from_utf8_unchecked` leaned on two local facts: the
+input had been a `&str`, and the one function that appends bytes to the scratch
+buffer validates them. This one leans on an invariant that spans the whole rest
+of this unit: every byte that reaches the
+writer comes from a literal like `b\"[\"`, from an integer or float formatter
+writing ASCII digits, or from the bytes of a `&str` that was already valid. No
+path in `ser.rs` can put an arbitrary byte in the buffer, so the check the
+standard library would perform here can only succeed, and skipping it saves a
+pass over the output.
+
+The transcript's `round trips  true` is this unit's thesis and its limit: the
+output is byte-identical to the input for this document.
+"""
+
+[[step]]
+id = "s07-to-writer"
+source = "serde_json-1.0.151"
+file = "src/ser.rs"
+lines = "2167-2184"
+leans_on = ["s07-to-string", "s01-from-trait"]
+title = "to_writer — two lines, and the promise the unsafe was spending"
+body = """
+The doc comment is the other half of the previous step: *serialization
+guarantees it only feeds valid UTF-8 sequences to the writer*. That is a public
+promise about a private invariant, and `to_string` is its first consumer.
+
+Then the body, which is unit 01's `from_trait` in a mirror. There it was
+construct a `Deserializer`, call `T::deserialize`, and insist the input was
+finished. Here it is construct a `Serializer` and call `value.serialize` — and
+there is no third line, because nothing can be left over. A value is finite and
+the traversal ends when it ends.
+
+`&mut ser`, not `ser`. The trait is implemented for a reference, which the next
+step is about, and the effect here is that `ser` survives the call and the
+writer can be recovered from it afterwards with `into_inner`.
+
+`T: ?Sized + Serialize` is worth a second look. Without the `?Sized` this
+function could not be called on a `str` or a `[T]` directly, only on something
+behind a pointer with a known size — and `Serialize` is implemented for both
+unsized types. The bound says the argument is a reference and the referent's
+size is nobody's business.
+"""
+
+[[step]]
+id = "s07-serializer"
+source = "serde_json-1.0.151"
+file = "src/ser.rs"
+lines = "15-78"
+leans_on = ["s07-to-writer", "s01-deserializer-struct"]
+title = "Two fields, a default type parameter, and an impl on &mut"
+body = """
+The whole serializer: a writer and a formatter. No buffer, no stack, no
+position. Unit 01's `Deserializer` had four fields and two of them were
+`#[cfg]`'d away; this one has two and neither is conditional, because there is
+nothing about output that features can change except the formatter, which is
+already a parameter.
+
+`Serializer<W, F = CompactFormatter>` is a **default type parameter**, and it
+is the entire user-facing story of pretty printing. `Serializer<W>` means
+`Serializer<W, CompactFormatter>`, so `to_writer` can say `Serializer::new`
+and get compact output without naming a formatter, while `to_writer_pretty`
+says `Serializer::pretty` and gets the other one. Both constructors are one
+line and both call `with_formatter`, which is public — a third formatter is a
+type somebody else can write without this file knowing.
+
+Then the impl header, and two decisions in it.
+
+It is implemented for `&'a mut Serializer<W, F>`, not for the struct. Every
+method of `ser::Serializer` takes `self` by value, which is how serde enforces
+that a serializer serializes exactly one value. Implementing the trait for a
+mutable reference keeps that rule intact while letting the underlying
+serializer be used again: what is consumed is a borrow.
+
+`type Ok = ()`. There is nothing to return, because the output already went to
+the writer. The `Serializer` further down this crate — the one behind
+`to_value` — sets `type Ok = Value` instead, and that is the whole difference
+between writing JSON and building a tree. Seven associated types follow and all
+seven are `Compound`, one type doing the work of seven state machines.
+
+`W: io::Write` is not `std::io::Write`. It is `crate::io`, a facade over the
+real thing that reimplements enough of it when `std` is off — which is how a
+crate that writes to an I/O stream compiles for `no_std` at all.
+"""
+
+[[step]]
+id = "s07-serialize-for-value"
+source = "serde_json-1.0.151"
+file = "src/value/ser.rs"
+lines = "11-36"
+leans_on = ["s06-value-enum", "s06-the-visitor-passed"]
+title = "Serialize for Value — six arms, and only one of them is more than a line"
+body = """
+The exact mirror of `ValueVisitor`. There, a method per shape and the parser
+chose which to call; here, an arm per variant and the value chooses which
+method to call. Same six shapes, same crate, opposite direction.
+
+`Value::Null => serializer.serialize_unit()` is a decision rather than an
+identity. serde's data model has no null; it has unit, the type with one value,
+and JSON's `null` is mapped onto it. Every format has to make that choice and
+this is where this one is written down.
+
+`Value::Number(n) => n.serialize(serializer)` defers to `Number`'s own impl,
+which is a later step. `Value::Array(v) => v.serialize(serializer)` defers to
+`Vec<T>`'s, which is in `serde_core` and is the step after that.
+
+The object arm is the only one with a body, and it is four lines: open a map
+with the length, `serialize_entry` per pair, `end`. `use serde::ser::
+SerializeMap;` sits *inside* the arm — the trait has to be in scope for its
+methods to be callable, and it is imported in the narrowest block that needs
+it rather than at the top of the file.
+
+The `#[cfg]` pair at the bottom is the `Map` question from unit 06 surfacing
+again. With neither `std` nor `alloc` there is no map to iterate, so the arm
+becomes `unreachable!()` — an arm that exists to keep the match exhaustive over
+a variant that cannot be constructed in that build.
+"""
+
+[[step]]
+id = "s07-serialize-map"
+source = "serde_json-1.0.151"
+file = "src/ser.rs"
+lines = "348-369"
+leans_on = ["s07-serialize-for-value", "s07-serializer"]
+title = "serialize_map — the { is written before anything is known"
+body = """
+The first byte of the output goes out here, and it goes out immediately. There
+is no buffer to retract it from and no point at which the serializer could
+change its mind — which is why this half of the crate barely has an error type.
+Everything that can go wrong is either the writer failing or a key that is not
+a string.
+
+`self.formatter.begin_object(&mut self.writer).map_err(Error::io)` is the shape
+of almost every method in this impl: hand both fields to the formatter, convert
+an `io::Error` into this crate's error. A dozen of the thirty-one methods here
+differ from it only in which formatter method they name.
+
+Then the length. serde's length is a hint and the reference track calls it
+untrustworthy; this is the one place `serde_json` spends it. `Some(0)` writes
+`{}` at once and records `State::Empty`, so that `end` knows not to write the
+brace a second time. Everything else records `State::First` and writes nothing
+more. A `Serialize` impl that reports zero and then serializes an entry is not
+caught here — the entry is written after the closing brace, with a comma in
+front of it, and the output is malformed with no error raised. The hint is
+trusted exactly once, and this is the once.
+
+`serialize_seq`, sixty lines above, is this function with `array` for `object`.
+"""
+
+[[step]]
+id = "s07-compound"
+source = "serde_json-1.0.151"
+file = "src/ser.rs"
+lines = "460-480"
+leans_on = ["s07-serialize-map"]
+title = "Compound — one variant for seven traits, and a three-state enum for the commas"
+body = """
+*Not public API. Should be pub(crate).* A comment admitting that a type escaped
+into the public surface and cannot be withdrawn without a breaking change;
+`#[doc(hidden)]` is the most that can be done about it now. Unit 05 met
+`ParserNumber`, which is `pub(crate)` and never leaked — the difference is
+which side of a return type the two of them are on.
+
+`State` has three values and only one transition ever happens. `Empty` is
+decided at construction and never left. `First` becomes `Rest` the first time a
+key or an element is written. Nothing else moves, so the enum is not really a
+state machine — it is a bit saying *has anything been written yet*, with a
+third value meaning *and nothing ever will be*.
+
+`Compound::Map` holds the serializer and that state, and it is what arrays get
+too. The variant is named for the shape of the bookkeeping, not for JSON's
+object: a sequence needs exactly the same "is this the first one" question. The
+other two variants are behind features this build does not enable, which is why
+every `match` on a `Compound` in this file has arms that read as
+`unreachable!()` and compile to nothing at all — in our build the enum has one
+variant and the match is free.
+"""
+
+[[step]]
+id = "s07-serialize-key"
+source = "serde_json-1.0.151"
+file = "src/ser.rs"
+lines = "611-643"
+leans_on = ["s07-compound"]
+title = "serialize_key — the comma decision, and a key that gets its own serializer"
+body = """
+Three statements, and each is a decision.
+
+`begin_object_key(&mut ser.writer, *state == State::First)` passes the
+formatter one bit of information about where it is: whether this is the first
+key. That is all the formatter is ever told about position, and it is enough to
+put a comma in the right place forever.
+
+`*state = State::Rest` happens *before* the key is serialized. It has to: the
+byte is already out and the question the bool answered can never be asked
+again, so there is nothing to roll back if the key fails.
+
+`key.serialize(MapKeySerializer { ser: *ser })` is the surprise. The key is not
+serialized by the serializer that is serializing everything else — it gets a
+different type, built around a reborrow of the same `&mut Serializer`, and the
+next step is why.
+
+`end_object_key` writes nothing. The `:` is written by `begin_object_value`,
+and the trait's doc comment says explicitly that either method may be the one
+to do it. That freedom is not idle: it is what lets a formatter put spaces on
+one side of the colon and not the other.
+"""
+
+[[step]]
+id = "s07-map-key-serializer"
+source = "serde_json-1.0.151"
+file = "src/ser.rs"
+lines = "787-833"
+leans_on = ["s07-serialize-key"]
+title = "MapKeySerializer — a second Serializer whose job is mostly to refuse"
+body = """
+serde's data model lets a map key be anything serializable. JSON's grammar says
+an object key is a string. This type is where those two disagree, and it is
+built as a whole second `Serializer` implementation so that the disagreement is
+expressed in the type system rather than in a check somewhere.
+
+`key_must_be_a_string()` and `float_key_must_be_finite()` construct syntax
+errors at line 0, column 0. An error raised while writing has no input to point
+into, and rather than invent a position the crate reports the one that means
+*nowhere* — the machinery unit 02 built for `peek_error` has no counterpart on
+this side. Unit 08 comes back to what that costs a reader.
+
+What is accepted: `serialize_str` forwards to the real serializer, so a string
+key is escaped exactly like any other string; a unit variant contributes its
+name; a newtype struct unwraps and tries again. The integer methods below this
+range are accepted too, by wrapping the number in `begin_string` and
+`end_string` — a `u64` key comes out as `\"1\"`, a legal JSON key that
+deserializes back to a number only because the map's key type asked for one.
+
+And then the seven associated types, all `Impossible<(), Error>`.
+"""
+
+[[step]]
+id = "s07-impossible"
+source = "serde_core-1.0.229"
+file = "src/ser/impossible.rs"
+lines = "60-67"
+annotation = "ser-impossible-0003"
+leans_on = ["s07-map-key-serializer"]
+title = "…and Impossible, which is how a type says a whole category cannot happen"
+body = """
+The reference track read these eight lines as a design specimen: an empty enum
+is uninhabited, a struct with an uninhabited field is uninhabited too, so
+`Impossible` is a type no code anywhere can construct, enforced by the type
+system instead of by a private constructor.
+
+This is the first place in the json walk where it has a *user*.
+`MapKeySerializer::serialize_seq` returns `Err(key_must_be_a_string())`, and
+its signature says the success type is `Impossible<(), Error>` — a promise, not
+a convention, that the `Ok` arm is not reachable. The same for tuples, maps,
+structs and variants: seven state machines that would otherwise have to be
+written, and are instead declared not to exist.
+
+It costs nothing at run time and slightly less than nothing at compile time,
+since there is no impl body to monomorphise for each `W` and `F`. What it costs
+is one crate dependency's worth of vocabulary, and note where that vocabulary
+comes from: `serde_core` is not acting as a contract here, the way `Visitor`
+and `Deserializer` did all through units 03 to 06. It is acting as a library,
+handing a format author a type to build with.
+"""
+
+[[step]]
+id = "s07-serialize-entry"
+source = "serde_core-1.0.229"
+file = "src/ser/mod.rs"
+lines = "1840-1866"
+annotation = "ser-mod-0045"
+leans_on = ["s07-serialize-key", "s07-serialize-for-value"]
+title = "serialize_entry — a default method, and the format the reference track could not name"
+body = """
+`Value`'s object arm called `map.serialize_entry(k, v)`, and `serde_json`
+implements no such method. This is it: a default in `serde_core` that calls
+`serialize_key` and then `serialize_value`, in a crate that has never heard of
+a colon. The path from `value/ser.rs` to `ser.rs` goes out through a third file
+and back, and after inlining there is nothing left of the detour.
+
+The reference track's annotation on this trait names a trap. Splitting a pair
+across two calls means *one value per key* stops being enforceable by the type
+system, the way `SerializeSeq`'s receivers enforce their invariant; call
+`serialize_key` twice and you get, in its words, "malformed output, or a panic
+from a format that kept a flag, depending on the format".
+
+`serde_json` is a format that kept a flag. It is `State`, and it does not
+panic. A second `serialize_key` finds the state is already `Rest`, writes a
+comma and another key, and produces a document with two keys and no value
+between them — no error, no assertion, nothing to observe until something tries
+to parse it. That is the walk's job: the reference track had to say *depending
+on the format*, and this is the format.
+"""
+
+[[step]]
+id = "s07-collect-seq"
+source = "serde_core-1.0.229"
+file = "src/ser/mod.rs"
+lines = "1296-1332"
+annotation = "ser-mod-0038"
+leans_on = ["s07-serialize-for-value"]
+title = "collect_seq — the array's whole loop, in a crate that has never seen JSON"
+body = """
+`Value::Array(v) => v.serialize(serializer)` hands off to `Vec<Value>`'s
+`Serialize` impl, which `serde_core` generates from a macro and whose body is
+one line: `serializer.collect_seq(self)`.
+
+Which lands here, in another default method. Take the iterator, ask it for a
+length hint, open a sequence, `try_for_each` an element at a time, end. Four
+lines, and `serde_json` overrides none of them — so the `[1,true]` in our
+document is traversed by `serde_core` code calling back into `serde_json`
+three times: once for the `[`, once per element, once for the `]`.
+
+`iterator_len_hint` turns `Iterator::size_hint` into the `Option<usize>` that
+`serialize_seq` wants, which for a `Vec` is `Some(2)` — the value the previous
+step's `len == Some(0)` test is about, arriving from a place that knows nothing
+about what it will be used for.
+
+`try_for_each` short-circuits, so a failure in the second element does not
+serialize the third. And `tri!` is `serde_core`'s own, for the same reason
+`serde_json` has one: unit 01 read that comment, in a different crate, about
+the same problem.
+"""
+
+[[step]]
+id = "s07-serialize-element"
+source = "serde_json-1.0.151"
+file = "src/ser.rs"
+lines = "482-526"
+leans_on = ["s07-collect-seq", "s07-compound"]
+title = "serialize_element — the same three lines, and a reborrow that keeps the loop alive"
+body = """
+`serialize_key` with `array` for `object`: ask the formatter for a separator
+given `*state == State::First`, set the state, serialize, close. The commas in
+`[1,true]` and the one in `{\"a\":…,\"b\":…}` are decided by the same two lines
+written twice.
+
+`value.serialize(&mut **ser)` is the line worth stopping on. Inside the match,
+`ser` is a `&mut` to the `&'a mut Serializer` held in the variant; `**ser` is
+the serializer itself; `&mut **ser` is a fresh borrow of it. It has to be a
+reborrow rather than a move, because `Serializer` is implemented for `&mut
+Serializer` and every method takes `self` by value — moving the reference into
+the first call would end the loop after one element, and the borrow checker
+would say so.
+
+This is the ordinary move-versus-reborrow question that the course track's
+ownership unit is about, in a place where the answer is load-bearing rather
+than stylistic.
+
+`end(self)` takes `self` by value, which is the state-machine guarantee the
+reference track read in `SerializeSeq`: having ended a sequence you no longer
+have the thing that could add to it. `State::Empty` returns without writing,
+because the `]` went out at the beginning, on the `len == Some(0)` branch two
+hundred lines up.
+"""
+
+[[step]]
+id = "s07-number-serialize"
+source = "serde_json-1.0.151"
+file = "src/number.rs"
+lines = "372-396"
+leans_on = ["s05-parser-number", "s06-n-invariants"]
+title = "Number::serialize — the type the parser chose, coming back out unchanged"
+body = """
+Three arms, and they are `ParserNumber`'s three arms from unit 05 with the
+arrows reversed. `N::PosInt(u) => serializer.serialize_u64(u)`: the `1` that
+the parser typed as a `u64` because it had no minus sign is still a `u64`, and
+it leaves through the method that width chose.
+
+Nothing attempts to round-trip the *spelling* of a number. `1.0` in becomes
+`N::Float(1.0)`, and out through `serialize_f64` and the shortest decimal that
+reads back as the same double. `1e2` comes back as `100.0`. Our document has no
+float, so the transcript cannot show this and this step does not claim it.
+
+Two other things happen on the float path, both outside this range and both
+worth knowing. `serialize_f64` in `ser.rs` classifies the value first and
+writes `null` for NaN and infinity, because JSON has no spelling for either and
+the alternative is emitting something no parser will accept. And the formatter
+method underneath it calls `format_finite`, which is fast precisely because it
+does not check — the check was made one level up, once, by the only caller.
+
+The `arbitrary_precision` arm is the far end of the seam unit 05 found in
+`parse_any_number`. It serializes a struct with a magic token for a name, which
+is why `serialize_struct` in `ser.rs` matches on `name` before doing anything
+else: a private protocol between two halves of one crate, carried through a
+public trait that has no idea it is being used as a channel.
+"""
+
+[[step]]
+id = "s07-formatter"
+source = "serde_json-1.0.151"
+file = "src/ser.rs"
+lines = "1539-1574"
+leans_on = ["s07-serializer"]
+title = "Formatter — thirty-one methods, every one defaulted, and no state at all"
+body = """
+The trait the unit is named for, and its doc comment states the purpose exactly:
+abstract away the JSON control characters so that the output can optionally be
+pretty printed.
+
+`write_null` writes four bytes. `write_bool` picks one of two literals, with an
+`as &[u8]` coercion on the first arm so that both arms have the same type — a
+byte-string literal is `&[u8; 4]` and `&[u8; 5]`, two different types, until one
+of them is told to forget its length.
+
+`write_i8` is the shape of all ten integer methods: an `itoa::Buffer` on the
+stack, `format` into it, `write_all` the bytes. No allocation, and no `Display`
+— formatting an integer through `core::fmt` goes through `Arguments` and a
+dynamically dispatched `fmt` call, and a document of numbers is one of the two
+places in a JSON writer where that cost would show up. The float methods do the same with `zmij::Buffer` and
+`format_finite`.
+
+Every method has a default, and the defaults together are the whole of JSON's
+syntax with no whitespace in it. That is what makes the last step of this unit
+possible, and it is the reason the trait is public: a formatter that wants
+different whitespace overrides the punctuation and inherits the values.
+"""
+
+[[step]]
+id = "s07-punctuation"
+source = "serde_json-1.0.151"
+file = "src/ser.rs"
+lines = "1839-1860"
+leans_on = ["s07-formatter", "s07-serialize-element"]
+title = "begin_array_value — where the comma is, and the hook that looks like nothing"
+body = """
+Two methods, one `if`, and the bool that `Compound` computed three steps ago.
+If this is the first element, write nothing; otherwise write a comma. That is
+the whole of JSON's separator rule on the writing side, and it is four lines.
+
+`end_array_value` returns `Ok(())` and is called after every element. In the
+compact formatter it does nothing whatsoever, and a reader could reasonably ask
+why it exists.
+
+It exists because the trait is a set of *events*, not a set of writes. Every
+structural position has a begin and an end, most of the ends are empty, and the
+empty ones are precisely the hooks a stateful formatter needs. The pretty
+printer overrides this method to set `has_value = true`, which is how it later
+decides whether a closing bracket goes on a line of its own or immediately
+after the opening one. An empty default method here is the difference between
+a trait that can express `[]` and one that cannot.
+"""
+
+[[step]]
+id = "s07-escaped-str"
+source = "serde_json-1.0.151"
+file = "src/ser.rs"
+lines = "2088-2165"
+leans_on = ["s04-parse-str-bytes", "s04-skip-to-escape"]
+title = "The escape table, on the way out — 256 bytes, and a loop that writes runs"
+body = """
+Unit 04 read the other direction of this: fifty lines of word-at-a-time
+scanning to find one of three bytes, with a citation from 1998 attached. The
+writing side is a 256-entry table and a byte loop, and the asymmetry is not
+laziness.
+
+The loop's job is to find bytes that need escaping while writing everything
+else in the largest possible runs. `split_at(i)` and `split_first` divide the
+remaining bytes into the run so far and the byte under inspection; a table
+lookup says whether that byte is special; if it is not, `continue` and the run
+grows by one. When it is, the run is written in a single `write_string_fragment`
+and the escape follows.
+
+The table is the part to look at. A value of `0` means *no escape*, and
+everything from `0x20` upward is `0` except `\"` and `\\`. Two consequences fall
+out for free. The control characters below `0x20` are the only ones with named
+escapes plus a `\\u00XX` fallback, which is exactly what JSON requires. And
+every byte of a multi-byte UTF-8 sequence is `0x80` or higher, so the table
+says `0` for all of them and a non-ASCII string is written through untouched,
+with no decoding, no `char` boundaries, and no special case in the loop. This
+crate does not escape non-ASCII, and does not escape `/`.
+
+Two `unsafe`s, both justified by the table rather than by the input.
+`from_utf8_unchecked` on a run is sound because the loop only ever splits on
+ASCII bytes, which can never fall inside a sequence. `hint::unreachable_unchecked`
+in the `match` is sound because the table is the only thing that produces these
+values and the eight arms above it are every value it contains — a comment says
+so, and the table twenty lines down is the proof.
+
+Our `\"x\"` contains nothing special, so the loop runs once, finds `0`, falls out
+of the bottom, and writes one fragment.
+"""
+
+[[step]]
+id = "s07-formatters"
+source = "serde_json-1.0.151"
+file = "src/ser.rs"
+lines = "1937-1982"
+leans_on = ["s07-punctuation", "s07-to-string"]
+title = "impl Formatter for CompactFormatter {} — and the three fields that make the other one"
+produces = '''
+to_string_pretty
+  {
+    "a": [
+      1,
+      true
+    ],
+    "b": "x"
+  }
+'''
+body = """
+A unit struct and an empty impl block. Every byte of the compact output in the
+transcript is a default method of a trait, inherited by a type with no fields,
+selected by a default type parameter nobody wrote down. That is the line this
+unit has been walking toward.
+
+`PrettyFormatter` has the state the compact one did not need: `current_indent`,
+`has_value`, and the indent string itself, which is a `&'a [u8]` — hence the
+lifetime parameter, and hence `with_indent`, which lets a caller pretty-print
+with tabs. `new` is `with_indent(b\"  \")`, and those two spaces are where the
+transcript's indentation comes from.
+
+Its impl overrides nine methods and *none* of them write a value. `begin_array`
+increments the indent, clears `has_value`, and writes the same `[` the default
+would have written. `begin_object_value` writes `\": \"` where the default writes
+`\":\"`. The numbers, strings and booleans go out through methods neither
+formatter touches.
+
+Which is the claim the two halves of the transcript make together. The compact
+line and the pretty block below it contain the same `1`, the same `true` and
+the same `\"x\"`, because the same `write_u64`, `write_bool` and
+`format_escaped_str` produced them in both runs. Between `to_string` and
+`to_string_pretty` — one identifier at the entry point, five steps back —
+nothing else in the traversal differs at all.
+
+The twenty-two bytes are twenty-two bytes again. Unit 09 sends them somewhere
+else.
+"""
