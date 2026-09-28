@@ -1003,7 +1003,7 @@ not run a different release of any crate this repo pins.
 |---|---|---|
 | **J1 — A second walk** ✅ | Pin `serde_json` 1.0.151 as `narrative`; `narrative/` becomes `narrative/<track>/`; step ids, unit ordering and the forward-reference check become per track; `NOTICE.md` gains the tree's second copyright holder; glossary sources pinned only for what the walk actually quotes (scope §5 lists four candidates; it may be none) | `cargo xtask coverage` reports the derive walk unchanged — 9 units, 85 steps, crossings 8, 9, 10, 7, 9, 10, 9, 12, 11 — beside an empty json walk, without error; a step id repeated across tracks is fine and a forward reference inside one still fails the build |
 | **J2 — D13: output that is run** ✅ | The json walk's analogue of D10, argued and built: a claim about what the crate produces, checked against the crate producing it | A step's claimed output is byte-identical to what the pinned `serde_json` produces on the host and in the browser; editing the expected text fails the build rather than the page |
-| **J3 — The walk** | 8–10 units, one document, bytes → `read.rs` → `Value` → `ser.rs`, and separately into a struct through §11's generated impl | Walkable start to finish; every cited range resolves; every crossing into either annotated crate names the annotation it lands in; no forward references |
+| **J3 — The walk** ✅ | 8–10 units, one document, bytes → `read.rs` → `Value` → `ser.rs`, and separately into a struct through §11's generated impl | Walkable start to finish; every cited range resolves; every crossing into either annotated crate names the annotation it lands in; no forward references |
 | **J4 — Ship** | Four tracks in the header, the restated promise, `README` | Each track reachable and each honest about what it claims; the front page says what `serde_json` is in the one-sentence-per-role form, with no third percentage |
 
 ### What J1 shipped
@@ -1067,6 +1067,36 @@ back out, with the pretty printer and a trailing-comma error carrying its
 position. It compiles to `wasm32-unknown-unknown` untouched, exactly as the
 scope doc's spike measured, and the playground's node check now reports 13
 examples matching their transcripts in the browser rather than 12.
+
+### What J3 shipped
+
+Nine units and 104 steps, citing 2,726 of `serde_json`'s 18,329 lines. Units
+01–06 take the document from bytes to a `Value`, 07 takes it back out to the
+same twenty-two bytes, 08 is the error path, and 09 reads it straight into a
+struct through a `serde_derive` impl. That is the one unit in the walk where all
+three crates are on the page at once.
+
+The crossings came out as 1, 0, 2, 1, 1, 2, 3, 1 and 10. The first eight units
+are about `serde_json`'s own machinery and touch `serde_core` only where a
+visitor receives what the parser sends. Unit 09's ten are the reason the track
+exists: every generated line it quotes lands in a `serde_derive` annotation, and
+every impl the generated code calls — the tuple, `u8`'s range check, `&str`'s
+visitor — lands in a `serde_core` one. As §13 predicted, all 21 named their
+annotation on the day they were written.
+
+Unit 09 needed one thing no earlier unit had: a single struct that is both
+expanded and run. `expand/cases/json_document.rs` and `examples/json_document`
+each hold a copy of it, and each gate passes against its own copy. So a test in
+the example fails if its source stops containing the case verbatim. Without that
+test, the unit could describe an impl that no longer runs and both gates would
+stay green.
+
+It also moved the bump boundary, and a test caught that. Once the json walk
+crossed into `serde_derive`, a `serde_derive` bump had to rewrite the json walk
+as well as the derive walk. `which_stores_a_bump_rewrites_follows_from_the_role`
+had asserted that it would not, and it failed until the expectation was
+updated. That failure was the check working, because it proved the bump reaches
+every walk that crosses into the crate being moved.
 
 ### Cost
 

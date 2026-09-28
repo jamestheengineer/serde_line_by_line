@@ -1,0 +1,526 @@
+schema = 1
+
+[unit]
+id = "09-into-a-struct"
+title = "Into a struct, where the type asks first and the parser mostly does not listen"
+expand_case = "json_document"
+run_example = "json_document"
+summary = """
+No `Value` this time. The document goes straight into a three-line struct
+through the impl `serde_derive` wrote, and every call that impl makes is a
+question — `deserialize_struct`, `deserialize_tuple`, `deserialize_u8`,
+`deserialize_str`. `serde_json` answers each with the shape it finds rather than
+the one it was asked for, and six inputs show where that is a feature and where
+it turns into an error.
+"""
+body = """
+Unit 03 was titled for the way `Value` is built: the first byte decides, and the
+visitor is told. `Value` has no expectations, so it asks the parser
+`deserialize_any` and takes whatever comes. That was the whole of units 03 to 06.
+
+A struct has expectations. This one has three lines:
+
+```rust
+struct Document<'a> {
+    a: (u8, bool),
+    b: &'a str,
+}
+```
+
+`a` is a tuple because `[1,true]` holds two types, and `b` borrows because unit
+04 spent a whole unit on the parser offering a borrow and this is the type that
+accepts it. Its `Deserialize` impl is not written anywhere in this repository. It
+is 224 lines of `serde_derive` output, the same shape the [derive
+track](../derive/index.html) watched being emitted for `Point`, and every method
+it calls on the parser names the shape it wants.
+
+The parser is unchanged. It is the `Deserializer` from unit 01, and its
+`deserialize_*` methods are the `match` from unit 03 again, specialised one shape
+at a time. What this unit follows is how little of each question the parser uses.
+It is told the struct's name and ignores it, told the field list and ignores it,
+told a tuple's length and ignores it, told `u8` and parses a `u64` anyway. What
+each of those ignored arguments costs is in the six inputs at the bottom of the
+transcript: one is the walk's document, and each of the other five changes one
+thing.
+"""
+
+[[step]]
+id = "s09-impl-header"
+source = "serde_derive-1.0.229"
+file = "src/de.rs"
+lines = "283-304"
+annotation = "de-0019"
+leans_on = ["s04-visit-borrowed-str", "s01-deserialize-trait"]
+title = "impl<'de: 'a, 'a> — a bound nobody wrote, and a field that points into the input"
+emits = """
+impl<'de: 'a, 'a> _serde::Deserialize<'de> for Document<'a> {
+"""
+emits_from = "deserialize"
+produces = '''
+struct   {"a":[1,true],"b":"x"}
+ok       Document { a: (1, true), b: "x" }
+b        borrowed from the input at byte 19
+'''
+body = """
+The struct declares no `#[serde(borrow)]`, and the impl borrows anyway. A field
+whose type is literally `&str` or `&[u8]` is borrowed implicitly —
+`is_implicitly_borrowed` in `attr.rs` checks the syntax for a shared reference to
+the primitive `str` — so `'a` lands in the set this function collects and becomes
+the bound `'de: 'a`. The input must outlive the struct, which is exactly what a
+struct holding a slice of the input requires.
+
+That is the reference track's `impl<'de: 'a, 'a> Deserialize<'de> for &'a str`
+made one level larger: `Document<'a>` is deserializable from any input that
+lives at least as long as `'a`, and from no shorter one. Unit 01's `from_str`
+tied `'de` to the `&str` it was handed, so the compiler holds the document alive
+for as long as the struct is.
+
+The third line of the transcript is the proof that the bound is not ceremony.
+`doc.b` is not a copy of `"x"`. Its pointer is byte 19 of the input — the `x`
+between the last two quotes — which is unit 04's `Reference::Borrowed` arriving
+where it was going, not in a `Value::String` that copies it after all, but in a
+field that keeps the slice.
+"""
+
+[[step]]
+id = "s09-dispatch"
+source = "serde_derive-1.0.229"
+file = "src/de/struct_.rs"
+lines = "139-161"
+annotation = "de-st-0008"
+leans_on = ["s09-impl-header", "s01-from-trait"]
+title = "The impl's last statement, which is the first thing it does"
+emits = """
+const FIELDS: &'static [&'static str] = &["a", "b"];
+_serde::Deserializer::deserialize_struct(
+    __deserializer,
+    "Document",
+    FIELDS,
+"""
+emits_from = "deserialize"
+body = """
+Everything above this in the generated `deserialize` is a declaration: the
+`__Field` enum, its visitor, its `Deserialize` impl, the struct's own `__Visitor`
+and its two methods. Items declared inside a function body are not executed.
+So when unit 01's `from_trait` calls `Document::deserialize(&mut de)`, the first
+thing that happens at run time is the call at the very bottom of the function.
+
+The call is the question. Three arguments describe what is wanted — the type's
+name, the keys it knows, and a visitor that can take either a map or a sequence —
+and none of them has been checked against the input yet. The derive track said of
+`FIELDS` that a format "is free to use it to intern keys or to skip unknown ones
+cheaply, and free to ignore it." The next step is the format choosing.
+"""
+
+[[step]]
+id = "s09-deserialize-struct"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "1820-1868"
+leans_on = ["s09-dispatch", "s03-seq-arm", "s03-check-recursion", "s08-peek-invalid-type"]
+title = "deserialize_struct — _name, _fields, and two arms where the question asked for one"
+body = """
+`_name` and `_fields`. The underscores are the answer to the derive track's
+question: `serde_json` reads neither. Not for interning, not for skipping, not
+for an error message. The struct's name reaches the user only through the
+visitor's `expecting`, if something goes wrong, as `struct Document`.
+
+What it does read is one byte, the same byte unit 03's `deserialize_any` peeked,
+and it takes two arms. `{` is a map and goes to `visit_map` — this arm is
+`deserialize_map`'s arm character for character. `[` is a sequence and goes to
+`visit_seq`, which is `deserialize_seq`'s. A struct asked for by name is accepted
+in either shape, and every other first byte is `peek_invalid_type` from unit 08,
+reading the wrong value to its end so the message can quote it.
+
+The `match (ret, self.end_map())` below each call deserves a second look. The
+tuple is built before it is matched, so `end_map` runs *whether or not the
+visitor succeeded* — it consumes the closing `}` even after `visit_map` has
+returned an error. The pattern `(Err(err), _)` then keeps the visitor's error over
+anything `end_map` said, but the parser has already moved one byte further. Two
+steps from the end of this unit, that byte is where an error message points.
+"""
+
+[[step]]
+id = "s09-visit-seq"
+source = "serde_derive-1.0.229"
+file = "src/de/struct_.rs"
+lines = "70-96"
+annotation = "de-st-0005"
+leans_on = ["s09-deserialize-struct", "s06-next-element"]
+title = "visit_seq — the method the derive track found no use for, used"
+emits = """
+let __field0 = match _serde::de::SeqAccess::next_element::<
+    (u8, bool),
+>(&mut __seq)? {
+"""
+emits_from = "deserialize"
+produces = '''
+struct   [[1,true],"x"]
+ok       Document { a: (1, true), b: "x" }
+b        borrowed from the input at byte 11
+'''
+body = """
+The derive track titled this code "a `visit_seq` that a struct does not obviously
+need", and gave the reason it is generated anyway: a compact format may lay a
+struct out as its fields in order, with no keys at all. `serde_json` is not a
+compact format, and it is one of the formats that calls it — the `[` arm of the
+previous step.
+
+So `[[1,true],"x"]` is a `Document`, and the transcript shows it: the same struct
+from fourteen bytes instead of twenty-two, with `b` borrowed from byte 11 of *its*
+input. The fields are read by position with the `next_element` unit 06 met from
+the other side, each one typed by the generated code — `(u8, bool)` first, then
+`&'a str` — and a short array is an `invalid_length` naming the struct. The
+pinned crate reports `[[1,true]]` as `invalid length 1, expected struct Document
+with 2 elements`, and `[[1,true],"x",3]` as `trailing characters`, the second
+from `serde_json`'s `end_seq` after the visitor had all it wanted.
+
+Whether that is a feature depends on who wrote the JSON. It is compact and it is
+what some serializers emit; it is also a second, positional spelling of every
+derived struct that nobody using `serde_json` opted into, and reordering the
+fields of a struct changes what it means.
+"""
+
+[[step]]
+id = "s09-map-key"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "2208-2225"
+leans_on = ["s09-deserialize-struct", "s03-has-next-key", "s04-reference", "s04-visit-borrowed-str"]
+title = "MapKey — a second Deserializer for keys, and a quote it does not check for"
+body = """
+In the `{` arm the generated `visit_map` asks for keys with
+`next_key::<__Field>()`. That arrives at `next_key_seed`, where unit 03's
+`has_next_key` has peeked a `"` and returned true, and the key is then
+deserialized from a `MapKey` wrapping the parser — not from the parser itself.
+
+`MapKey` exists because a JSON key is always a string but the type reading it
+need not be. A `HashMap<u32, _>` asks its key for `deserialize_u32`, and
+`MapKey` answers by parsing the number from between the quotes: the macro just
+above this range, `deserialize_numeric_key!`, is most of the type. Everything
+else — `str`, `identifier`, `struct`, `ignored_any`, twelve hints in all — is
+forwarded to this `deserialize_any` by `forward_to_deserialize_any!` at the
+bottom of the impl, and here every key is a string.
+
+So `__Field`'s `deserialize_identifier` lands on these six lines. There is no
+peek and no check that the next byte is a quote: `eat_char` discards it blind,
+because the doc comment on `MapKey` makes it the caller's job and `has_next_key`
+is the only caller. Then `parse_str` from unit 04, and the same fork as unit
+04's `"` arm. For `"a"` the key is `Borrowed`, and the field visitor is offered
+a slice of the input.
+"""
+
+[[step]]
+id = "s09-field-match"
+source = "serde_derive-1.0.229"
+file = "src/de/identifier.rs"
+lines = "194-218"
+annotation = "de-id-0008"
+leans_on = ["s09-map-key"]
+title = "The field visitor — a borrow offered, declined, and one match on the string"
+emits = """
+match __value {
+    "a" => _serde::__private229::Ok(__Field::__field0),
+    "b" => _serde::__private229::Ok(__Field::__field1),
+    _ => _serde::__private229::Ok(__Field::__ignore),
+}
+"""
+emits_from = "deserialize"
+body = """
+The generated `__FieldVisitor` implements `visit_str`, `visit_bytes` and
+`visit_u64`, and not `visit_borrowed_str`. So the borrow `MapKey` offered goes
+to the default unit 04 crossed into, which forwards to `visit_str`. A field name
+does not need to outlive the call: it is compared against two literals and
+thrown away, and what survives is a one-byte enum.
+
+That makes the key path indifferent to escapes. The pinned crate reads
+`{"\\u0061":[1,true],"b":"x"}` as the same `Document` — the key is `Copied`,
+unescaped into scratch, and `visit_str` matches `"a"` either way. The field
+*value* `b` will turn out to be less forgiving.
+
+The last arm is the one that differs from the derive track's `Point`. `Point` had
+`deny_unknown_fields` and its fallthrough was an error; `Document` does not, so
+an unknown key becomes `__Field::__ignore` and the map loop decides what to do
+with it. The `visit_u64` arms above this range, `0u64 => __field0`, are for
+formats that write field indices; `serde_json`'s `MapKey` never calls it for a
+struct, because an identifier is forwarded to `deserialize_any` and
+`deserialize_any` only ever produces a string.
+"""
+
+[[step]]
+id = "s09-value-arm"
+source = "serde_derive-1.0.229"
+file = "src/de/struct_.rs"
+lines = "236-274"
+annotation = "de-st-0012"
+leans_on = ["s09-field-match", "s06-visit-map"]
+title = "One arm per field — a duplicate check, then next_value with the type spelled out"
+emits = """
+__Field::__field0 => {
+    if _serde::__private229::Option::is_some(&__field0) {
+        return _serde::__private229::Err(
+            <__A::Error as _serde::de::Error>::duplicate_field("a"),
+        );
+    }
+    __field0 = _serde::__private229::Some(
+        _serde::de::MapAccess::next_value::<(u8, bool)>(&mut __map)?,
+    );
+}
+"""
+emits_from = "deserialize"
+body = """
+`__Field::__field0` is `a`. The arm checks its accumulator first, so a key that
+appears twice is refused *before* its second value is read: the pinned crate
+reports `{"a":[1,true],"a":[1,true],"b":"x"}` as ``duplicate field `a` `` at
+column 17, the end of the second key. `Value` would have taken the second one
+and dropped the first, as unit 06's `visit_map` did; a derived struct will not.
+
+Then `next_value::<(u8, bool)>`. The type is written out in the turbofish
+because this is where the generated code stops knowing anything about JSON and
+hands the value to whatever `(u8, bool)`'s own `Deserialize` impl does.
+`serde_json`'s `next_value_seed` is two lines: `parse_object_colon`, then the
+seed deserialized from `&mut *self.de` — the parser itself this time, not
+`MapKey`, because a value can be any JSON at all.
+
+`(u8, bool)` has no impl in `serde_derive`'s output. It is in `serde_core`, and
+it is the next step.
+"""
+
+[[step]]
+id = "s09-tuple"
+source = "serde_core-1.0.229"
+file = "src/de/impls.rs"
+lines = "1395-1432"
+annotation = "de-impls-0065"
+leans_on = ["s09-value-arm", "s09-visit-seq"]
+title = "The tuple impl — a length asked for, and a length not listened to"
+body = """
+This is the same pattern the generated `visit_seq` used, written once in a macro
+for every tuple from one element to sixteen: a visitor whose `visit_seq` calls
+`next_element` once per position, each call typed by the variable it is bound to
+— here `T0` is `u8` and `T1` is `bool` — and an `invalid_length` naming the
+position that ran out.
+
+The question it asks is `deserialize_tuple(2, visitor)`. `serde_json`'s answer
+sits directly below `deserialize_seq` in `de.rs`: the signature takes
+`_len: usize` and the body calls `deserialize_seq` without it. A format that does
+not write lengths has nothing to check the `2` against, so the `[` arm runs as it
+would for a `Vec`.
+
+The length is enforced anyway, from both ends and by different crates. Too few
+elements is this visitor: `{"a":[1],"b":"x"}` fails in the pinned crate as
+`invalid length 1, expected a tuple of size 2`. Too many is `serde_json`'s
+`end_seq`, which finds a `,` where it wanted `]` once the visitor has stopped
+asking, and says `trailing characters`.
+"""
+
+[[step]]
+id = "s09-deserialize-number"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "318-342"
+leans_on = ["s09-tuple", "s05-parse-integer", "s05-parser-number"]
+title = "deserialize_number — eight integer widths asked for, and one method that answers all of them"
+body = """
+`next_element::<u8>()` asks for `deserialize_u8`, and `serde_json`'s
+`Deserializer` defines it on line 1504 with `deserialize_number!(deserialize_u8)`
+— one of ten such lines, `i8` through `f64`, every one expanding to a call to
+this function. Only the 128-bit widths go elsewhere. The width is dropped at the
+call.
+
+Then it is unit 05 again. Peek a `-` or a digit, `parse_integer`, and
+`ParserNumber::visit` hands the result to the visitor as whatever the parser
+chose: for our `1`, a `u64`, by `visit_u64`. Unit 05 was titled for a type chosen
+before anyone asked. Here someone asked — for a `u8` — and the choice is the
+same, because asking is a hint and the parser's type is decided by the bytes.
+
+That is not an oversight. Narrowing is the visitor's job, and every format that
+passes a `u64` gets the same narrowing for free. The visitor is the next step,
+and our `1` fits. `256` does not.
+"""
+
+[[step]]
+id = "s09-uint-to-self"
+source = "serde_core-1.0.229"
+file = "src/de/impls.rs"
+lines = "336-346"
+annotation = "de-impls-0014"
+leans_on = ["s09-deserialize-number", "s08-de-error", "s08-syntax"]
+title = "uint_to_self — try_from, and a u64 that was never going to fit"
+produces = '''
+struct   {"a":[256,true],"b":"x"}
+error    invalid value: integer `256`, expected u8 at line 1 column 9
+'''
+body = """
+`u8`'s visitor gets `visit_u64` from this arm of the macro, and the whole
+conversion is `Self::Value::try_from(v as u64)`. `1` converts. `256` does not,
+and the error is `invalid_value`, not `invalid_type`: an integer is the right
+kind of thing, and this one is the wrong size. `Unexpected::Unsigned(256)` goes
+through `serde_json`'s `JsonUnexpected` from unit 08 unchanged, and the
+visitor's `expecting` says `u8`.
+
+The position is the innermost `fix_position` again: `deserialize_number`'s,
+after the parser has consumed the `6`, which is column 9. The outer ones — the tuple's
+`deserialize_seq`, the struct's `deserialize_struct` — see a line and leave it
+alone.
+
+Two neighbours, confirmed against the pinned crate. `-1` arrives as `visit_i64`
+and a sibling macro's check refuses it the same way, ``invalid value: integer
+`-1`, expected u8``. And `1.0` is ``invalid type: floating point `1.0`, expected
+u8`` — `invalid_type` this time, because unit 05's `parse_number` chose `F64` the
+moment it saw the `.`, and `u8`'s visitor has no `visit_f64` to try.
+"""
+
+[[step]]
+id = "s09-str-visitor"
+source = "serde_core-1.0.229"
+file = "src/de/impls.rs"
+lines = "703-728"
+annotation = "de-impls-0031"
+leans_on = ["s09-impl-header", "s04-parse-escape", "s04-string-arm"]
+title = "StrVisitor — Ok(v), so easy, and the same x refused"
+produces = '''
+struct   {"a":[1,true],"b":"\u0078"}
+error    invalid type: string "x", expected a borrowed string at line 1 column 26
+'''
+body = """
+`b` is `&'a str`, whose impl asks `deserialize_str(StrVisitor)`, and this is the
+whole visitor: `visit_borrowed_str` returns the slice it was given, with the
+comment `// so easy`, and there is no `visit_str`.
+
+The missing method is the point. `"\\u0078"` is `x`, and `parse_str` has to
+decode the escape into `scratch` to find that out — unit 04's `Copied` case. A
+`Copied` string is handed over by `visit_str`, and a slice of `scratch` lives
+only until the next string is parsed, so it cannot become a `&'a str` in a struct
+that outlives the parser. With no `visit_str` of its own, `StrVisitor` falls
+through to the default in `serde_core`, which refuses with the visitor's
+`expecting`: `a borrowed string`.
+
+So the transcript shows the same `x` accepted and refused, and the difference is
+not the value but where it lives. The error quotes the decoded string — which is
+identical to the one that succeeded — and column 26 is the end of the escaped
+literal, filled in by `deserialize_str`'s `fix_position`. A `&str` field is a
+promise that the input spells the string verbatim, and that promise is about the
+producer of the JSON, not its reader. `String` or `Cow<'a, str>` is the type
+for a field that might be escaped.
+"""
+
+[[step]]
+id = "s09-ignored-arm"
+source = "serde_derive-1.0.229"
+file = "src/de/struct_.rs"
+lines = "276-291"
+annotation = "de-st-0013"
+leans_on = ["s09-field-match", "s09-value-arm"]
+title = "The ignored arm — the one Point did not get"
+emits = """
+_ => {
+    let _ = _serde::de::MapAccess::next_value::<
+        _serde::de::IgnoredAny,
+    >(&mut __map)?;
+}
+"""
+emits_from = "deserialize"
+body = """
+The derive track titled this code "the arm our struct does not get", because
+`Point` denied unknown fields and so the generated `match` had nothing to do with
+`__ignore` except fail. `Document` gets it: an unknown key's value is read as
+`IgnoredAny` and dropped.
+
+`IgnoredAny` is a zero-sized type whose `Deserialize` impl asks
+`deserialize_ignored_any` — a hint that means *I will not look at this, do
+whatever is cheapest*. The reference track annotates its visitor: eleven scalar
+methods that accept anything, and a recursive half that walks sequences and maps
+element by element, discarding each. That is how a format that honours no hints
+skips a value — by deserializing it into nothing, the whole way down.
+
+`serde_json` honours this one.
+"""
+
+[[step]]
+id = "s09-ignore-value"
+source = "serde_json-1.0.151"
+file = "src/de.rs"
+lines = "1102-1215"
+leans_on = ["s09-ignored-arm", "s04-string-arm", "s03-check-recursion", "s03-parse-ident"]
+title = "ignore_value — no visitor, no recursion, and scratch as a stack of brackets"
+produces = '''
+struct   {"a":[1,true],"b":"x","c":{"d":[2]}}
+ok       Document { a: (1, true), b: "x" }
+b        borrowed from the input at byte 19
+'''
+body = """
+`deserialize_ignored_any` is two lines: `ignore_value()`, then `visit_unit()`.
+`IgnoredAny`'s recursive visitor is never called with anything but unit, because
+the skipping happens here, in a loop that builds nothing and calls no one.
+
+Literals are `parse_ident` from unit 03. Numbers are `ignore_integer`, which
+checks the grammar and keeps no digits. Strings are `read.ignore_str`, which
+still validates every escape — the pinned crate refuses `"\\q"` inside an
+ignored value exactly as it would anywhere — but has nothing to unescape them
+into.
+
+The brackets are where it is clever. The parser tracks nesting without
+recursing: each `[` or `{` becomes one byte on a stack, and the stack is
+`scratch`, the string buffer from unit 04, borrowed for a job that is not strings
+at all. The innermost open bracket is kept in a local, `enclosing`, and only
+pushed when another opens inside it, so a value one level deep never touches the
+`Vec`. For `{"d":[2]}`, `{` is `enclosing` until `[` opens, then it is pushed;
+`]` pops it back; `}` finds the stack empty and returns.
+
+There is no `check_recursion!` anywhere in the function, and there does not need
+to be: a loop over a heap buffer cannot overflow the call stack. The pinned crate
+accepts a `Document` whose ignored `c` is an array nested a thousand deep, while
+the same bytes read as a `Value` fail with `recursion limit exceeded`. The limit
+unit 01 wrote down protects the stack of a parser that builds something; a value
+nobody wants is not built, so it is not limited.
+"""
+
+[[step]]
+id = "s09-missing-field"
+source = "serde_derive-1.0.229"
+file = "src/de/struct_.rs"
+lines = "313-325"
+annotation = "de-st-0015"
+leans_on = ["s09-deserialize-struct", "s09-value-arm", "s08-syntax", "s08-de-error"]
+title = "missing_field — noticed at the closing brace, and reported there"
+emits = """
+let __field1 = match __field1 {
+    _serde::__private229::Some(__field1) => __field1,
+    _serde::__private229::None => {
+        _serde::__private229::de::missing_field("b")?
+    }
+};
+"""
+emits_from = "deserialize"
+produces = '''
+struct   {"a":[1,true]}
+error    missing field `b` at line 1 column 14
+'''
+body = """
+The accumulators are unwrapped after the loop, so an absent field can only be
+discovered once the map is over — once `has_next_key` has peeked the `}` and
+`next_key` has returned `None`. For `{"a":[1,true]}`, `__field1` is still `None`.
+
+`missing_field("b")` is the one function on this path that neither of the claimed
+crates holds: it lives in the `serde` facade's private module, locked by this
+repo at the same 1.0.229 but not vendored. It builds a throwaway `Deserializer`
+whose every method fails with `Error::missing_field`, except `deserialize_option`,
+which answers `visit_none` — which is how an `Option` field may be absent without
+an attribute, and how `&str` may not. `missing_field` in `serde_core` is the
+default the reference track annotates: `custom`, with the sentence
+``missing field `b` ``, which in `serde_json` is `make_error` and a `Message` at
+line 0.
+
+Column 14 is the `}`. The error has no position when `visit_map` returns it,
+and `deserialize_struct` fixes one — but by then its `match (ret,
+self.end_map())` has run `end_map`, which consumed the brace. Had it only been
+peeked, the error would point at the `]` before it. As it is, the position is
+the closing brace: the first byte at which the absence was knowable, reported
+there by a line of code that did not know it was reporting anything.
+
+That is where the walk ends. Twenty-two bytes, through a parser that answers with
+the shape it finds, into a `Value` and back out, and into a struct whose impl was
+written by a macro the reader watched run — three crates, and one document all the
+way through.
+"""

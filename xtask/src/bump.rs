@@ -1504,7 +1504,9 @@ mod tests {
     /// walk, because a crossing into the crate being moved is a crossing
     /// whichever story made it. J3 is what makes that concrete: the json walk
     /// crosses into `serde_core` from its first unit, so a `serde_core` bump
-    /// now rewrites three directories and the set says which.
+    /// now rewrites three directories and the set says which. Its unit 09
+    /// crosses into `serde_derive` as well, reading the impl the derive walk
+    /// watched being emitted, so a `serde_derive` bump reaches it too.
     #[test]
     fn which_stores_a_bump_rewrites_follows_from_the_role() {
         let coverage = stores("serde_core");
@@ -1516,22 +1518,17 @@ mod tests {
                 .collect()
         );
 
-        // The derive store is empty until R2 fills it, so what this proves
-        // today is the isolation rather than the contents: neither coverage
-        // bump reaches into the other's directory.
+        // Both walks cross into `serde_derive`, and neither coverage bump
+        // reaches into the other's annotation directory.
         let derive = stores("serde_derive");
-        assert!(
-            dirs(&derive).is_subset(
-                &["serde_derive", "derive"]
-                    .map(String::from)
-                    .into_iter()
-                    .collect()
-            ),
-            "{:?}",
-            dirs(&derive)
+        assert_eq!(
+            dirs(&derive),
+            ["serde_derive", "derive", "json"]
+                .map(String::from)
+                .into_iter()
+                .collect()
         );
         assert!(!dirs(&derive).contains("serde_core"));
-        assert!(dirs(&derive).contains("derive"));
 
         let glossary = stores("syn");
         assert_eq!(

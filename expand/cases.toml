@@ -116,3 +116,19 @@ fields, implements `Serialize` for it, and passes it as the content field.
 It is the clearest example in the crate of generated code that is not a
 rewriting of the input: nothing in `Event` corresponds to `__AdjacentlyTagged`.
 """
+
+[[case]]
+name = "json_document"
+title = "The json walk's struct"
+body = """
+The struct the [json track](../json/index.html) reads `{"a":[1,true],"b":"x"}`
+into, and the one input here that is also run: `examples/json_document` defines
+the same three lines, and a test fails if they drift apart.
+
+Two things in it are not in `struct_rename`. `b: &'a str` carries no
+`#[serde(borrow)]` and is borrowed anyway, because a field whose type is
+literally `&str` or `&[u8]` is borrowed implicitly — so the header reads
+`impl<'de: 'a, 'a>`. And with no `deny_unknown_fields`, the key match gains the
+arm `Point` does not have: an unknown key's value is read as `IgnoredAny` and
+dropped.
+"""

@@ -10,12 +10,40 @@
 //! explanation checkable against real output rather than against a transcript
 //! somebody typed (PLAN.md §6).
 
+use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 /// The one document this walk follows.
 pub const INPUT: &str = r#"{"a":[1,true],"b":"x"}"#;
+
+/// The same document as a type of its own, for the walk's last unit.
+///
+/// The three lines inside the derive are `expand/cases/json_document.rs`
+/// verbatim, and a test holds them to it: the expansion the walk quotes is the
+/// impl that runs here. `a` is a tuple because `[1,true]` is two types, and `b`
+/// borrows because unit 04 showed the parser offering a borrow and this is the
+/// type that takes it.
+#[allow(dead_code)] // `a` is only ever printed, and `Debug` does not count as a read
+#[derive(Debug, Deserialize)]
+struct Document<'a> {
+    a: (u8, bool),
+    b: &'a str,
+}
+
+/// The inputs the struct is read from, beside the walk's own. Each changes
+/// one thing: the shape of the container, a key nobody asked for, a number
+/// that does not fit, a string that cannot be borrowed, a field that is not
+/// there.
+const STRUCT_INPUTS: &[&str] = &[
+    INPUT,
+    r#"[[1,true],"x"]"#,
+    r#"{"a":[1,true],"b":"x","c":{"d":[2]}}"#,
+    r#"{"a":[256,true],"b":"x"}"#,
+    r#"{"a":[1,true],"b":"\u0078"}"#,
+    r#"{"a":[1,true]}"#,
+];
 
 pub fn run() -> String {
     let mut out = String::new();
@@ -74,6 +102,30 @@ pub fn run() -> String {
             writeln!(out, "error    {e}").unwrap();
             writeln!(out, "category {:?}", e.classify()).unwrap();
         }
+    }
+    writeln!(out).unwrap();
+
+    // Straight into a struct, with no `Value` in between. The impl doing the
+    // reading was written by `serde_derive`; the parser is the one the rest of
+    // the walk read.
+    for input in STRUCT_INPUTS {
+        writeln!(out, "struct   {input}").unwrap();
+        match serde_json::from_str::<Document>(input) {
+            Ok(doc) => {
+                writeln!(out, "ok       {doc:?}").unwrap();
+                // Where `b` points. Inside the input means the string was
+                // never copied: the struct holds a slice of the bytes that
+                // went in.
+                let at = (doc.b.as_ptr() as usize).wrapping_sub(input.as_ptr() as usize);
+                if at < input.len() {
+                    writeln!(out, "b        borrowed from the input at byte {at}").unwrap();
+                } else {
+                    writeln!(out, "b        not borrowed").unwrap();
+                }
+            }
+            Err(e) => writeln!(out, "error    {e}").unwrap(),
+        }
+        writeln!(out).unwrap();
     }
     out
 }

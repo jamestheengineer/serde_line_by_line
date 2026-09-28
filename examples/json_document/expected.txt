@@ -28,3 +28,25 @@ debug    Error("trailing comma", line: 1, column: 14)
 as       BTreeMap<String, Vec<String>>
 error    invalid type: integer `1`, expected a string at line 1 column 7
 category Data
+
+struct   {"a":[1,true],"b":"x"}
+ok       Document { a: (1, true), b: "x" }
+b        borrowed from the input at byte 19
+
+struct   [[1,true],"x"]
+ok       Document { a: (1, true), b: "x" }
+b        borrowed from the input at byte 11
+
+struct   {"a":[1,true],"b":"x","c":{"d":[2]}}
+ok       Document { a: (1, true), b: "x" }
+b        borrowed from the input at byte 19
+
+struct   {"a":[256,true],"b":"x"}
+error    invalid value: integer `256`, expected u8 at line 1 column 9
+
+struct   {"a":[1,true],"b":"\u0078"}
+error    invalid type: string "x", expected a borrowed string at line 1 column 26
+
+struct   {"a":[1,true]}
+error    missing field `b` at line 1 column 14
+
