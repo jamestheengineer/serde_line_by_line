@@ -65,6 +65,9 @@ pub struct NarrativeTrackReport {
     /// territory, against which `cited_lines` is a path and never a fraction.
     pub source: String,
     pub source_lines: u32,
+    /// Distinct lines of that crate the walk cites. The per-unit figures are
+    /// what each page shows, crossings included, so they do not sum to this.
+    pub walked_lines: u32,
     pub units: Vec<NarrativeUnitReport>,
 }
 
@@ -1006,6 +1009,7 @@ fn check_narrative_track(
         title: track.track.title.clone(),
         source: slbl_core::vendor::source_id(&track.crate_name, &track.version),
         source_lines: track.lines,
+        walked_lines: track.walked_lines(),
         units: out,
     })
 }
@@ -1501,11 +1505,11 @@ fn print_report(report: &Report, diag: &Diagnostics) {
 
     for track in &report.narrative {
         let steps: usize = track.units.iter().map(|u| u.steps).sum();
-        let cited: u32 = track.units.iter().map(|u| u.cited_lines).sum();
         println!(
-            "\nnarrative track {}: {} units, {steps} steps, {cited} of {}'s {} lines cited\n",
+            "\nnarrative track {}: {} units, {steps} steps, {} of {}'s {} lines cited\n",
             track.id,
             track.units.len(),
+            track.walked_lines,
             track.source,
             track.source_lines
         );

@@ -326,6 +326,9 @@ from the annotation store on every push to `main` (D6). All three tracks are
 complete: 12,037 lines claimed by 468 annotations, 14 course units written, and
 9 derive units walking `serde_derive` in 85 steps.
 
+§13 added a fourth: a walk through `serde_json`, pinned as a narrative source
+and shipped in J4 without a third percentage.
+
 What followed them is **§12**, now also complete: the reference half of the
 derive track, which the walk deliberately did not make. `serde_derive` is a
 second source promising every line, and the walk is an ordering over it. The
@@ -1004,7 +1007,7 @@ not run a different release of any crate this repo pins.
 | **J1 — A second walk** ✅ | Pin `serde_json` 1.0.151 as `narrative`; `narrative/` becomes `narrative/<track>/`; step ids, unit ordering and the forward-reference check become per track; `NOTICE.md` gains the tree's second copyright holder; glossary sources pinned only for what the walk actually quotes (scope §5 lists four candidates; it may be none) | `cargo xtask coverage` reports the derive walk unchanged — 9 units, 85 steps, crossings 8, 9, 10, 7, 9, 10, 9, 12, 11 — beside an empty json walk, without error; a step id repeated across tracks is fine and a forward reference inside one still fails the build |
 | **J2 — D13: output that is run** ✅ | The json walk's analogue of D10, argued and built: a claim about what the crate produces, checked against the crate producing it | A step's claimed output is byte-identical to what the pinned `serde_json` produces on the host and in the browser; editing the expected text fails the build rather than the page |
 | **J3 — The walk** ✅ | 8–10 units, one document, bytes → `read.rs` → `Value` → `ser.rs`, and separately into a struct through §11's generated impl | Walkable start to finish; every cited range resolves; every crossing into either annotated crate names the annotation it lands in; no forward references |
-| **J4 — Ship** | Four tracks in the header, the restated promise, `README` | Each track reachable and each honest about what it claims; the front page says what `serde_json` is in the one-sentence-per-role form, with no third percentage |
+| **J4 — Ship** ✅ | Four tracks in the header, the restated promise, `README` | Each track reachable and each honest about what it claims; the front page says what `serde_json` is in the one-sentence-per-role form, with no third percentage |
 
 ### What J1 shipped
 
@@ -1097,6 +1100,53 @@ as well as the derive walk. `which_stores_a_bump_rewrites_follows_from_the_role`
 had asserted that it would not, and it failed until the expectation was
 updated. That failure was the check working, because it proved the bump reaches
 every walk that crosses into the crate being moved.
+
+### What J4 shipped
+
+The header names four tracks and then the two tools, and it is the one place
+a track is still written by hand — every page renders it, and threading the
+walks through a dozen page types to save two lines of template would cost more
+than it saves. So the hand-written list is checked instead: the site build
+fails if a walk under `narrative/` has no header link.
+
+The front page restates the promise one paragraph per role, and which
+paragraph a walk gets is read off the pin rather than the track id. The derive
+walk's crate is annotated, so it keeps R7's sentence: an ordering over
+annotations, all 85 stops landing in one. The json walk's crate is not, so it
+gets the sentence N5 wrote for `serde_derive` and R1 retired, back in use for
+the crate the role now describes:
+
+> `serde_json` is walked, not claimed. The json track cites 2258 of its 18329
+> lines where one document goes through them, declares no file complete, and
+> has no percentage, because a percentage over a walk would be a lie told in a
+> number. Where it crosses into an annotated crate — 21 of its 104 stops — it
+> lands inside an annotation and links there. And each of its 21 claims about
+> what the crate produces is located in a real run of the pinned version, which
+> the build checks against both the host and the browser (D13).
+
+**One figure was wrong, and it had been wrong since N4.** "N of a crate's lines
+cited" summed every step's range, so a crossing into `serde_core` counted as a
+line of the crate being walked, and a line two steps both show counted twice.
+The gate printed 2,726 of `serde_json`'s lines (J3 above repeats it) and 1,853
+of `serde_derive`'s (N4 says 1,875, from before R1). The real figures, distinct
+lines of the walked crate only, are **2,258** and **1,649**.
+`NarrativeTrackItem::walked_lines` computes it once, and the gate, the walk
+index and the front page all read that. The per-unit "lines" column in the
+gate's table is still what each page shows, crossings included, and no longer
+sums to the headline; it was never meant to.
+
+The rest is per-walk wording that had been keyed to `derive` by id and is now
+keyed to what the walk checks: a walk with `emits` steps says its generated
+code is sliced from an expansion, a walk with `produces` steps says its output
+is located in a real run, and the json walk does both because unit 09 quotes
+generated code. Each walk index ends by naming the other walk, the course
+index names both, and the course page's "Next" no longer says the course stops
+at the crate boundary — it stopped stopping there in R6.
+
+**§13 is complete.** Four tracks: two annotated crates at 100% and no figure
+spanning them, a 21-unit course over both, and two walks — 85 stops through
+`serde_derive` and 104 through `serde_json` — that make no coverage claim and
+are checked at every seam where they cross into one.
 
 ### Cost
 

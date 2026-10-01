@@ -5,8 +5,9 @@
   <p class="lede">
     A guided walkthrough of the crate that holds Serde&rsquo;s trait definitions
     and the crate that generates the code calling into it &mdash; explanations
-    beside the source, runnable micro-examples, and the derive macro expanding
-    live in your browser.
+    beside the source, runnable micro-examples, the derive macro expanding
+    live in your browser, and one JSON document followed through
+    <code>serde_json</code> to show all three crates working at once.
   </p>
 
   {# One block per annotated crate, never a combined figure. The two crates
@@ -29,7 +30,7 @@
 </section>
 
 <section class="tracknote">
-  <h2>Three ways through</h2>
+  <h2>{{ walks.len() + 2 }} ways through</h2>
   <p>
     The <b>reference track</b> below walks the source trees, file by file, and
     claims every line of them. The
@@ -39,9 +40,17 @@
     {%- for w in walks %}
     <a href="{{ root }}{{ w.id }}/index.html"><b>{{ w.title }}</b></a>
     follows one route through <code>{{ w.crate_name }}</code> {{ w.version }}
-    &mdash; {{ w.units }} units, {{ w.steps }} stops&nbsp;&mdash; ending with
-    the expansion
+    &mdash; {{ w.units }} units, {{ w.steps }} stops&nbsp;&mdash;
+    {%- if w.produced > 0 %}
+    from bytes to a <code>Value</code> and back, then into a struct through the
+    <code>impl</code> the derive walk emits, with every output it shows read off
+    a real run.
+    {%- else if w.emitted > 0 %}
+    ending with the expansion
     <a href="{{ root }}expand/index.html">running in your browser</a>.
+    {%- else %}
+    one route, start to finish.
+    {%- endif %}
     {%- endfor %}
   </p>
 
@@ -60,16 +69,37 @@
     rather than about either crate
     (<a href="https://github.com/jamestheengineer/serde_line_by_line/blob/main/docs/decisions.md">D12</a>).
   </p>
+  {#- One paragraph per walk, and which one is read off the pin: a walk over
+      an annotated crate is an ordering over annotations, and a walk over a
+      narrative source is all that is written about the ground it covers.
+      Neither gets a percentage, and nothing is summed across them (§13). #}
+  {%- for w in walks %}
   <p>
-    {%- for w in walks %}
+    {%- if w.annotated %}
     <a href="{{ root }}{{ w.id }}/index.html">{{ w.title }}</a> makes
     no coverage claim of its own and never did. It is a path:
     {{ w.units }} units and {{ w.steps }} stops picking one route through
-    {{ w.source_lines }} lines of <code>{{ w.crate_name }}</code>, and all
-    {{ w.crossings }} of them land inside an annotation and link there. The
-    percentage belongs to the track underneath it.
-    {%- endfor %}
+    {{ w.source_lines }} lines of <code>{{ w.crate_name }}</code>, and
+    {% if w.crossings == w.steps %}all {{ w.crossings }}{% else %}{{ w.crossings }}{% endif %}
+    of them land inside an annotation and link there. The percentage belongs to
+    the track underneath it.
+    {%- else %}
+    <code>{{ w.crate_name }}</code> is walked, not claimed.
+    <a href="{{ root }}{{ w.id }}/index.html">{{ w.title }}</a> cites
+    {{ w.cited_lines }} of its {{ w.source_lines }} lines where one document
+    goes through them, declares no file complete, and has no percentage,
+    because a percentage over a walk would be a lie told in a number. Where it
+    crosses into an annotated crate &mdash; {{ w.crossings }} of its
+    {{ w.steps }} stops &mdash; it lands inside an annotation and links there.
+    {%- if w.produced > 0 %}
+    And each of its {{ w.produced }} claims about what the crate produces is
+    located in a real run of the pinned version, which the build checks against
+    both the host and the browser
+    (<a href="https://github.com/jamestheengineer/serde_line_by_line/blob/main/docs/decisions.md">D13</a>).
+    {%- endif %}
+    {%- endif %}
   </p>
+  {%- endfor %}
   <p>
     Borrowed vocabulary is quoted, pinned, and named as borrowed. The
     {{ glossary.entries }} types from

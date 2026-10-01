@@ -19,7 +19,7 @@
   <div class="progress">
     <div class="figures">
       <span><b>{{ units.len() }}</b> units</span>
-      <span>{{ steps }} steps, {{ cited_lines }} lines cited</span>
+      <span>{{ steps }} steps, {{ cited_lines }} lines of <code>{{ walk.crate_name }}</code> cited</span>
       <span>{{ crossings }} steps landing in an annotation</span>
     </div>
   </div>
@@ -35,6 +35,12 @@
     <a href="{{ root }}index.html">reference track</a> has finished, it links
     to the annotation there rather than explaining the same lines twice. A
     percentage belongs to that track. This one has an order.
+    {%- if !walk.annotated %}
+    Most of its ground is not that, though: <code>{{ walk.crate_name }}</code>
+    is pinned to be walked and never claimed, so on {{ walk.steps - walk.crossings }}
+    of its {{ walk.steps }} stops the explanation here is the only one this
+    site has.
+    {%- endif %}
   </p>
   <p>
     What is checked is everything a reader could catch. Every line range
@@ -42,10 +48,17 @@
     later. A step standing on a file the reference track has finished must land
     inside an annotation and say which — and once that file is declared
     complete, the build fails if it does not.
-    {%- if walk.id == "derive" %}
+    {%- if walk.emitted > 0 %}
     And every claim about generated code is sliced out of a
     <a href="{{ root }}expand/index.html">real expansion</a> at build time — if
     <code>serde_derive</code> stopped emitting it, this page would not build.
+    {%- endif %}
+    {%- if walk.produced > 0 %}
+    And every claim about what <code>{{ walk.crate_name }}</code> produces
+    &mdash; {{ walk.produced }} of them &mdash; is located in the output of a
+    real run of {{ walk.version }}, the same output the browser&rsquo;s wasm is
+    checked to print. If the crate stopped producing it, this page would not
+    build.
     {%- endif %}
   </p>
 </section>
@@ -58,7 +71,7 @@
       <h2><a href="{{ root }}{{ walk.id }}/{{ u.href }}">{{ u.title }}</a></h2>
     </div>
     <div class="prose">{{ u.summary_html|safe }}</div>
-    <div class="unitmeta">{{ u.steps }} steps{% if u.crossings > 0 %} · {{ u.crossings }} into serde_core{% endif %}</div>
+    <div class="unitmeta">{{ u.steps }} steps{% if u.crossings > 0 %} · {{ u.crossings }} landing in an annotation{% endif %}</div>
   </article>
   {% endfor %}
 </section>
@@ -78,12 +91,30 @@
     <code>proc-macro2</code> types the walk names but does not annotate,
     quoted from their own pinned trees.
   </p>
-  {%- endif %}
+  <p>
+    <a href="{{ root }}json/index.html">The json track &rarr;</a>
+    &mdash; the <code>impl</code> this track watched being emitted, run against
+    a real document. Its last unit reads JSON into a struct through exactly
+    that code, with all three crates on the page at once.
+  </p>
   <p>
     <a href="{{ root }}index.html">The reference track</a>
     &mdash; back inside <code>serde_core</code>, where the
     <code>impl</code> this track emits has to satisfy a trait that is claimed
     line by line.
   </p>
+  {%- else %}
+  <p>
+    <a href="{{ root }}derive/index.html">The derive track</a>
+    &mdash; where the <code>Deserialize</code> impl the last unit calls came
+    from: one struct and one enum followed through <code>serde_derive</code>
+    until the impl is emitted.
+  </p>
+  <p>
+    <a href="{{ root }}index.html">The reference track</a>
+    &mdash; every line of <code>serde_core</code>, where each visitor this
+    walk&rsquo;s parser calls into is claimed line by line.
+  </p>
+  {%- endif %}
 </section>
 {% endblock %}

@@ -12,7 +12,7 @@ use anyhow::{Context, Result};
 use schema::{
     Annotation, AnnotationFile, CourseFile, CourseUnit, LineRange, Manifest, SCHEMA_VERSION,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// One annotation resolved against the pinned source: its parsed line range,
@@ -523,6 +523,31 @@ pub struct NarrativeTrackItem {
     pub crate_name: String,
     pub version: String,
     pub lines: u32,
+    /// What the pin asks of the crate being walked. A walk over an annotated
+    /// crate is an ordering over annotations; a walk over a narrative one is
+    /// the only thing written about most of the ground it covers, and the
+    /// front page has to say which (§13).
+    pub role: vendor::Role,
+}
+
+impl NarrativeTrackItem {
+    /// How many distinct lines *of the crate this walk is about* it cites.
+    ///
+    /// Not the sum of every step's range, which is what was reported until J4:
+    /// that counted a crossing into `serde_core` as a line of `serde_json`, and
+    /// a line two steps both show as two. "N of a crate's lines cited" is a
+    /// claim about that crate, so only that crate's lines, each once.
+    pub fn walked_lines(&self) -> u32 {
+        let mut seen = BTreeSet::new();
+        for step in self.units.iter().flat_map(|u| &u.steps) {
+            if step.crate_name == self.crate_name {
+                for line in step.range.start..=step.range.end {
+                    seen.insert((step.step.file.as_str(), line));
+                }
+            }
+        }
+        seen.len() as u32
+    }
 }
 
 /// Reads every walk under `narrative/<track>/`, resolving each citation
@@ -569,7 +594,8 @@ fn read_narrative_track(repo: &Path, dir: &Path) -> Result<NarrativeTrackItem> {
         .to_string();
     anyhow::ensure!(
         track.id == stem,
-        "{}: track id {:?} but the directory is {:?} — the directory name is the          track's URL, so they cannot disagree",
+        "{}: track id {:?} but the directory is {:?} — the directory name is the \
+         track's URL, so they cannot disagree",
         track_path.display(),
         track.id,
         stem
@@ -591,6 +617,7 @@ fn read_narrative_track(repo: &Path, dir: &Path) -> Result<NarrativeTrackItem> {
         crate_name: about.name.clone(),
         version: about.version.clone(),
         lines: vendor::total_lines_in(&about.dir(repo))?,
+        role: about.role,
         track,
         units,
     })

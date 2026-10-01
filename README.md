@@ -12,7 +12,10 @@ A guided walkthrough of **every line** of
 Serde's actual trait definitions — and of
 [`serde_derive`](https://crates.io/crates/serde_derive), the crate that
 generates the code calling into it. Explanations side-by-side with the source,
-runnable micro-examples, and the derive macro expanding live in the browser.
+runnable micro-examples, the derive macro expanding live in the browser, and
+one JSON document followed through
+[`serde_json`](https://crates.io/crates/serde_json) — walked, not claimed — so
+all three crates can be seen working on the same bytes.
 
 Along the way it teaches Rust twice over: lifetimes, trait design, associated
 types, generic bounds, `macro_rules!` and `no_std` engineering from
@@ -23,11 +26,12 @@ the question most readers actually arrive with — **what does
 `#[derive(Serialize)]` turn into?** — by following one struct and one enum all
 the way through and running the expansion in your browser.
 
-> **Status: live, and the reference track now covers two crates.**
-> `serde_derive` is complete at 8,975 of 8,975 lines, alongside `serde_core`'s
-> 12,037 — two crates, two hard gates, and no number that spans them
-> (PLAN.md §12, [D12](docs/decisions.md)). The course track spans both crates
-> at 21 units, with prereq edges crossing between them.
+> **Status: live, with four tracks.** Two crates are claimed line by line —
+> `serde_core` at 12,037 of 12,037 and `serde_derive` at 8,975 of 8,975, two
+> hard gates and no number that spans them (PLAN.md §12,
+> [D12](docs/decisions.md)). The course track spans both at 21 units. Two walks
+> follow a path rather than claiming ground: one through `serde_derive`, and
+> one through `serde_json` (PLAN.md §13).
 >
 > **Reference** — every line of both annotated crates: `serde_core`'s 19 files
 > and `serde_derive`'s 28, all at 100% and all listed in their
@@ -50,8 +54,8 @@ the way through and running the expansion in your browser.
 > which did not.
 >
 > **Derive** — 9 units and 85 steps follow one struct and one enum from a
-> `syn::DeriveInput` to an emitted `impl`, citing 1,875 lines of pinned
-> `serde_derive` and `syn`. Thirty steps quote the code their citation emits,
+> `syn::DeriveInput` to an emitted `impl`, citing 1,649 lines of pinned
+> `serde_derive`. Thirty steps quote the code their citation emits,
 > and those quotations are sliced out of a real expansion at build time rather
 > than stored, so the page does not build if the crate stops emitting them.
 > The walk makes no coverage claim of its own — it is a path, and the
@@ -59,6 +63,18 @@ the way through and running the expansion in your browser.
 > steps now lands inside an annotation and links there, which is what happened
 > when `serde_derive` stopped being walked-not-claimed and became the second
 > crate the reference track claims.
+>
+> **Json** — 9 units and 104 steps follow one document,
+> `{"a":[1,true],"b":"x"}`, from bytes through `serde_json`'s parser into a
+> `Value`, back out to the same twenty-two bytes, through an error and its
+> position, and finally into a struct through the impl the derive walk
+> emitted. It cites 2,258 of `serde_json`'s 18,329 lines and claims none of
+> them: `serde_json` is pinned as a `narrative` source, so there is no file
+> declared complete and no third percentage. Where the walk crosses into
+> `serde_core` or `serde_derive` — 21 of its stops — it lands inside an
+> annotation and links there. Its 21 claims about what the crate *produces*
+> are located in the output of a real run of the pinned version, checked
+> against both the host and the browser ([D13](docs/decisions.md)).
 >
 > See **[PLAN.md](PLAN.md)** for the roadmap and
 > **[docs/decisions.md](docs/decisions.md)** for the architecture calls.
@@ -72,9 +88,13 @@ the way through and running the expansion in your browser.
 >
 > ```
 > $ cargo xtask coverage
-> TOTAL                        12037    12037     468 100.0%
->
-> course track: 14/14 units written
+> serde_core-1.0.229          coverage        19    12037  every line claimed
+> serde_derive-1.0.229        coverage        28     8975  every line claimed
+> serde_json-1.0.151          narrative       37    18329  annotated where the story goes
+> …
+> course track: 21/21 units written
+> narrative track derive: 9 units, 85 steps, 1649 of serde_derive-1.0.229's 8975 lines cited
+> narrative track json: 9 units, 104 steps, 2258 of serde_json-1.0.151's 18329 lines cited
 > ```
 
 ---
@@ -91,15 +111,20 @@ plumbing. **`serde_core`** is where the real content lives:
 Zero dependencies matters for a teaching project: the reader never has to leave
 the tree to understand something.
 
+`serde_json` is here for the opposite reason. It is the format the other two
+crates exist to serve, and the one place on the site where a byte is actually
+read: the walk through it is how the trait definitions get called.
+
 ## What "every line" means here
 
-Not a slogan, and not a claim over the whole `vendor/` tree either. Five crates
+Not a slogan, and not a claim over the whole `vendor/` tree either. Six crates
 are pinned, and `vendor/pin.toml` gives each one a **role** that decides what
 the gates ask of it:
 
 | role | crate | what is promised |
 |---|---|---|
 | `coverage` | `serde_core`, `serde_derive` | every line claimed by exactly one annotation; `cargo xtask coverage` fails on a gap, an overlap, or a dangling reference |
+| `narrative` | `serde_json` | **walked, not claimed** — a walk cites line ranges that resolve in the pinned tree and makes no coverage promise, so it gets no percentage; every crossing into a `coverage` crate must land inside an annotation |
 | `glossary` | `syn`, `quote`, `proc-macro2` | **quoted, not annotated** — a definition is pinned to a line range, and the gate fails if the quotation drifts from the tree |
 
 A role the gates do not know is a build failure, which is what keeps the
@@ -152,7 +177,7 @@ Axum + Askama. Examples are real crates, compiled to WASM for the browser and
 runnable under local `cargo` for real rustc errors and debugger stepping. Every
 example's output is asserted in CI, so explanations cannot drift from behavior.
 
-Three ways to read it:
+Four ways to read it:
 
 - **Reference track** — file by file, 100% coverage, the spine.
 - **Course track** — the same annotations reordered as a Rust curriculum: 14
@@ -165,6 +190,10 @@ Three ways to read it:
   `impl` it gets back. 9 units, 85 steps, and where the path crosses back into
   `serde_core` it links to the annotation rather than explaining the same lines
   twice.
+- **Json track** — one document followed through `serde_json`, from bytes to a
+  `Value` and back, then into a struct through the impl the derive track
+  watched being emitted. 9 units, 104 steps, and every output it quotes is
+  located in a real run rather than typed into the page.
 
 And two tools the derive track leans on, reachable on their own:
 
@@ -182,10 +211,10 @@ And two tools the derive track leans on, reachable on their own:
 | path | contents |
 |---|---|
 | `PLAN.md` | full design and roadmap |
-| `vendor/` | five pinned, unmodified crates (MIT/Apache-2.0); `vendor/pin.toml` gives each a role |
+| `vendor/` | six pinned, unmodified crates (MIT/Apache-2.0); `vendor/pin.toml` gives each a role |
 | `annotations/` | the explanations, as TOML keyed to line ranges |
 | `annotations/course.toml` | the course track's units, ordering, and honesty labels |
-| `narrative/` | the derive track's units and steps, as TOML citing pinned line ranges |
+| `narrative/` | one directory per walk — `derive/` and `json/` — each a `track.toml` and its units, as TOML citing pinned line ranges |
 | `glossary/` | borrowed-vocabulary entries, each pinned to a quoted range |
 | `examples/` | micro-example crates, CI-verified |
 | `expand/`, `expander/` | the `serde_derive` expansion harness and its wasm front end |
@@ -224,7 +253,8 @@ across the diff, and reports the annotations whose code changed underneath them.
 Project content and code: **MIT OR Apache-2.0**.
 
 Everything under `vendor/` is an unmodified copy of a published crate —
-`serde_core` and `serde_derive` by Erick Tryzelaar and David Tolnay, `syn` and
+`serde_core`, `serde_derive` and `serde_json` by Erick Tryzelaar and David
+Tolnay (with `serde_json`'s `src/lexical/` by Alexander Huszagh), `syn` and
 `quote` by David Tolnay, `proc-macro2` by David Tolnay and Alex Crichton — all
 MIT OR Apache-2.0. Provenance, checksums and copyright for each are in
 [`vendor/NOTICE.md`](vendor/NOTICE.md).

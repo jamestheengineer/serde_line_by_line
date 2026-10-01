@@ -57,9 +57,15 @@
   <h2>Next</h2>
   <p>
     <a href="{{ root }}derive/index.html">The derive track &rarr;</a>
-    &mdash; this track and the reference track both stop at the crate boundary.
-    <code>#[derive(Serialize)]</code> is on the other side of it, and that is
-    where most readers arrived from.
+    &mdash; this track teaches how <code>serde_derive</code> is written; the
+    derive track follows one struct and one enum through it, until
+    <code>#[derive(Serialize)]</code> has turned into an <code>impl</code>.
+  </p>
+  <p>
+    <a href="{{ root }}json/index.html">The json track</a>
+    &mdash; neither annotated crate is a data format. This one follows a
+    document through <code>serde_json</code> and into a struct, which is where
+    the traits this track teaches finally get called.
   </p>
   <p>
     <a href="{{ root }}index.html">The reference track</a>

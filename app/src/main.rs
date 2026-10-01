@@ -219,9 +219,21 @@ struct Narrated {
     source_lines: u32,
     units: usize,
     steps: usize,
+    /// Distinct lines of `crate_name` the walk cites — see
+    /// [`slbl_core::NarrativeTrackItem::walked_lines`].
     cited_lines: u32,
     crossings: usize,
     version: String,
+    /// Whether the crate being walked is one the reference track claims. It
+    /// decides which promise the front page makes about the walk: an ordering
+    /// over annotations, or the only thing written about most of its ground.
+    annotated: bool,
+    /// Steps whose claim about generated code is sliced out of an expansion
+    /// (D10), and steps whose claim about output is located in a real run
+    /// (D13). Counted rather than keyed off the track id, so a page says what
+    /// a walk checks because the walk checks it.
+    emitted: usize,
+    produced: usize,
 }
 
 /// What the glossary came to. Same reason.
@@ -609,15 +621,9 @@ fn main() -> Result<()> {
     let index = IndexPage {
         page_title: "serde line by line".to_string(),
         description: one_line(&format!(
-            "Every line of serde_core {} annotated: {} lines claimed by {} explanations, \
-             beside the source, with runnable examples — a {}-unit Rust course read out of \
-             the same annotations, and a {}-unit walk through what #[derive(Serialize)] \
-             expands to.",
-            first.version,
-            first.total_lines(),
-            first.annotations(),
+            "Every line of serde_core and serde_derive annotated, a {}-unit Rust course, and \
+             walks from #[derive(Serialize)] to its impl and from JSON bytes into a struct.",
             store.course.len(),
-            narrative_units,
         )),
         nav: build_nav(&store, &pages),
         // One row per annotated crate, each with its own figure. There is no
@@ -648,7 +654,9 @@ fn main() -> Result<()> {
         current: String::new(),
         track: "reference".to_string(),
     };
-    write(&out.join("index.html"), &index.render()?)?;
+    let front = index.render()?;
+    header_names_every_walk(&front, &index.walks)?;
+    write(&out.join("index.html"), &front)?;
 
     // Copied rather than embedded: the playground is a binary artefact, and it
     // may legitimately be absent — the site must build without a wasm
@@ -689,14 +697,39 @@ fn main() -> Result<()> {
     println!(
         "wrote {} pages to {}  ({}, {} annotations)",
         // one per annotated file, one per course unit, one per narrative unit,
-        // plus the front page, the course index, the derive index, the
+        // one index per walk, plus the front page, the course index, the
         // glossary, the expansion page and the 404.
-        file_pages + store.course.len() + narrative_units + 6,
+        file_pages + store.course.len() + narrative_units + index.walks.len() + 5,
         out.display(),
         claims.join(", "),
         store.annotations(),
     );
     println!("checked {links} internal links");
+    Ok(())
+}
+
+/// Fails the build if the header leaves out a walk.
+///
+/// The header is the one place a track is named by hand rather than read off
+/// the store, because every page renders it and threading the walks through
+/// a dozen page types to save two lines of template would cost more than it
+/// saves. So the hand-written list is checked against the store instead: a
+/// third walk added under `narrative/` without a header link would otherwise
+/// build, deploy, and be reachable only by someone who already had its URL.
+fn header_names_every_walk(front: &str, walks: &[Narrated]) -> Result<()> {
+    let nav = front
+        .split_once(r#"<nav class="tracks">"#)
+        .and_then(|(_, rest)| rest.split_once("</nav>"))
+        .map(|(nav, _)| nav)
+        .context("the front page has no track header")?;
+    for w in walks {
+        anyhow::ensure!(
+            nav.contains(&format!(r#"href="./{}/index.html""#, w.id)),
+            "narrative/{}/ is a walk, but the header in app/templates/base.html does not link \
+             to it — add it beside the other tracks",
+            w.id
+        );
+    }
     Ok(())
 }
 
@@ -1019,13 +1052,20 @@ fn write_walk(
         source_lines: track.lines,
         units: units.len(),
         steps: nav.iter().map(|u| u.steps).sum(),
-        cited_lines: units
-            .iter()
-            .flat_map(|u| u.steps.iter())
-            .map(|s| s.range.line_count())
-            .sum(),
+        cited_lines: track.walked_lines(),
         crossings: nav.iter().map(|u| u.crossings).sum(),
         version: track.version.clone(),
+        annotated: track.role == slbl_core::vendor::Role::Coverage,
+        emitted: units
+            .iter()
+            .flat_map(|u| &u.steps)
+            .filter(|s| s.step.emits.is_some())
+            .count(),
+        produced: units
+            .iter()
+            .flat_map(|u| &u.steps)
+            .filter(|s| s.step.produces.is_some())
+            .count(),
     };
 
     let index = NarrativePage {
