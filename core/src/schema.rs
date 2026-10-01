@@ -168,7 +168,7 @@ impl Manifest {
 #[derive(Debug, Deserialize)]
 pub struct GlossaryFile {
     pub schema: u32,
-    /// Must match a pinned source with `role = "glossary"`, e.g. "syn-3.0.5".
+    /// Must match a pinned source with `role = "glossary"`, e.g. "syn-3.0.6".
     pub source: String,
     #[serde(default, rename = "entry")]
     pub entries: Vec<GlossaryEntry>,

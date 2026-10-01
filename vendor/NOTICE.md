@@ -33,12 +33,12 @@ rather than annotated is D9 in `docs/decisions.md`.
 - Copyright: Erick Tryzelaar <erick.tryzelaar@gmail.com>, David Tolnay <dtolnay@gmail.com>
 - Also, in `src/lexical/mod.rs` line 9: copyright Alexander Huszagh.
 
-## syn 3.0.5 (glossary)
+## syn 3.0.6 (glossary)
 
-- crates.io: https://crates.io/crates/syn/3.0.5
+- crates.io: https://crates.io/crates/syn/3.0.6
 - Upstream: https://github.com/dtolnay/syn
-- sha256: `12df2e0110f65b775f769bb17ef989067a1d931b2eb822bd4346631eeada89f9`
-- License: MIT OR Apache-2.0 (see `syn-3.0.5/LICENSE-MIT` and `syn-3.0.5/LICENSE-APACHE`)
+- sha256: `8593e8e72159ed2257d083c7a454a85cbf854f37a0966d8d483aff8c8a3ebcee`
+- License: MIT OR Apache-2.0 (see `syn-3.0.6/LICENSE-MIT` and `syn-3.0.6/LICENSE-APACHE`)
 - Copyright: David Tolnay <dtolnay@gmail.com>
 
 ## quote 1.0.47 (glossary)

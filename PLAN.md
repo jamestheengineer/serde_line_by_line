@@ -497,6 +497,13 @@ non-default feature, and one ULP away from mattering (scope §3).
 > it would have replaced without retargeting them — and the expansion harness
 > was free to build against a `syn` the glossary does not describe, which no
 > tree hash can see, because the tree is not what moved.
+>
+> It moved again on 2026-10-01, 3.0.5 → 3.0.6, and that one was the tool doing
+> what it was built for: `src/expr.rs` grew eight lines below all five entries
+> quoting it, so no range shifted, all 50 `syn` quotations cover the text they
+> covered, and the nine committed expansions came out byte for byte
+> ([the record](docs/migrations/syn-3.0.5-to-3.0.6.md)). The other five pins
+> were still the newest published releases that day.
 
 ---
 

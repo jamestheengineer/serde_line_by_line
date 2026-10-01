@@ -117,9 +117,9 @@ A glossary or narrative source is the same five lines with `--source` and one
 more step:
 
 ```
-cargo xtask bump --source syn 3.0.5 --dry-run
-cargo xtask bump --source syn 3.0.5
-cargo update -p syn@3.0.3 --precise 3.0.5   # `-p syn` is ambiguous: syn 2 is
+cargo xtask bump --source syn 3.0.6 --dry-run
+cargo xtask bump --source syn 3.0.6
+cargo update -p syn@3.0.5 --precise 3.0.6   # `-p syn` is ambiguous: syn 2 is
                                             # in the graph too
 cargo test -p expand -- --ignored      # the expander is built from it
 cargo xtask coverage
@@ -162,6 +162,6 @@ run, which is the hard shape — a file added, a file removed, and 11 annotation
 whose contents moved.
 
 For the other two roles: `syn` `3.0.3 → 3.0.5` was performed, the first bump of
-a glossary source; and `serde_derive` `1.0.229 → 1.0.228` was dry-run, which
+a glossary source, and `3.0.5 → 3.0.6` after it; and `serde_derive` `1.0.229 → 1.0.228` was dry-run, which
 moves eight narrative steps across five files and leaves all nine `serde_core`
 crossings where they are.

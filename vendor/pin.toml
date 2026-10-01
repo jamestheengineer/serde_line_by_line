@@ -37,10 +37,10 @@ src_tree_sha256 = "a665c44b0a7679d9330484c98f36050cc6b95709310580b11872361d19a64
 
 [[source]]
 name = "syn"
-version = "3.0.5"
+version = "3.0.6"
 role = "glossary"
-crate_sha256 = "12df2e0110f65b775f769bb17ef989067a1d931b2eb822bd4346631eeada89f9"
-src_tree_sha256 = "9ac68490ba2e6345011b2d96b3a06674ae3f5dcc0e0a27e9c5e944f91d7ab147"
+crate_sha256 = "8593e8e72159ed2257d083c7a454a85cbf854f37a0966d8d483aff8c8a3ebcee"
+src_tree_sha256 = "ed89ff73a5f09223865e7b9ee2458b1c26915e5029d796b0d53edeec8d7beea6"
 
 [[source]]
 name = "quote"
