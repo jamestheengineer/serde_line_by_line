@@ -557,8 +557,8 @@ they would need.
 | **N4 — The narrative** ✅ | 8–10 units, one struct and one enum, end to end | Walkable start to finish; every cited range resolves; no forward references (the D8 check, across two sources) |
 | **N5 — Ship** ✅ | Track navigation, the restated promise, `README` | The three tracks are each reachable and each honest about what they claim |
 
-N4 shipped as nine units and 85 steps, citing 1,875 lines across the two pinned
-sources, nine of them crossings into annotated `serde_core`. Thirty steps quote
+N4 shipped as nine units and 85 steps, citing 1,670 distinct lines of
+`serde_derive`, with nine of the steps crossing into annotated `serde_core`. Thirty steps quote
 the code their citation emits, and those quotations are verified against a real
 expansion at build time rather than stored — [D10](docs/decisions.md).
 
@@ -596,6 +596,11 @@ might check it.
 > the second crate the reference track claims. The mechanism it demonstrates
 > did not change — the promise is still one sentence per role, still read off
 > the pin, and there are simply two rows under `coverage` now.
+>
+> The quotation is left as the page printed it, and its 1,875 was wrong when it
+> was printed: it summed every step's range, crossings into `serde_core`
+> included. The walk cited 1,670 distinct lines of `serde_derive` at the time.
+> J4 found this and fixed where the figure comes from.
 
 ---
 
@@ -1080,7 +1085,7 @@ examples matching their transcripts in the browser rather than 12.
 
 ### What J3 shipped
 
-Nine units and 104 steps, citing 2,726 of `serde_json`'s 18,329 lines. Units
+Nine units and 104 steps, citing 2,258 of `serde_json`'s 18,329 lines. Units
 01–06 take the document from bytes to a `Value`, 07 takes it back out to the
 same twenty-two bytes, 08 is the error path, and 09 reads it straight into a
 struct through a `serde_derive` impl. That is the one unit in the walk where all
@@ -1134,9 +1139,12 @@ the crate the role now describes:
 **One figure was wrong, and it had been wrong since N4.** "N of a crate's lines
 cited" summed every step's range, so a crossing into `serde_core` counted as a
 line of the crate being walked, and a line two steps both show counted twice.
-The gate printed 2,726 of `serde_json`'s lines (J3 above repeats it) and 1,853
-of `serde_derive`'s (N4 says 1,875, from before R1). The real figures, distinct
-lines of the walked crate only, are **2,258** and **1,649**.
+The gate printed 2,726 of `serde_json`'s lines and 1,853 of `serde_derive`'s —
+1,875 when N4 shipped, before R2–R5 re-cut a handful of steps. The real figures,
+distinct lines of the walked crate only, are **2,258** and **1,649**, and the
+derive walk's was 1,670 at N4. J3 and N4 above repeated the sums when they
+were written and now give the distinct figures; N5's quotation of the front
+page keeps its 1,875, because that is what the page said.
 `NarrativeTrackItem::walked_lines` computes it once, and the gate, the walk
 index and the front page all read that. The per-unit "lines" column in the
 gate's table is still what each page shows, crossings included, and no longer
