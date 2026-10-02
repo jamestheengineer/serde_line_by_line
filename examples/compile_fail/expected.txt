@@ -317,7 +317,7 @@ error[E0382]: borrow of moved value: `names`
 20 |     println!("{} names", names.len());
    |                          ^^^^^ value borrowed here after move
    |
-note: `into_iter` takes ownership of the receiver `self`, which moves `names`
+note: the `for` loop is desugared into a call to `std::iter::IntoIterator::into_iter`, which takes ownership of the receiver `self`, which moves `names`
   --> $RUST/core/src/iter/traits/collect.rs
 help: consider iterating over a slice of the `Vec<String>`'s content to avoid moving into the `for` loop
    |
@@ -355,14 +355,20 @@ fn main() {
 error[E0502]: cannot borrow `lengths` as mutable because it is also borrowed as immutable
   --> tests/ui/push_while_iterating.rs:18:13
    |
-16 |     for len in lengths.iter() {
-   |                --------------
-   |                |
-   |                immutable borrow occurs here
-   |                immutable borrow later used here
-17 |         if *len == 2 {
-18 |             lengths.push(99);
-   |             ^^^^^^^^^^^^^^^^ mutable borrow occurs here
+16 |       for len in lengths.iter() {
+   |       -          --------------
+   |       |          |
+   |       |          immutable borrow occurs here
+   |  _____|          immutable borrow later used here
+   | |
+17 | |         if *len == 2 {
+18 | |             lengths.push(99);
+   | |             ^^^^^^^^^^^^^^^^ mutable borrow occurs here
+19 | |         }
+20 | |     }
+   | |_____- this for loop borrows `lengths` immutably, preventing mutation within its body
+   |
+   = help: consider using an index-based loop instead, or collecting modifications into a separate collection
 
 ========================================================================
 unit 14 · closure_types_differ

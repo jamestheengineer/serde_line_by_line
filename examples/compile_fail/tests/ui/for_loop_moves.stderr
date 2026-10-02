@@ -10,7 +10,7 @@ error[E0382]: borrow of moved value: `names`
 20 |     println!("{} names", names.len());
    |                          ^^^^^ value borrowed here after move
    |
-note: `into_iter` takes ownership of the receiver `self`, which moves `names`
+note: the `for` loop is desugared into a call to `std::iter::IntoIterator::into_iter`, which takes ownership of the receiver `self`, which moves `names`
   --> $RUST/core/src/iter/traits/collect.rs
 help: consider iterating over a slice of the `Vec<String>`'s content to avoid moving into the `for` loop
    |

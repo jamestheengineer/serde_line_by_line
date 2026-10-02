@@ -1,11 +1,17 @@
 error[E0502]: cannot borrow `lengths` as mutable because it is also borrowed as immutable
   --> tests/ui/push_while_iterating.rs:18:13
    |
-16 |     for len in lengths.iter() {
-   |                --------------
-   |                |
-   |                immutable borrow occurs here
-   |                immutable borrow later used here
-17 |         if *len == 2 {
-18 |             lengths.push(99);
-   |             ^^^^^^^^^^^^^^^^ mutable borrow occurs here
+16 |       for len in lengths.iter() {
+   |       -          --------------
+   |       |          |
+   |       |          immutable borrow occurs here
+   |  _____|          immutable borrow later used here
+   | |
+17 | |         if *len == 2 {
+18 | |             lengths.push(99);
+   | |             ^^^^^^^^^^^^^^^^ mutable borrow occurs here
+19 | |         }
+20 | |     }
+   | |_____- this for loop borrows `lengths` immutably, preventing mutation within its body
+   |
+   = help: consider using an index-based loop instead, or collecting modifications into a separate collection
