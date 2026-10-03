@@ -1505,7 +1505,7 @@ was written from scratch for that reason. This unit is the first to supply it
 from an annotated crate, which is what the scope doc's §6 table promised.
 
 **The cross-crate DAG gained a third crate.** Twelve of the tagged
-annotations declare prereqs, ten of them pointing into `serde_core`: the
+annotations declare prereqs, eleven of them pointing into `serde_core`: the
 `Deserializer` impl leans on the trait's declaration, the literal arms on
 `Visitor`, the access types on `SeqAccess` and `MapAccess`, `from_trait` on
 `Deserialize::deserialize`, and `from_reader` on `DeserializeOwned`.
