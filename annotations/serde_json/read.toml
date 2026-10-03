@@ -1,0 +1,1051 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-read-0001"
+file  = "src/read.rs"
+lines = "1-21"
+title = "Imports, and three features visible before any code"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "no-std", "modules"]
+body = """
+The import list tells you what this file can do without the standard library,
+and it is nearly everything.
+
+The unconditional imports are `alloc::vec::Vec` and four `core` modules. The
+slice reader and the string reader need nothing else, which is why
+`serde_json` can parse in a `no_std` build as long as there is an allocator.
+
+`crate::io` and `LineColIterator` are behind `std`, because reading from a
+stream needs `io::Read`. The last four imports are behind `raw_value`, and two
+of those need `std` as well. Read that as a preview: `RawValue` support is not
+a separate module here. It is threaded through every reader in this file, one
+`#[cfg]` at a time, and you will meet it at each of them.
+"""
+
+[[annotation]]
+id    = "json-read-0002"
+file  = "src/read.rs"
+lines = "22-36"
+title = "Read — the parser's whole view of its input"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "sealed-traits", "lifetime-de", "supertraits"]
+body = """
+This trait is everything `Deserializer` knows about where bytes come from.
+The parser in `de.rs` is generic over `R: Read<'de>` and never names a slice,
+a string or a stream.
+
+The doc comment says the trait is "manually specialized" for `&[u8]`. What
+that means in practice is that the trait has two layers. `next`, `peek` and
+`discard` are the byte-at-a-time layer every reader can provide. The string
+methods further down are a second layer, where a reader that holds the whole
+input can do something a stream cannot. Real specialization would let one
+generic function pick the fast version; without it, the fast version has to be
+a method each reader implements.
+
+`'de` is the lifetime of the input, the same `'de` as in `serde_core`'s
+`Deserializer<'de>`. It is on the trait because one method below returns data
+borrowed for that long.
+
+`discard` has a precondition in its doc comment and no way to enforce it: it
+is only valid after `peek`. Every method here is `#[doc(hidden)]` because the
+trait is public only so that it can appear in public signatures.
+"""
+
+[[annotation]]
+id    = "json-read-0003"
+file  = "src/read.rs"
+lines = "37-61"
+title = "position, peek_position and byte_offset — three answers to \"where?\""
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "custom-errors"]
+body = """
+Two of these exist for error messages and say so: "only called in case of an
+error, so performance is not important". That sentence is a design decision.
+It lets a reader keep no running line or column at all and compute one on
+demand, which is what the slice reader does.
+
+There are two position methods because the parser reports two kinds of error.
+After `next` the offending byte has been consumed. After `peek` it has not.
+The line and column of "the byte we just looked at" differ by one between
+those cases, and each method's doc comment admits it cannot always know which
+case it is in.
+
+`byte_offset` is the odd one out. It is not for errors. `StreamDeserializer`
+uses it to say how far into the input the last complete value ended.
+"""
+
+[[annotation]]
+id    = "json-read-0004"
+file  = "src/read.rs"
+lines = "62-89"
+title = "The string methods — where the manual specialization lives"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["lifetime-de", "lifetimes", "borrowing", "strings"]
+body = """
+These four are the second layer. All of them assume the opening `"` has
+already been consumed.
+
+`parse_str` has two lifetimes in its return type and they are the point.
+`Reference<'de, 's, str>` is either borrowed from the input for `'de` or
+copied into `scratch` and borrowed from there for `'s`. `'s` is also the
+lifetime of `&mut self`, so the copied case cannot outlive the call's borrow of
+the reader. The scratch buffer belongs to the caller, which lets one
+allocation be reused for every string in the document.
+
+`parse_str_raw` is the same scan without UTF-8 validation, returning bytes. It
+exists for `deserialize_bytes`, where a lone surrogate escape is allowed
+through. `ignore_str` skips a string whose value nobody wants, and
+`decode_hex_escape` reads the four hex digits after `\\u`. That last one is on
+the trait rather than a free function because a slice can read four bytes at
+once and a stream cannot.
+"""
+
+[[annotation]]
+id    = "json-read-0005"
+file  = "src/read.rs"
+lines = "90-104"
+title = "Raw buffering — two methods that exist only with raw_value"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "generic-params"]
+body = """
+`RawValue` holds a piece of JSON as unparsed text. To produce one, the
+deserializer needs the exact bytes a value occupied, and only the reader has
+them.
+
+So the reader gets two methods, both compiled only with the `raw_value`
+feature. `begin_raw_buffering` marks where the value starts. The parser then
+skips over the value as it would for any ignored data, and
+`end_raw_buffering` hands the bytes in between to a visitor.
+
+The visitor is called through `visit_map` with a one-entry map, which is the
+protocol `RawValue`'s `Deserialize` impl expects. You can see both ends of
+that in `raw.rs`. Here, notice only that a feature flag has changed the shape
+of a trait: every implementor below carries the same pair of gated methods.
+"""
+
+[[annotation]]
+id    = "json-read-0006"
+file  = "src/read.rs"
+lines = "105-117"
+title = "should_early_return_if_failed — a constant so a check can compile away"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["associated-types", "zero-cost", "monomorphization"]
+body = """
+These two serve `StreamDeserializer`, the iterator over several JSON values
+in one input. Once it has reported an error it must keep returning `None`.
+
+A stream reader needs a flag for that, checked on every call. A slice reader
+does not: it can truncate its own input to the point of failure, after which
+it reaches end of input naturally. `set_failed` is the method that does
+whichever one applies.
+
+The associated constant tells the iterator which kind of reader it has.
+Because it is a constant on the type, `R::should_early_return_if_failed &&
+self.failed` is decided per monomorphization, and for slice and string readers
+the branch is gone from the compiled code. The lower-case name breaks the
+naming convention for constants, and `#[doc(hidden)]` is why nobody is asked
+to care.
+"""
+
+[[annotation]]
+id    = "json-read-0007"
+file  = "src/read.rs"
+lines = "118-123"
+title = "Position — a line and a column, and nothing else"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["visibility"]
+body = """
+Two `usize` fields. `Position` is `pub` with `pub` fields because it crosses
+from this module to `de.rs` and `error.rs`, but `read` is a private module and
+the type is not re-exported, so it is not part of the crate's API.
+
+What is absent matters more. There is no byte offset here and no derive of any
+trait. The value is built, read once to construct an `Error`, and dropped.
+"""
+
+[[annotation]]
+id    = "json-read-0008"
+file  = "src/read.rs"
+lines = "124-145"
+title = "Reference — borrowed from the input, or copied into scratch"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["lifetimes", "sized-bound", "pattern-matching", "zero-cost"]
+body = """
+This enum is how a string comes out of the reader without the reader deciding
+in advance whether it had to copy.
+
+`Borrowed(&'b T)` points into the original input. `Copied(&'c T)` points into
+the scratch buffer. The two variants hold the same kind of pointer and differ
+only in lifetime, so the enum costs one discriminant and tells the caller
+which promise it can make. `de.rs` matches on it to choose between
+`visit_borrowed_str` and `visit_str`, and that choice is the whole of
+zero-copy deserialization in this crate.
+
+`T: ?Sized` is required because `T` is `str` or `[u8]`, neither of which has a
+size. The `Deref` impl is for callers that do not care which variant they
+got: both arms return the inner reference, shortened to the lifetime of
+`&self`.
+"""
+
+[[annotation]]
+id    = "json-read-0009"
+file  = "src/read.rs"
+lines = "146-180"
+title = "Three readers, and what each one stores"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["cfg", "lifetimes", "generic-params"]
+body = """
+The three struct definitions are worth reading side by side, because the
+fields predict everything their impls do.
+
+`IoRead` wraps an iterator over bytes that also counts lines and columns, plus
+`ch`, one byte of storage. A stream cannot un-read, so a peeked byte has to be
+kept somewhere until it is consumed.
+
+`SliceRead` holds the slice and an index. That is all. Peeking is reading
+`slice[index]` without moving, and position is computed from the index only
+when an error asks. The plain comment above it says this is why it is faster.
+
+`StrRead` wraps a `SliceRead` and adds nothing by default. Its reason to exist
+is a fact about the input, not a field: the bytes came from a `&str`, so they
+are already valid UTF-8 and one check can be skipped.
+
+Each struct has a `raw_value` field, and they differ. The stream reader needs
+an owned buffer, the slice reader a start index, and the string reader the
+original `&str` so it can slice text out without re-validating.
+"""
+
+[[annotation]]
+id    = "json-read-0010"
+file  = "src/read.rs"
+lines = "181-187"
+title = "private::Sealed — a public trait nobody else can implement"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["sealed-traits", "modules", "visibility"]
+body = """
+`Read` is `pub` and has `private::Sealed` as a supertrait. `Sealed` is `pub`
+too, but it lives in a module that is not. Code outside this crate can name
+`Read`, can use it as a bound, and cannot write `impl Read for MyType`,
+because that would require implementing a trait it has no path to.
+
+The reason to seal it is that every method of `Read` is hidden and its
+contracts are informal. "Only valid after a call to peek" is the kind of rule
+upstream wants to be free to change. Sealing means the only implementors are
+the four in this file, so the trait can gain a method in a patch release.
+"""
+
+[[annotation]]
+id    = "json-read-0011"
+file  = "src/read.rs"
+lines = "188-212"
+title = "IoRead::new — and the warning about buffering"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg", "generic-params"]
+body = """
+The constructor is three field initializers. The doc comment is the part to
+read.
+
+`reader.bytes()` turns an `io::Read` into an iterator that performs one
+`read` call per byte. On a `File` or a socket that is one system call per
+byte. `serde_json` does not add a buffer of its own, and the comment tells you
+to wrap the reader in a `BufReader` yourself. This is the most common reason a
+`from_reader` call is slower than expected.
+
+Below the constructor, `IoRead` is marked `Sealed`, which is what permits the
+`Read` impl further down.
+"""
+
+[[annotation]]
+id    = "json-read-0012"
+file  = "src/read.rs"
+lines = "213-251"
+title = "IoRead::parse_str_bytes — the scan when nothing can be borrowed"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["closures", "lifetimes", "pattern-matching"]
+body = """
+This is the stream reader's string loop, and every byte goes into `scratch`.
+A stream has no stable buffer to point into, so there is no borrowed case.
+
+Read it against the slice reader's version of the same function. The control
+flow is identical: pull a byte, push it if it is ordinary, otherwise branch on
+quote, backslash, or control character. The difference is that "ordinary" here
+costs a `push` per byte.
+
+`result` is a closure that turns the finished bytes into the return type. With
+`validate` true it is `as_str`, which checks UTF-8. With `validate` false it
+returns the bytes as they are. Passing the conversion in is what lets one loop
+serve both `parse_str` and `parse_str_raw`.
+
+The last arm is reached only for a control character, because `is_escape`
+with `true` reports those as well. Validating callers get an error. The raw
+caller keeps the byte.
+"""
+
+[[annotation]]
+id    = "json-read-0013"
+file  = "src/read.rs"
+lines = "252-299"
+title = "IoRead next and peek — one byte of lookahead, stored"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["lifetime-de", "option", "cfg", "inlining"]
+body = """
+`impl<'de, R> Read<'de> for IoRead<R>` introduces `'de` and never constrains
+it. A stream reader works for any `'de` because it never lends anything out
+for that long.
+
+`next` first takes the stored byte if there is one, and otherwise pulls from
+the iterator. `peek` pulls from the iterator and stores the byte in `self.ch`.
+That is why `peek` takes `&mut self` on a trait where you would expect looking
+to be read-only: for a stream, looking is consuming, and the reader has to
+remember what it saw.
+
+An I/O failure becomes `Error::io`. End of input is `Ok(None)`, not an error.
+Whether running out of bytes is a problem depends on what the parser was in
+the middle of, so the reader does not judge.
+
+The `raw_value` blocks push each byte to the raw buffer as it is *consumed*.
+`peek` has no such block, so a byte that is looked at twice is recorded once.
+"""
+
+[[annotation]]
+id    = "json-read-0014"
+file  = "src/read.rs"
+lines = "300-334"
+title = "IoRead discard and positions — why the two positions are the same"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg", "option"]
+body = """
+There are two `discard` functions and the compiler sees exactly one. Without
+`raw_value`, discarding is clearing the stored byte. With it, the byte being
+dropped is one the raw buffer must still record, so the function becomes a
+`take` followed by a push.
+
+`peek_position` returns `self.position()` and the comment says why. The line
+and column live in `LineColIterator`, which advanced when `peek` pulled the
+byte. By the time anyone asks, the iterator already stands on the peeked
+byte. The slice reader cannot say the same and has to add one.
+
+`byte_offset` shows the same fact from the other side. The iterator has
+counted the peeked byte, the parser has not consumed it, so one is subtracted
+while a byte is in storage.
+"""
+
+[[annotation]]
+id    = "json-read-0015"
+file  = "src/read.rs"
+lines = "335-378"
+title = "IoRead's string methods — always Copied"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings", "closures", "result"]
+body = """
+`parse_str` and `parse_str_raw` both finish with `.map(Reference::Copied)`.
+There is no path here that produces `Borrowed`. A type that asks for
+`&'de str` therefore cannot be deserialized with `from_reader`, and the error
+it gets is `serde_core`'s "expected a borrowed string", raised by the visitor
+when `visit_str` arrives where `visit_borrowed_str` was needed.
+
+`ignore_str` is the same loop as `parse_str_bytes` with the pushes removed.
+It still validates what it can see cheaply: an unescaped control character is
+an error even in a string nobody will read.
+
+`decode_hex_escape` pulls four bytes one at a time, each of which can hit end
+of input, and hands them to the shared table lookup at the bottom of the file.
+"""
+
+[[annotation]]
+id    = "json-read-0016"
+file  = "src/read.rs"
+lines = "379-409"
+title = "IoRead raw buffering and the failed flag"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg", "option", "inlining"]
+body = """
+`begin_raw_buffering` allocates an empty `Vec` and stores it in `raw_buffer`.
+From then on `next` and `discard` copy every consumed byte into it.
+`end_raw_buffering` takes the buffer back, checks that it is UTF-8, and gives
+the visitor an `OwnedRawDeserializer`. Owned, because a stream has nothing to
+borrow from.
+
+The `unwrap` is on a value this file set a few calls earlier. It can only fail
+if the parser calls `end` without `begin`, which would be a bug in `de.rs`.
+
+For this reader `should_early_return_if_failed` is `true` and `set_failed`
+writes the flag. `#[cold]` tells the optimizer the function is rarely called,
+so the error path is laid out away from the loop that calls it.
+"""
+
+[[annotation]]
+id    = "json-read-0017"
+file  = "src/read.rs"
+lines = "410-420"
+title = "SliceRead::new — an index that starts at zero"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["lifetimes"]
+body = """
+The slice reader is a borrowed slice and a cursor. `index` is the position of
+the *next* byte to be returned, a convention every method below depends on.
+
+Nothing is validated here and nothing is scanned. The constructor cannot fail,
+and a `SliceRead` over invalid UTF-8 is a legal value. Whether the bytes are
+text is checked later, per string, by whichever method produces a `&str`.
+"""
+
+[[annotation]]
+id    = "json-read-0018"
+file  = "src/read.rs"
+lines = "421-431"
+title = "position_of_index — a line and column computed only when asked"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings", "iterators"]
+body = """
+This function is the reason the slice reader keeps no line counter. It turns a
+byte index into a `Position` by searching the input.
+
+`memrchr` finds the last newline before index `i`, searching backwards, which
+gives the start of the current line. `memchr_iter` then counts the newlines
+before that point to get the line number. `memchr` is a separate crate with
+SIMD implementations of exactly these searches, so the cost is one fast pass
+over the input up to the error.
+
+The column is `i - start_of_line`, with no `1 +`. It comes out one-based
+anyway when `i` is the index *after* the offending byte, which is where
+`position()` stands once a byte has been consumed. That convention is why the
+trait needs a separate `peek_position`.
+"""
+
+[[annotation]]
+id    = "json-read-0019"
+file  = "src/read.rs"
+lines = "432-482"
+title = "skip_to_escape — eight bytes at a time, looking for three kinds of byte"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["unsafe", "cfg", "zero-cost"]
+body = """
+Most bytes of most JSON strings are ordinary. This function advances `index`
+to the first byte that is not: a quote, a backslash, or a control character.
+
+The first check handles an empty string and back-to-back escapes without
+entering the loop. If control characters are allowed, which is the raw-bytes
+case, `memchr2` can search for the two remaining bytes directly.
+
+Otherwise there are three conditions and no three-needle `memchr`, so the
+function tests a whole machine word at once. `ONE_BYTES` is `0x0101…01`.
+Subtracting `0x20` from every byte and masking with `!chars` leaves the top
+bit of a byte set when that byte was below `0x20`. XOR with a repeated `"`
+turns matching bytes into zero, and the same subtract-and-mask finds a zero
+byte. A borrow can spill into a higher byte and produce a false positive, but
+only above a true one, and the code takes the lowest set bit.
+
+`from_le_bytes` puts the first byte of the chunk in the low bits on every
+platform, so `trailing_zeros() / 8` is the index of the first hit. `Chunk` is
+`u64` or `u32` depending on the `fast_arithmetic` cfg that `build.rs` emits.
+
+The `unsafe` block is pointer subtraction. `chunk` is a sub-slice of
+`self.slice`, so both pointers are in the same allocation, which is what
+`offset_from` requires. Leftover bytes shorter than a chunk go to the slow
+loop.
+"""
+
+[[annotation]]
+id    = "json-read-0020"
+file  = "src/read.rs"
+lines = "483-490"
+title = "skip_to_escape_slow — the tail, kept out of line"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["inlining"]
+body = """
+A byte-at-a-time loop over whatever was left after the last full chunk, at
+most seven bytes on a 64-bit target.
+
+`#[cold]` and `#[inline(never)]` keep it out of its caller's body. The fast
+loop above is the code that should be small and well laid out, and the tail
+runs at most once per call.
+
+It always passes `true` for control characters. The only caller that reaches
+it is the validating path, because the other path returned after `memchr2`.
+"""
+
+[[annotation]]
+id    = "json-read-0021"
+file  = "src/read.rs"
+lines = "491-540"
+title = "SliceRead::parse_str_bytes — the fast path that returns the input itself"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["hrtb", "lifetimes", "borrowing", "closures", "sized-bound"]
+body = """
+This is the function the doc comment calls "the big optimization". If a string
+has no escapes, the result is a sub-slice of the input and nothing is copied.
+
+`start` is the index of the first byte not yet copied to scratch. Each pass of
+the loop skips to the next interesting byte and looks at it. On a closing
+quote with `scratch` still empty, nothing has been copied, so
+`slice[start..index]` is the whole string and it is returned as `Borrowed`.
+The emptiness test is why the trait says scratch must be empty on entry.
+
+On a backslash, the run before it is appended to scratch, the escape is
+decoded into scratch, and `start` moves past it. From then on the string is in
+scratch and the closing quote takes the `Copied` branch.
+
+The bound on `F` is the hard line. `for<'f> FnOnce(&'s Self, &'f [u8]) ->
+Result<&'f T>` says the closure must work for *any* lifetime `'f`, because it
+is called with input that lives for `'a` in one branch and with scratch that
+lives for `'s` in the other. A single named lifetime could not describe both.
+
+In the last arm the index is advanced before the error is built, so the
+reported column is that of the control character.
+"""
+
+[[annotation]]
+id    = "json-read-0022"
+file  = "src/read.rs"
+lines = "541-556"
+title = "SliceRead::next — and a comment about ten percent"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["inlining", "option"]
+body = """
+`SliceRead` is sealed in, and then `Read<'a> for SliceRead<'a>` ties the
+trait's `'de` to the slice's own lifetime. This is the line that makes
+borrowed deserialization possible: data the reader lends out is valid for as
+long as the input.
+
+`next` is a bounds check, a load and an increment, and it always returns
+`Ok`. The `Result` is there for the stream reader's sake.
+
+The comment records a measurement. The version written with `get` and `map`
+compiled to slower code than the explicit `if`, so the explicit form stayed.
+You will see this crate prefer a plain branch to an adapter chain in every hot
+path, and this is the reason given.
+"""
+
+[[annotation]]
+id    = "json-read-0023"
+file  = "src/read.rs"
+lines = "557-567"
+title = "SliceRead::peek — reading without moving"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["inlining", "option"]
+body = """
+The same load as `next` without the increment, and the same remark about the
+adapter version being slower.
+
+Nothing is mutated. The method takes `&mut self` only because the trait
+requires it for the stream reader, which must store what it peeked. The slice
+reader's `peek` would compile with `&self`.
+"""
+
+[[annotation]]
+id    = "json-read-0024"
+file  = "src/read.rs"
+lines = "568-572"
+title = "SliceRead::discard — one increment, no check"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["inlining"]
+body = """
+`self.index += 1`, with no bounds check. This is the trait's precondition
+doing real work: `discard` is only valid after a `peek`, and the parser only
+calls it after a `peek` that returned `Some`. If that holds, the index was in
+bounds.
+
+If a caller breaks the rule, nothing unsafe happens. The index goes one past
+the end, and every other method compares it against the length before
+indexing.
+"""
+
+[[annotation]]
+id    = "json-read-0025"
+file  = "src/read.rs"
+lines = "573-586"
+title = "SliceRead positions — why peek_position adds one"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["custom-errors"]
+body = """
+`position` asks for the position of `self.index`, which after a `next` is one
+past the byte just consumed. `position_of_index` turns that into a one-based
+column for the consumed byte.
+
+`peek_position` has to produce the same kind of answer for a byte that has not
+been consumed, so it asks about `index + 1`. The `min` with the slice length
+covers the case the comment names: the last call was really `next`, it
+returned the final byte, and `index + 1` would be past the end.
+
+`byte_offset` is the index itself, the count of bytes consumed so far.
+"""
+
+[[annotation]]
+id    = "json-read-0026"
+file  = "src/read.rs"
+lines = "587-597"
+title = "SliceRead parse_str and parse_str_raw — two closures over one loop"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings", "closures"]
+body = """
+Both methods are one call to `parse_str_bytes`, differing in two arguments.
+
+`parse_str` validates and converts with `as_str`, which runs `str::from_utf8`
+on the bytes. A slice has no guarantee about its contents, so this check is
+necessary. `parse_str_raw` does not validate and its closure returns the bytes
+unchanged.
+
+Unlike the stream reader's versions there is no `.map(Reference::Copied)`.
+`parse_str_bytes` already chose the variant, and here the result can be
+`Borrowed`.
+"""
+
+[[annotation]]
+id    = "json-read-0027"
+file  = "src/read.rs"
+lines = "598-619"
+title = "SliceRead::ignore_str — skipping a string with the same scanner"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+The loop from `parse_str_bytes` with every use of scratch removed. It still
+uses `skip_to_escape`, so skipping a long string is as fast as reading one.
+
+Compare the control-character arm with its counterpart. There the index is
+advanced before the error is returned. Here it is not. The consequence is
+visible in the message: for the same input, a control character in a string
+that is being ignored is reported one column earlier than in a string that is
+being read. The parse fails either way.
+"""
+
+[[annotation]]
+id    = "json-read-0028"
+file  = "src/read.rs"
+lines = "620-636"
+title = "SliceRead::decode_hex_escape — four bytes by slice pattern"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "inlining"]
+body = """
+This is the reason `decode_hex_escape` is a trait method. The stream reader
+pulls four bytes with four fallible calls. The slice reader matches the rest
+of the input against `[a, b, c, d, ..]`, which binds four bytes with a single
+length check.
+
+If fewer than four bytes remain, the index is moved to the end before the
+error is built, so the reported position is the end of the input and the
+message says the string ended early.
+
+A successful match advances by four and uses the shared lookup. Bytes that are
+not hex digits give `InvalidEscape`.
+"""
+
+[[annotation]]
+id    = "json-read-0029"
+file  = "src/read.rs"
+lines = "637-656"
+title = "SliceRead raw buffering — a start index instead of a buffer"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg", "strings"]
+body = """
+The slice reader already has the bytes. Beginning to buffer is remembering
+`index`, and ending is slicing from that index to the current one. Nothing is
+copied, and the visitor receives a `BorrowedRawDeserializer` holding a `&str`
+that lives as long as the input. That is what makes `&'de RawValue` possible.
+
+The bytes do have to be checked. A value that parsed as JSON can still contain
+invalid UTF-8 inside a string that was skipped, since skipping does not
+validate text. `str::from_utf8` catches that here.
+"""
+
+[[annotation]]
+id    = "json-read-0030"
+file  = "src/read.rs"
+lines = "657-667"
+title = "SliceRead::set_failed — truncating the input"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["zero-cost", "inlining"]
+body = """
+The constant is `false`, so `StreamDeserializer` compiles without its flag
+check for this reader.
+
+`set_failed` ignores the flag it is handed. It replaces `self.slice` with the
+part before `index`. After that, `index == slice.len()`, every `next` and
+`peek` returns `None`, and the iterator ends through its ordinary
+end-of-input path. The failure is stored in the data.
+"""
+
+[[annotation]]
+id    = "json-read-0031"
+file  = "src/read.rs"
+lines = "668-680"
+title = "StrRead::new — keeping the str only when it is needed"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg", "strings"]
+body = """
+`StrRead` is built from a `SliceRead` over the string's bytes. The `&str`
+itself is kept only under `raw_value`, where `end_raw_buffering` needs
+something it can slice as text.
+
+Without that feature, the fact that the input was a string is not stored
+anywhere. It is carried by the type, and the type's impl is where it is used.
+"""
+
+[[annotation]]
+id    = "json-read-0032"
+file  = "src/read.rs"
+lines = "681-708"
+title = "StrRead delegates six methods unchanged"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["inlining"]
+body = """
+Six methods, each forwarding to `self.delegate`. Bytes, lookahead and
+positions are the same for a string as for the slice under it.
+
+This is written out by hand because Rust has no delegation syntax, and the
+`#[inline]` attributes mean the wrapper should cost nothing after
+optimization. The only method of this impl with a body of its own is the next
+one.
+"""
+
+[[annotation]]
+id    = "json-read-0033"
+file  = "src/read.rs"
+lines = "709-717"
+title = "StrRead::parse_str — the one check a str lets you skip"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["unsafe", "strings", "closures"]
+body = """
+This is why `StrRead` exists. It calls the slice reader's `parse_str_bytes`
+with a closure that converts bytes to `&str` using `from_utf8_unchecked`.
+
+The comment is the safety argument, and it has two halves because there are
+two sources of bytes. A borrowed result is a sub-slice of the original `&str`.
+The scanner only stops at ASCII bytes, which never fall inside a multi-byte
+sequence, so the sub-slice is valid. A copied result is made of such runs plus
+the output of escapes, and the validating escape path only pushes well-formed
+encodings.
+
+The `unsafe` is sound only while both of those stay true. In particular it
+relies on `validate` being `true` here, since the non-validating path can push
+a lone surrogate.
+"""
+
+[[annotation]]
+id    = "json-read-0034"
+file  = "src/read.rs"
+lines = "718-732"
+title = "StrRead delegates the rest of the string methods"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings"]
+body = """
+`parse_str_raw`, `ignore_str` and `decode_hex_escape` forward to the slice
+reader. None of them produces a `&str`, so knowing the input is UTF-8 buys
+nothing and there is nothing to override.
+"""
+
+[[annotation]]
+id    = "json-read-0035"
+file  = "src/read.rs"
+lines = "733-759"
+title = "StrRead raw buffering — slicing the str, with no check"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg", "strings"]
+body = """
+Here is the use of the `data` field. The slice reader's version of this
+method slices bytes and validates them. This one slices the original `&str`
+between the same two indices and skips validation, because a sub-string of a
+`&str` is a `&str`.
+
+It reaches into `self.delegate` for both indices, which works because the
+fields are private to the module, not to the type.
+
+The slicing would panic if an index fell inside a multi-byte character. It
+cannot: a JSON value begins and ends on ASCII bytes. `set_failed` and the
+constant are the slice reader's.
+"""
+
+[[annotation]]
+id    = "json-read-0036"
+file  = "src/read.rs"
+lines = "760-830"
+title = "Read for &mut R — a reader you can lend"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["blanket-impls", "generic-params", "borrowing"]
+body = """
+A blanket impl: any `&mut R` is a reader if `R` is. Every method forwards with
+`R::method(self)`, and the constant forwards as well.
+
+This is the standard trick for traits whose methods take `&mut self`.
+`Deserializer::new` takes its reader by value. With this impl, code that owns
+a reader can build a `Deserializer` over `&mut reader`, use it, and still have
+the reader afterwards. Nothing inside the crate needs it. It is there for
+callers.
+
+The explicit `R::next(self)` form is deliberate. Written as `self.next()`,
+method resolution could pick this same impl and recurse.
+
+`Sealed` needs its own blanket impl first, or the supertrait bound on `Read`
+would not be satisfied.
+"""
+
+[[annotation]]
+id    = "json-read-0037"
+file  = "src/read.rs"
+lines = "831-835"
+title = "Fused — a marker for readers that stay finished"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["marker-types", "sealed-traits", "traits"]
+body = """
+`Fused` has no methods. It is implemented for `SliceRead` and `StrRead` and
+not for `IoRead`.
+
+`StreamDeserializer` implements `FusedIterator` only where `R: Fused`. That
+standard-library trait promises that once `next` returns `None` it always
+will. A slice reader keeps that promise by construction, since its input was
+truncated. A stream could, in principle, produce more bytes later, so the
+promise is not made for it.
+"""
+
+[[annotation]]
+id    = "json-read-0038"
+file  = "src/read.rs"
+lines = "836-839"
+title = "is_escape — the three-way test, in one expression"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["strings"]
+body = """
+A byte is interesting if it is a quote, a backslash, or, when the flag is
+set, below `0x20`. This is the scalar form of the test `skip_to_escape`
+performs a word at a time.
+
+The name is slightly off. A control character is not an escape. It is a byte
+that JSON says must be *written* as an escape, which is why finding one raw is
+an error for validating callers.
+"""
+
+[[annotation]]
+id    = "json-read-0039"
+file  = "src/read.rs"
+lines = "840-871"
+title = "Four helpers — end of input as an error, and where errors are built"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["generic-params", "sized-bound", "result", "closures"]
+body = """
+`next` and `peek` return `Ok(None)` at end of input. Inside a string that is
+always wrong, so `next_or_eof` and `peek_or_eof` turn `None` into
+`EofWhileParsingString`.
+
+`error` is where this file constructs every syntax error. It asks the reader
+for its position and builds `Error::syntax`. It is generic in `T` so that it
+can be the tail expression of a function returning any `Result<T>`.
+
+`as_str` is the UTF-8 check. `from_utf8`'s own error says where the bad byte
+is and that detail is dropped: the `or_else` closure replaces it with an
+error at the reader's current position.
+
+Three of these have `R: ?Sized`, which lets them be called through a
+reference to an unsized reader. `as_str` does not, and nothing calls it that
+way.
+"""
+
+[[annotation]]
+id    = "json-read-0040"
+file  = "src/read.rs"
+lines = "872-896"
+title = "parse_escape — eight letters and a delegation"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "strings"]
+body = """
+Called after a backslash. The next byte selects the escape, and for eight of
+the nine legal ones the result is a single byte pushed to scratch.
+
+`\\/` is in the list. JSON allows a forward slash to be escaped and nothing
+requires it, so a parser must accept it and a serializer need not produce it.
+`\\b` and `\\f` are backspace and form feed, written as hex because Rust has no
+short escapes for them.
+
+`\\u` is the only arm that returns directly. Everything else falls through to
+the `Ok(())`. Any other byte after a backslash is `InvalidEscape`. There is no
+lenient mode.
+"""
+
+[[annotation]]
+id    = "json-read-0041"
+file  = "src/read.rs"
+lines = "897-923"
+title = "parse_unicode_escape — the easy case, and a misnamed error"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings", "inlining"]
+body = """
+`\\uXXXX` gives a 16-bit number. If it is not a surrogate, it is a code point
+in the Basic Multilingual Plane, and it is encoded straight into scratch.
+
+Surrogates are how JSON, by way of UTF-16, writes code points above
+`U+FFFF`: a leading unit in `D800–DBFF` followed by a trailing unit in
+`DC00–DFFF`. The first check rejects a trailing unit that arrives first.
+
+The error it raises is `LoneLeadingSurrogateInHexEscape`, and the `XXX`
+comment says what is wrong with that: this is a lone *trailing* surrogate. The
+variant name and its message are public behaviour now, so `"\\udc00"` reports
+"lone leading surrogate in hex escape" and will keep doing so.
+
+`#[cold]` marks the whole function as unlikely, which keeps it out of the way
+of the eight common escapes.
+"""
+
+[[annotation]]
+id    = "json-read-0042"
+file  = "src/read.rs"
+lines = "924-974"
+title = "The surrogate pair — and what the non-validating path lets through"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings", "pattern-matching"]
+body = """
+From here `n` is a leading surrogate and a second escape must follow. The
+code checks for `\\`, then `u`, then decodes four more digits, and each step has
+two outcomes depending on `validate`.
+
+When validating, anything other than a well-formed trailing surrogate is an
+error. When not validating, which is the `deserialize_bytes` path, the lone
+surrogate is encoded as it stands and parsing continues. That produces bytes
+that are not valid UTF-8, which is permitted because the caller asked for
+bytes.
+
+Two details are easy to miss. If the byte after the backslash is not `u`, the
+backslash has been consumed and begins a different escape, so `parse_escape`
+is called to finish it. The comment explains why that recursion is bounded.
+And if the second escape is itself a leading surrogate, the first is emitted
+alone and the loop restarts with the second, which is what the `loop` is for.
+
+The last lines are the UTF-16 decoding formula: ten bits from each unit, plus
+`0x10000`.
+"""
+
+[[annotation]]
+id    = "json-read-0043"
+file  = "src/read.rs"
+lines = "975-1022"
+title = "push_wtf8_codepoint — writing UTF-8 into spare capacity"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["unsafe", "collections", "pattern-matching"]
+body = """
+This encodes one code point as one to four bytes at the end of a `Vec<u8>`.
+"WTF-8" is UTF-8 with the rule against surrogates removed, which the
+non-validating path needs.
+
+ASCII is pushed normally. For everything else the function reserves four
+bytes and writes through a raw pointer to the first byte past the vector's
+length. The `SAFETY` comment states the three facts the block depends on: the
+capacity exists after `reserve`, every arm writes exactly `encoded_len` bytes,
+and that length is at most four. Then `set_len` makes the bytes part of the
+vector.
+
+Each arm writes the leading byte and any middle bytes. The final continuation
+byte has the same form in all three cases, so it is written once after the
+`match`, at `encoded_len - 1`.
+
+The doc comment gives the motive: this is faster than going through
+`String::push`, and it accepts values a `char` cannot hold.
+"""
+
+[[annotation]]
+id    = "json-read-0044"
+file  = "src/read.rs"
+lines = "1023-1049"
+title = "ignore_escape — consuming an escape without judging it"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "sized-bound"]
+body = """
+The skipping counterpart of `parse_escape`. The eight simple escapes need no
+action, since their one byte has been consumed.
+
+For `\\u` it consumes four hex digits and stops. It does not pair surrogates
+and does not reject lone ones, and the comment gives the reason: whether a
+lone surrogate is legal depends on whether the string would have been read as
+text or as bytes, and a skipped string is neither.
+
+The hex digits are still checked, and an unknown escape letter is still an
+error. Skipped data has to be well-formed JSON even where its content is not
+inspected.
+"""
+
+[[annotation]]
+id    = "json-read-0045"
+file  = "src/read.rs"
+lines = "1050-1074"
+title = "Two hex tables, built at compile time"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["zero-cost"]
+body = """
+`decode_hex_val_slow` is the obvious function from a byte to a hex digit.
+`build_hex_table` runs it for all 256 byte values in a `const fn` and stores
+the answers, with `-1` for bytes that are not hex digits.
+
+The `while` loop with a manual counter is the form a `const fn` accepts on
+the compilers this crate supports. A `for` loop would call `Iterator::next`,
+which is a trait method.
+
+There are two tables. `HEX0` holds the digit value and `HEX1` holds it already
+shifted left by four. A two-digit byte is then two lookups and an OR, with no
+shift at run time. The entries are `i16` so that an invalid digit can be a
+negative number that survives being combined, which the next function relies
+on.
+"""
+
+[[annotation]]
+id    = "json-read-0046"
+file  = "src/read.rs"
+lines = "1075-1089"
+title = "decode_four_hex_digits — four lookups and one sign check"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["zero-cost", "option"]
+body = """
+Four table lookups, widened to `i32`. `a | b` is the high byte and `c | d` the
+low byte of the result.
+
+The trick is in what `-1` does. It has every bit set, so OR-ing it with
+anything gives `-1`, and shifting it left keeps the sign bit set. If any of
+the four digits was invalid, the combined value is negative. Valid digits can
+only produce a value from 0 to `0xFFFF`. One comparison therefore validates
+all four digits at once.
+
+This is the function both readers' `decode_hex_escape` methods end in.
+"""

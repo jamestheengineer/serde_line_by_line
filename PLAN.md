@@ -1247,7 +1247,7 @@ machines in `read.rs` and `ser.rs` refuse large spans.
 | phase | scope | annots | exit criteria |
 |---|---|---:|---|
 | **K1 — Three coverage sources** ✅ | The role moves; `extra_files` in the pin; the front page stops saying "both"; D14 | 0 | `cargo xtask coverage` reports the first two crates unchanged and `serde_json` at 0/18,359 without error; the json walk's crossings still read 1, 0, 2, 1, 1, 2, 3, 1, 10 |
-| **K2 — Vertical slice: `read.rs`** | The byte-level state machine, 1,089 lines, and the refusal case the scope doc named | ~47 | `read.rs` at 100%; its narrative steps retargeted; the density either confirms 23 lines per annotation or moves the estimate before 650 more are written |
+| **K2 — Vertical slice: `read.rs`** ✅ | The byte-level state machine, 1,089 lines, and the refusal case the scope doc named | ~47 | `read.rs` at 100%; its narrative steps retargeted; the density either confirms 23 lines per annotation or moves the estimate before 650 more are written |
 | **K3 — The rest of the engines** | `de.rs`, `ser.rs`, `io/*`, `iter.rs`, `build.rs` | ~224 | the engines at 100%; every `Deserializer` and `Serializer` method leans on its `serde_core` contract by `prereqs` rather than re-explaining it |
 | **K4 — The `Value` tree** | `value/*`, `map.rs`, `number.rs`, `raw.rs` | ~283 | the tree at 100%; `value/de.rs` and `value/ser.rs` read as the second implementation of a surface the reader has seen, not a second transcript |
 | **K5 — `lexical/`** | The float parser, 19 files | ~106 | `lexical/` at 100%; the five constant tables are a table each |
@@ -1280,3 +1280,30 @@ touched the tree hash, the bump, and every place a tree's files are listed.
 The narrative role has no holder now. It stays in the pin's header and in the
 gates, for the reason it stayed after R1: it is the right role for the next
 crate that is walked before anybody decides whether to claim it.
+
+### What K2 shipped
+
+46 annotations over 1,089 lines, `src/read.rs` declared complete, and
+`serde_json` at 5.9%.
+
+**The refusal case did not happen.** The scope doc's upper bound of 780
+assumed a byte-level scanner would want an annotation per branch. `read.rs`
+came in at 23.7 lines each against the projected 23.2. The reason is that the
+file is one trait implemented four times. `Read` is explained once, and
+`IoRead`, `SliceRead`, `StrRead` and `&mut R` are each written as what they do
+differently. `StrRead` delegates nine methods and overrides one, so it is two
+annotations about delegation and one about the `unsafe` that is its reason to
+exist. The estimate stays at ~704.
+
+**All 17 narrative steps fit on the first pass**, against five of thirteen
+needing work in R2. That is not the boundaries being better drawn. It is the
+order of the work: here the walk existed first, so the annotation ranges were
+cut around the stops it had already justified.
+
+**Every behavioural claim was run before it was written.** Three were worth
+it. A control character inside a string is reported one column earlier when
+the string is being skipped than when it is being read, because
+`ignore_str`'s error arm does not advance the index and `parse_str_bytes`'s
+does. `"\udc00"` reports a lone *leading* surrogate, which upstream's own
+`XXX` comment says is the wrong name. And a lone surrogate read as bytes comes
+out as three bytes of WTF-8. None of the three is in the json walk.

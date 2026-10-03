@@ -10,4 +10,6 @@
 # turns both of those on at once.
 source = "serde_json-1.0.151"
 
-complete = []
+complete = [
+    "src/read.rs",
+]
