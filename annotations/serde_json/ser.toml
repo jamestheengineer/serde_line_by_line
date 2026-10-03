@@ -679,9 +679,9 @@ rust_features = ["cfg", "custom-errors"]
 body = """
 Fourteen methods, each returning `invalid_number()`.
 
-`serde_core`'s `Serializer` has no default bodies for these methods, so a
-serializer that supports one input must still spell out its answer to every
-other. This is what that costs.
+`serde_core`'s `Serializer` gives almost none of these methods a default
+body, so a serializer that supports one input must still spell out its
+answer to every other. This is what that costs.
 """
 
 [[annotation]]

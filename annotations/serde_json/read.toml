@@ -30,7 +30,8 @@ file  = "src/read.rs"
 lines = "22-36"
 title = "Read — the parser's whole view of its input"
 kind  = "trait-item"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["traits", "sealed-traits", "lifetime-de", "supertraits"]
 body = """
 This trait is everything `Deserializer` knows about where bytes come from.
@@ -202,7 +203,8 @@ file  = "src/read.rs"
 lines = "146-180"
 title = "Three readers, and what each one stores"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["cfg", "lifetimes", "generic-params"]
 body = """
 The three struct definitions are worth reading side by side, because the
@@ -231,7 +233,8 @@ file  = "src/read.rs"
 lines = "181-187"
 title = "private::Sealed — a public trait nobody else can implement"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["sealed-traits", "modules", "visibility"]
 body = """
 `Read` is `pub` and has `private::Sealed` as a supertrait. `Sealed` is `pub`
@@ -300,7 +303,8 @@ file  = "src/read.rs"
 lines = "252-299"
 title = "IoRead next and peek — one byte of lookahead, stored"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["lifetime-de", "option", "cfg", "inlining"]
 body = """
 `impl<'de, R> Read<'de> for IoRead<R>` introduces `'de` and never constrains
@@ -397,7 +401,8 @@ file  = "src/read.rs"
 lines = "410-420"
 title = "SliceRead::new — an index that starts at zero"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["lifetimes"]
 body = """
 The slice reader is a borrowed slice and a cursor. `index` is the position of
@@ -523,7 +528,8 @@ file  = "src/read.rs"
 lines = "541-556"
 title = "SliceRead::next — and a comment about ten percent"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["inlining", "option"]
 body = """
 `SliceRead` is sealed in, and then `Read<'a> for SliceRead<'a>` ties the
@@ -546,7 +552,8 @@ file  = "src/read.rs"
 lines = "557-567"
 title = "SliceRead::peek — reading without moving"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["inlining", "option"]
 body = """
 The same load as `next` without the increment, and the same remark about the
@@ -563,7 +570,8 @@ file  = "src/read.rs"
 lines = "568-572"
 title = "SliceRead::discard — one increment, no check"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["inlining"]
 body = """
 `self.index += 1`, with no bounds check. This is the trait's precondition
@@ -797,8 +805,10 @@ file  = "src/read.rs"
 lines = "760-830"
 title = "Read for &mut R — a reader you can lend"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["blanket-impls", "generic-params", "borrowing"]
+prereqs = ["de-mod-0062"]
 body = """
 A blanket impl: any `&mut R` is a reader if `R` is. Every method forwards with
 `R::method(self)`, and the constant forwards as well.

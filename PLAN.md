@@ -1252,7 +1252,7 @@ machines in `read.rs` and `ser.rs` refuse large spans.
 | **K4 — The `Value` tree** ✅ | `value/*`, `map.rs`, `number.rs`, `raw.rs` | ~283 | the tree at 100%; `value/de.rs` and `value/ser.rs` read as the second implementation of a surface the reader has seen, not a second transcript |
 | **K5 — `lexical/`** ✅ | The float parser, 19 files | ~106 | `lexical/` at 100%; the five constant tables are a table each |
 | **K6 — Plumbing** ✅ | `lib.rs`, `error.rs`, `macros.rs` | ~44 | **every line of `serde_json` claimed**; all 38 files in its manifest; all 104 narrative steps name a containing annotation |
-| **K7 — Course units** | 8 new units, 22 through 29 (scope §6) | — | the course track spans three crates, walkable start to finish, D8's forward-reference check enforcing across all of them |
+| **K7 — Course units** (1 of 8) | 8 new units, 22 through 29 (scope §6) | — | the course track spans three crates, walkable start to finish, D8's forward-reference check enforcing across all of them |
 | **K8 — Ship** | Three reference file-trees, the restated promise, `README` | — | three figures, no total, and each track honest about what it claims |
 
 K2 is a vertical slice for the reason phase 1 and R2 were. `read.rs` is the
@@ -1321,8 +1321,9 @@ landed at **28.7 and 219**. `de.rs` took 98 over 2,714 lines and `ser.rs` took
 The compression is not the kind the scope doc expected. It predicted that
 `de.rs` and `value/de.rs` would compress against each other, which is K4's to
 find out. What compressed here is repetition *inside* `ser.rs`, where
-`serde_core`'s `Serializer` has no default method bodies. A serializer that
-accepts one kind of input still has to answer for all thirty. Eleven key
+`serde_core`'s `Serializer` gives almost none of its methods a default body.
+A serializer that accepts one kind of input still has to answer for nearly
+thirty. Eleven key
 methods that quote an integer are 187 lines and one annotation. Two emitter
 types that reject everything but a string are 360 lines and nine. The
 `Deserializer` side generated its equivalents with a macro and cost a
@@ -1486,3 +1487,47 @@ lines, and `make_error` at the bottom of it parses a line and column back out
 of its own `Display` output. A custom error whose message ends in
 " at line 3 column 4" reports `line() == 3`. The json walk's unit 08 is
 titled for this. The reference track now has the annotation that says why.
+
+### What K7 has shipped so far: unit 22
+
+One unit of the eight, and the work stops here by instruction rather than by
+exhaustion. **Unit 22, "Implementing a Deserializer: bytes in, visitor calls
+out"**, is written, with 37 `serde_json` annotations tagged to it from
+`read.rs` and `de.rs`. The course track is 22 units and 377 annotations.
+
+**What it teaches, and why it is first.** Units 1–14 read `Deserializer` as a
+contract and units 15–21 generate calls into it. Nothing in the course until
+now implements it. The unit is built on one line of `de.rs`: the trait is
+implemented for `&mut Deserializer<R>`, because its methods take `self` by
+value and a parser has to survive its first value. §2 said `serde_core`
+teaches almost nothing about ownership in ordinary imperative code and unit 6
+was written from scratch for that reason. This unit is the first to supply it
+from an annotated crate, which is what the scope doc's §6 table promised.
+
+**The cross-crate DAG gained a third crate.** Twelve of the tagged
+annotations declare prereqs, ten of them pointing into `serde_core`: the
+`Deserializer` impl leans on the trait's declaration, the literal arms on
+`Visitor`, the access types on `SeqAccess` and `MapAccess`, `from_trait` on
+`Deserialize::deserialize`, and `from_reader` on `DeserializeOwned`.
+`reading_order` gained two qualified entries. D8's check passed without
+change.
+
+**K3's exit criterion is met for these 37 and not for the rest.** It asked
+that every `Deserializer` and `Serializer` method lean on its `serde_core`
+contract by `prereqs` rather than re-explaining it. The annotations written in
+K2–K6 name those contracts in prose and carry no `prereqs`. The edges are
+being added as each unit tags its annotations, which is how R6 did it, and
+that leaves the engines' untagged annotations without them until units 23–29
+reach them.
+
+**The other seven units are not registered.** A planned unit needs a
+`supplement` value, and the gate checks `none` and `partial` against what is
+tagged. Registering seven placeholders would mean claiming seven labels
+nobody has checked. From the scope doc, in order: writing a `Serializer`;
+strings, escapes and borrowing from the input; numbers and round-tripping;
+the `Value` tree and the `json!` muncher; errors that carry a position;
+feature-gated engineering; and `unsafe` with its invariants written down.
+Unit 22 deliberately leaves the string and number arms' machinery untagged
+for the two units that will want them.
+
+**Still to do in §14:** units 23–29, and K8.

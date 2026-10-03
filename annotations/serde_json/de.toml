@@ -34,8 +34,10 @@ file  = "src/de.rs"
 lines = "30-40"
 title = "Deserializer — a reader, a buffer and a depth budget"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["generic-params", "cfg"]
+prereqs = ["json-read-0002"]
 body = """
 Three fields in a default build.
 
@@ -60,7 +62,8 @@ file  = "src/de.rs"
 lines = "41-70"
 title = "Deserializer::new — the general constructor"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["lifetime-de", "where-clauses", "cfg"]
 body = """
 `new` accepts any reader and fills in the defaults: an empty scratch buffer,
@@ -82,7 +85,8 @@ file  = "src/de.rs"
 lines = "71-100"
 title = "from_reader, from_slice, from_str — three impl blocks, three concrete types"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["generic-params", "lifetimes", "cfg"]
 body = """
 Each constructor lives in its own `impl` block for one concrete reader type.
@@ -161,7 +165,8 @@ file  = "src/de.rs"
 lines = "142-152"
 title = "end — the check that nothing follows the value"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["result"]
 body = """
 Parsing a value stops at its last byte. `end` is the separate step that makes
@@ -227,7 +232,8 @@ file  = "src/de.rs"
 lines = "219-238"
 title = "Five one-line wrappers, and a null byte that stands for end of input"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["option", "result", "visibility"]
 body = """
 The parser's own names for the reader's operations. `peek`, `eat_char` and
@@ -271,7 +277,8 @@ file  = "src/de.rs"
 lines = "253-267"
 title = "parse_whitespace — skip, then report what stopped you"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["pattern-matching", "option"]
 body = """
 JSON permits exactly four whitespace bytes: space, newline, tab and carriage
@@ -432,7 +439,8 @@ file  = "src/de.rs"
 lines = "445-461"
 title = "parse_ident — matching the rest of a literal"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["iterators", "option"]
 body = """
 `null`, `true` and `false` are recognised by their first byte. The caller
@@ -882,7 +890,8 @@ file  = "src/de.rs"
 lines = "1061-1071"
 title = "parse_object_colon — one byte, three outcomes"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["pattern-matching"]
 body = """
 After an object key there must be a colon. This skips whitespace and checks.
@@ -899,7 +908,8 @@ file  = "src/de.rs"
 lines = "1072-1101"
 title = "end_seq and end_map — closing brackets, and the trailing comma"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["pattern-matching", "custom-errors"]
 body = """
 These run after a visitor has finished with a sequence or map, and they
@@ -1088,7 +1098,8 @@ file  = "src/de.rs"
 lines = "1372-1388"
 title = "check_recursion! — spend one level of depth around a block"
 kind  = "macro-def"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["macro-rules", "macro-hygiene", "macro-repetition"]
 body = """
 This macro wraps the code that descends into an array or object. It
@@ -1117,8 +1128,10 @@ file  = "src/de.rs"
 lines = "1389-1403"
 title = "Deserializer for &mut Deserializer<R> — and the first thing every value does"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["traits", "lifetime-de", "associated-types", "inlining"]
+prereqs = ["de-mod-0029"]
 body = """
 The trait is implemented for a mutable reference, not for the struct. The
 methods of `serde_core`'s `Deserializer` take `self` by value. If the struct
@@ -1140,8 +1153,10 @@ file  = "src/de.rs"
 lines = "1404-1419"
 title = "null, true, false — one byte decides, then the rest is checked"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["pattern-matching"]
+prereqs = ["de-mod-0043"]
 body = """
 The first three arms of the central `match`. A single peeked byte selects the
 arm, the byte is consumed, and `parse_ident` verifies the remaining letters.
@@ -1198,8 +1213,10 @@ file  = "src/de.rs"
 lines = "1433-1457"
 title = "The array and object arms — where the parser recurses"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["pattern-matching", "result"]
+prereqs = ["json-de-0048", "de-mod-0060"]
 body = """
 An opening bracket starts a container. Inside `check_recursion!` the bracket
 is consumed and the visitor is given an access object that borrows the
@@ -1222,7 +1239,8 @@ file  = "src/de.rs"
 lines = "1458-1468"
 title = "The tail of deserialize_any — positioning errors that arrived without one"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["custom-errors", "result"]
 body = """
 An `Ok` passes through. An `Err` goes through `fix_position`.
@@ -1238,7 +1256,8 @@ file  = "src/de.rs"
 lines = "1469-1499"
 title = "deserialize_bool — the shape of every typed method"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["pattern-matching", "result"]
 body = """
 This is the first method where the caller has said what it expects. Compare
@@ -1355,8 +1374,10 @@ file  = "src/de.rs"
 lines = "1671-1686"
 title = "deserialize_option — null is None, anything else is Some"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["option", "pattern-matching"]
+prereqs = ["de-mod-0029"]
 body = """
 The whole policy is in the doc comment. A `null` is consumed and reported as
 `visit_none`. Anything else is `visit_some(self)`, which gives the visitor the
@@ -1414,7 +1435,8 @@ file  = "src/de.rs"
 lines = "1737-1787"
 title = "seq, tuple and tuple_struct — all arrays, and nobody checks the length here"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["pattern-matching"]
 body = """
 `deserialize_seq` accepts `[` and does what the array arm of `deserialize_any`
@@ -1434,7 +1456,8 @@ file  = "src/de.rs"
 lines = "1788-1819"
 title = "deserialize_map — an object, through MapAccess"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["pattern-matching"]
 body = """
 The object counterpart of `deserialize_seq`. A `{` is consumed inside the
@@ -1451,7 +1474,8 @@ file  = "src/de.rs"
 lines = "1820-1867"
 title = "deserialize_struct — an object, or an array in field order"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["pattern-matching"]
 body = """
 A struct is normally read from an object, with `visit_map`. This method also
@@ -1518,7 +1542,8 @@ file  = "src/de.rs"
 lines = "1919-1929"
 title = "SeqAccess — a borrowed parser and one bool"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["lifetimes", "generic-params"]
 body = """
 The object a visitor uses to pull elements out of an array. It holds a
@@ -1538,8 +1563,10 @@ file  = "src/de.rs"
 lines = "1930-1971"
 title = "next_element_seed — commas, and a helper that is not generic over T"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["traits", "generic-params", "monomorphization"]
+prereqs = ["de-mod-0060"]
 body = """
 `serde_core`'s `SeqAccess` has one required method and this is it. It returns
 `Some(element)` or `None` when the array ends.
@@ -1565,7 +1592,8 @@ file  = "src/de.rs"
 lines = "1972-1982"
 title = "MapAccess — the same two fields"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["lifetimes", "generic-params"]
 body = """
 Identical in shape to `SeqAccess`: a borrowed parser and a `first` flag.
@@ -1579,8 +1607,10 @@ file  = "src/de.rs"
 lines = "1983-2026"
 title = "next_key_seed — a key must be a string, and is read by a different deserializer"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["traits", "monomorphization", "pattern-matching"]
+prereqs = ["de-mod-0064"]
 body = """
 The same structure as for sequences, with one more rule. Wherever a key is
 expected, the next byte must be `"`. Anything else is `KeyMustBeAString`.
@@ -1601,8 +1631,10 @@ file  = "src/de.rs"
 lines = "2027-2036"
 title = "next_value_seed — a colon, then an ordinary value"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["traits"]
+prereqs = ["de-mod-0064"]
 body = """
 After a key comes a colon and then a value. The colon is checked and
 consumed, and the value is read with the main deserializer.
@@ -2041,8 +2073,10 @@ file  = "src/de.rs"
 lines = "2507-2519"
 title = "from_trait — the three public functions, in four lines"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["generic-params", "lifetime-de"]
+prereqs = ["de-mod-0020"]
 body = """
 The private function behind `from_str`, `from_slice` and `from_reader`.
 
@@ -2112,8 +2146,10 @@ file  = "src/de.rs"
 lines = "2622-2631"
 title = "from_reader — and why its bound is DeserializeOwned"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["cfg", "where-clauses", "lifetime-de"]
+prereqs = ["de-mod-0022"]
 body = """
 The body is one line. The signature is the lesson.
 
@@ -2133,8 +2169,10 @@ file  = "src/de.rs"
 lines = "2632-2673"
 title = "from_slice — the input's lifetime becomes the type's"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["lifetime-de", "where-clauses"]
+prereqs = ["de-mod-0019"]
 body = """
 Here the bound is `T: de::Deserialize<'a>`, with `'a` the lifetime of the
 slice. `T` may hold references into `v`, and the borrow checker will keep `v`
@@ -2151,7 +2189,8 @@ file  = "src/de.rs"
 lines = "2674-2714"
 title = "from_str — the entry point most programs use"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "22-implementing-a-deserializer"
 rust_features = ["lifetime-de", "where-clauses", "strings"]
 body = """
 The same signature shape as `from_slice`, over `&'a str`.

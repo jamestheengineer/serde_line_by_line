@@ -18,6 +18,11 @@
 # entries are qualified with the crate name, because both crates have a
 # `src/lib.rs` and a bare path means the first source (D12).
 #
+# Units from 22 draw from `serde_json` (PLAN.md §14, K7), qualified the same
+# way. Unit 22 is the first of eight the scope doc lists; the other seven are
+# not registered until they are written, because a planned unit with nothing
+# tagged to it would have to claim a `supplement` nobody has checked.
+#
 # `status` is "written" once the unit's framing and its supplementary material
 # both exist; "planned" until then. The coverage gate warns on planned units so
 # the remaining work stays visible, and the reader sees the label too.
@@ -76,6 +81,10 @@ reading_order = [
     "serde_derive:src/de/enum_internally.rs",
     "serde_derive:src/de/enum_adjacently.rs",
     "serde_derive:src/de/enum_untagged.rs",
+
+    # serde_json, bottom up: where bytes come from, then what they mean.
+    "serde_json:src/read.rs",
+    "serde_json:src/de.rs",
 ]
 
 [[unit]]
@@ -1111,4 +1120,76 @@ fields identically whatever encloses them. `deserialize_seq` serves tuples and
 structs. Four representations, three reading paths — which is why the reference
 track claims 4,728 lines of codegen in 261 annotations rather than the 338 a
 count of `quote!` blocks predicted.
+"""
+
+[[unit]]
+id = "22-implementing-a-deserializer"
+title = "Implementing a Deserializer: bytes in, visitor calls out"
+supplement = "none"
+status = "written"
+prereqs = ["03-associated-types", "06-ownership-and-borrowing", "08-lifetimes-de-and-zero-copy"]
+rust_features = ["traits", "sealed-traits", "lifetime-de", "borrowing", "pattern-matching", "generic-params"]
+examples = ["json_document"]
+summary = """
+Units 3 and 8 read `Deserializer` as a contract. This unit reads one being
+kept: a JSON parser, from the trait that hands it bytes to the four lines
+behind `from_str`. Most of what there is to learn is about who holds the
+`&mut`.
+"""
+body = """
+Everything so far has looked at `Deserializer<'de>` from the side that
+declares it. `serde_core` says what a format must provide and never provides
+it. `serde_json` is a format, and its `de.rs` is the first place in this
+course where those methods have bodies.
+
+**Two layers, and the lower one is sealed.** The parser does not read from a
+slice or a stream. It reads from a `Read<'de>`, a trait with a byte-at-a-time
+core of `next`, `peek` and `discard`, and three implementors. The trait is
+public and cannot be implemented outside the crate, because its supertrait
+lives in a private module. That is the sealed-trait pattern, and the reason
+for it is here in the doc comments: every method has an informal contract,
+such as "only valid after a call to peek", that upstream wants to stay free
+to change.
+
+**The trait is implemented for `&mut Deserializer<R>`, not for the struct.**
+This is the line the unit turns on. Every method of `serde_core`'s
+`Deserializer` takes `self` by value. If the struct implemented the trait,
+reading one value would consume the parser. Implementing it for a mutable
+reference means each nested value gets a re-borrow, written `&mut *self.de`,
+and the parser is there again when the borrow ends. Unit 6 had to teach
+`&mut` from written examples, because `serde_core` has almost no code that
+passes one around, and it ended on the observation that a method taking
+`self` by value consumes what it is called on. This file is what a format
+does about that, and it does it on every path.
+
+**One peeked byte decides.** `deserialize_any` skips whitespace, looks at the
+next byte without consuming it, and matches. `n`, `t` and `f` are the three
+literals, a digit or a minus sign is a number, a quote is a string, and a
+bracket or brace opens a container. Seven patterns cover the whole grammar.
+The typed methods, `deserialize_bool` and the rest, are the same frame with
+one arm kept and a type error for everything else.
+
+**The recursion goes through the visitor.** For an array, the parser does not
+loop over elements. It gives the visitor a `SeqAccess` that borrows the
+parser, and the visitor pulls. Each pull is `seed.deserialize(&mut *self.de)`,
+a call back into the impl you are reading. A nested document is therefore a
+nested call stack, with the type being built in control of when the parser
+advances. `check_recursion!` puts a budget of 128 on that depth.
+
+**Punctuation lives in the access objects.** `SeqAccess` and `MapAccess` each
+hold the borrowed parser and one `bool`, `first`. That flag is all the state a
+comma-separated list needs. The comma rules sit in a nested function that is
+generic over the reader and not over the element type, so the compiler emits
+them once per reader instead of once per type in your program.
+
+Then read `from_trait` last. It is four lines: build a `Deserializer`, call
+`T::deserialize(&mut de)`, call `end`, return. The second of those is where
+control passes to the type, and it does not come back until the value is
+complete.
+
+Strings and numbers are passed over here. Each arm of the central match that
+handles them is in this unit, and the machinery behind each is not: a string
+may or may not be borrowed from the input, and a number may or may not fit in
+an integer, and each of those questions has enough in it to be read on its
+own.
 """

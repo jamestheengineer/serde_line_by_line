@@ -18,7 +18,7 @@
   <p class="lede">
     The same annotations as the reference track, ordered by what has to be
     understood first. {{ total_units }} units, {{ course_annotations }}
-    annotations drawn from across both annotated crates.
+    annotations drawn from across the annotated crates.
   </p>
   <p class="lede small">
     Units 1&ndash;14 are read out of <code>serde_core</code>, which teaches
@@ -26,8 +26,11 @@
     crate in the ecosystem, and teaches ordinary imperative Rust hardly at all.
     Units 15&ndash;21 are read out of <code>serde_derive</code> and are about
     writing a procedural macro: spans, an AST of your own, an attribute
-    language, and inferring the bounds of an impl you are generating. Units
-    neither crate can supply are written from scratch and labelled
+    language, and inferring the bounds of an impl you are generating. From
+    unit 22 the source is <code>serde_json</code>, the first of the three that
+    is a format: its units are about keeping the contracts the first fourteen
+    declared, and that part of the track is still being written. Units no
+    crate can supply are written from scratch and labelled
     <b>supplementary</b> rather than dressed up as something they demonstrate.
   </p>
   <div class="progress">
@@ -63,9 +66,10 @@
   </p>
   <p>
     <a href="{{ root }}json/index.html">The json track</a>
-    &mdash; neither annotated crate is a data format. This one follows a
-    document through <code>serde_json</code> and into a struct, which is where
-    the traits this track teaches finally get called.
+    &mdash; this track reads <code>serde_json</code> for how a format is
+    written. The json track follows one document through it and into a struct,
+    which is where the traits the first fourteen units teach finally get
+    called.
   </p>
   <p>
     <a href="{{ root }}index.html">The reference track</a>

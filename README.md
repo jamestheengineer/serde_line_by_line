@@ -31,13 +31,16 @@ the way through and running the expansion in your browser.
 > crates are claimed line by line — `serde_core` at 12,037 of 12,037 and
 > `serde_derive` at 8,975 of 8,975, two hard gates and no number that spans
 > them (PLAN.md §12, [D12](docs/decisions.md)). The course track spans both at
-> 21 units. Two walks follow a path rather than claiming ground: one through
+> 21 units, and has a 22nd read out of `serde_json`. Two walks follow a path
+> rather than claiming ground: one through
 > `serde_derive`, and one through `serde_json` (PLAN.md §13).
 >
 > `serde_json` is the third `coverage` source as of PLAN.md §14. Every line of
 > it is claimed — 18,359 of 18,359, in 566 annotations — and all 38 of its
-> files are named complete. Its course units are being written, and until
-> they are this file leaves the first two crates' sections as they stood.
+> files are named complete. The first of its eight course units is written,
+> unit 22, on implementing a `Deserializer`. The other seven are not, and
+> until they are this file leaves the first two crates' sections as they
+> stood.
 >
 > **Reference** — every line of both annotated crates: `serde_core`'s 19 files
 > and `serde_derive`'s 28, all at 100% and all listed in their
@@ -98,7 +101,7 @@ the way through and running the expansion in your browser.
 > serde_derive-1.0.229        coverage        28     8975  every line claimed
 > serde_json-1.0.151          coverage        38    18359  every line claimed
 > …
-> course track: 21/21 units written
+> course track: 22/22 units written
 > narrative track derive: 9 units, 85 steps, 1649 of serde_derive-1.0.229's 8975 lines cited
 > narrative track json: 9 units, 104 steps, 2258 of serde_json-1.0.151's 18359 lines cited
 > ```
