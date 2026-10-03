@@ -24,6 +24,7 @@ follows from that source's **role** and nothing else (D11):
 |---|---|---|
 | `coverage` | `serde_core` | `annotations/serde_core/`, the narrative steps citing it, and the course registry |
 | `coverage` | `serde_derive` | `annotations/serde_derive/`, and the narrative steps citing it |
+| `coverage` | `serde_json` | `annotations/serde_json/`, and the narrative steps citing it |
 | `glossary` | `syn`, `quote`, `proc-macro2` | the one `glossary/` file that quotes it |
 
 Each coverage source owns its own store directory, which is what makes "rewrite

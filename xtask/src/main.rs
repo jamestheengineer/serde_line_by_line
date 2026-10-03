@@ -115,7 +115,7 @@ fn pin(repo: &Path) -> Result<()> {
         if !root.is_dir() {
             anyhow::bail!("vendor/{} is missing", source.source_id());
         }
-        source.src_tree_sha256 = vendor::tree_hash_of(&root)?;
+        source.src_tree_sha256 = vendor::tree_hash_of(&root, &source.extra_files)?;
         println!("{:<28} {}", source.source_id(), source.src_tree_sha256);
     }
     let path = vendor::pin_path(repo);

@@ -14,8 +14,9 @@ Serde's actual trait definitions — and of
 generates the code calling into it. Explanations side-by-side with the source,
 runnable micro-examples, the derive macro expanding live in the browser, and
 one JSON document followed through
-[`serde_json`](https://crates.io/crates/serde_json) — walked, not claimed — so
-all three crates can be seen working on the same bytes.
+[`serde_json`](https://crates.io/crates/serde_json), so all three crates can be
+seen working on the same bytes. `serde_json` is the third crate being claimed
+line by line, and that work is in progress.
 
 Along the way it teaches Rust twice over: lifetimes, trait design, associated
 types, generic bounds, `macro_rules!` and `no_std` engineering from
@@ -26,12 +27,17 @@ the question most readers actually arrive with — **what does
 `#[derive(Serialize)]` turn into?** — by following one struct and one enum all
 the way through and running the expansion in your browser.
 
-> **Status: live, with four tracks.** Two crates are claimed line by line —
-> `serde_core` at 12,037 of 12,037 and `serde_derive` at 8,975 of 8,975, two
-> hard gates and no number that spans them (PLAN.md §12,
-> [D12](docs/decisions.md)). The course track spans both at 21 units. Two walks
-> follow a path rather than claiming ground: one through `serde_derive`, and
-> one through `serde_json` (PLAN.md §13).
+> **Status: live, with four tracks, and a third crate being claimed.** Two
+> crates are claimed line by line — `serde_core` at 12,037 of 12,037 and
+> `serde_derive` at 8,975 of 8,975, two hard gates and no number that spans
+> them (PLAN.md §12, [D12](docs/decisions.md)). The course track spans both at
+> 21 units. Two walks follow a path rather than claiming ground: one through
+> `serde_derive`, and one through `serde_json` (PLAN.md §13).
+>
+> `serde_json` is the third `coverage` source as of PLAN.md §14 and its
+> reference track is in progress. The front page states how far it has got,
+> counted during the build; this file does not repeat a figure that moves
+> every phase.
 >
 > **Reference** — every line of both annotated crates: `serde_core`'s 19 files
 > and `serde_derive`'s 28, all at 100% and all listed in their
@@ -68,11 +74,11 @@ the way through and running the expansion in your browser.
 > `{"a":[1,true],"b":"x"}`, from bytes through `serde_json`'s parser into a
 > `Value`, back out to the same twenty-two bytes, through an error and its
 > position, and finally into a struct through the impl the derive walk
-> emitted. It cites 2,258 of `serde_json`'s 18,329 lines and claims none of
-> them: `serde_json` is pinned as a `narrative` source, so there is no file
-> declared complete and no third percentage. Where the walk crosses into
-> `serde_core` or `serde_derive` — 21 of its stops — it lands inside an
-> annotation and links there. Its 21 claims about what the crate *produces*
+> emitted. It cites 2,258 of `serde_json`'s lines and claims none of them
+> itself: the claiming is the reference track's, which has started on
+> `serde_json` (PLAN.md §14). Where the walk crosses into `serde_core` or
+> `serde_derive` — 21 of its stops — it lands inside an annotation and links
+> there, and its other stops will as each file they stand on is finished. Its 21 claims about what the crate *produces*
 > are located in the output of a real run of the pinned version, checked
 > against both the host and the browser ([D13](docs/decisions.md)).
 >
@@ -90,11 +96,11 @@ the way through and running the expansion in your browser.
 > $ cargo xtask coverage
 > serde_core-1.0.229          coverage        19    12037  every line claimed
 > serde_derive-1.0.229        coverage        28     8975  every line claimed
-> serde_json-1.0.151          narrative       37    18329  annotated where the story goes
+> serde_json-1.0.151          coverage        38    18359  every line claimed
 > …
 > course track: 21/21 units written
 > narrative track derive: 9 units, 85 steps, 1649 of serde_derive-1.0.229's 8975 lines cited
-> narrative track json: 9 units, 104 steps, 2258 of serde_json-1.0.151's 18329 lines cited
+> narrative track json: 9 units, 104 steps, 2258 of serde_json-1.0.151's 18359 lines cited
 > ```
 
 ---
@@ -123,8 +129,8 @@ the gates ask of it:
 
 | role | crate | what is promised |
 |---|---|---|
-| `coverage` | `serde_core`, `serde_derive` | every line claimed by exactly one annotation; `cargo xtask coverage` fails on a gap, an overlap, or a dangling reference |
-| `narrative` | `serde_json` | **walked, not claimed** — a walk cites line ranges that resolve in the pinned tree and makes no coverage promise, so it gets no percentage; every crossing into a `coverage` crate must land inside an annotation |
+| `coverage` | `serde_core`, `serde_derive`, `serde_json` | every line claimed by exactly one annotation; `cargo xtask coverage` fails on a gap, an overlap, or a dangling reference. `serde_json` took this role in PLAN.md §14 and is being claimed file by file |
+| `narrative` | none today | **walked, not claimed** — a walk cites line ranges that resolve in the pinned tree and makes no coverage promise, so it gets no percentage. `serde_derive` held this role until §12 and `serde_json` until §14 |
 | `glossary` | `syn`, `quote`, `proc-macro2` | **quoted, not annotated** — a definition is pinned to a line range, and the gate fails if the quotation drifts from the tree |
 
 A role the gates do not know is a build failure, which is what keeps the
@@ -140,7 +146,7 @@ The third state the gate needs for this is *not started*: a file no annotation
 claims is counted, not warned about, because it is the roadmap rather than a
 defect.
 
-Both crates are now claimed in full, and what "every line" cost in each is
+The first two crates are claimed in full, and what "every line" cost in each is
 worth stating side by side, because the two numbers are different for a reason:
 
 | | lines | annotations | lines each |

@@ -477,8 +477,8 @@ impl Plan {
         new_root: &Path,
         new_version: &str,
     ) -> Result<Plan> {
-        let old_files = vendor::source_files_in(old_root)?;
-        let new_files = vendor::source_files_in(new_root)?;
+        let old_files = target.files_in(old_root)?;
+        let new_files = target.files_in(new_root)?;
         let old_set: BTreeSet<&str> = old_files.iter().map(String::as_str).collect();
         let new_set: BTreeSet<&str> = new_files.iter().map(String::as_str).collect();
 
@@ -846,7 +846,7 @@ impl Plan {
             .expect("the pin named this source a moment ago");
         migrated.version = self.new_version.clone();
         migrated.crate_sha256 = archive_sha.to_string();
-        migrated.src_tree_sha256 = vendor::tree_hash_of(&dest)?;
+        migrated.src_tree_sha256 = vendor::tree_hash_of(&dest, &migrated.extra_files)?;
         std::fs::write(vendor::pin_path(repo), vendor::render_pin(&new_pin))?;
         std::fs::write(
             repo.join("vendor").join("NOTICE.md"),

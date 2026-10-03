@@ -9,10 +9,15 @@
 #               (PLAN.md §13). No coverage promise and no percentage: a walk
 #               reports the lines it cites, not a fraction of a crate.
 #               serde_derive held this role through N1-N5 and gave it up in
-#               R1 (D12), when the walk became an ordering over annotations
-#               rather than a track with citations of its own.
+#               R1 (D12); serde_json held it through J1-J4 and gave it up in
+#               K1 (D14). Each time the walk became an ordering over
+#               annotations rather than a track with citations of its own.
+#               No source holds the role today, and the gates still know it.
 #   glossary  — never annotated at all; quoted verbatim by glossary entries
 #               (D9). The pin is what keeps a quotation honest.
+#
+# extra_files names files outside src/ that the promise covers anyway
+# (D14). They are hashed, counted and claimed like any file under src/.
 
 [[source]]
 name = "serde_core"
@@ -31,9 +36,10 @@ src_tree_sha256 = "510e108f5ac71439f41fb8dc6b0da87d155ae14421706e27d93e8ca916989
 [[source]]
 name = "serde_json"
 version = "1.0.151"
-role = "narrative"
+role = "coverage"
 crate_sha256 = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
-src_tree_sha256 = "a665c44b0a7679d9330484c98f36050cc6b95709310580b11872361d19a64737"
+src_tree_sha256 = "5e49c8672d216e17fdc436f074f4114fbddde8f2d7133e82c43460ab1dfa30ed"
+extra_files = ["build.rs"]
 
 [[source]]
 name = "syn"

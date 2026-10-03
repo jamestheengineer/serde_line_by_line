@@ -175,10 +175,13 @@ struct IndexPage {
     /// One row per annotated crate. There is deliberately no figure spanning
     /// them — see where this is built.
     sources: Vec<SourceSummary>,
-    /// How many source files are declared complete, across both crates. A
+    /// How many source files are declared complete, across the crates. A
     /// count of files is not a coverage percentage: it says how much of the
     /// promise is hard-gated, which is the same fact for either crate.
     complete_files: usize,
+    /// Whether every annotated crate has every file named complete. While one
+    /// is still being claimed the promise is stated per crate instead.
+    all_finished: bool,
     course_units: usize,
     /// One per walk, in track order. No figure spans them, for the reason no
     /// figure spans the annotated crates (D12).
@@ -201,6 +204,10 @@ struct SourceSummary {
     annotations: usize,
     files: usize,
     complete_files: usize,
+    /// Every file named complete. The front page says "a gap is a build
+    /// failure" only about a crate this is true of, because a crate still
+    /// being claimed has files where a gap is a warning.
+    finished: bool,
 }
 
 /// What one walk came to, counted once and reported in two places: on its own
@@ -643,9 +650,14 @@ fn main() -> Result<()> {
                 annotations: s.annotations(),
                 files: s.files.len(),
                 complete_files: s.complete.len(),
+                finished: s.complete.len() == s.files.len(),
             })
             .collect(),
         complete_files: store.sources.iter().map(|s| s.complete.len()).sum(),
+        all_finished: store
+            .sources
+            .iter()
+            .all(|s| s.complete.len() == s.files.len()),
         course_units: store.course.len(),
         walks,
         glossary,
@@ -1037,7 +1049,11 @@ fn write_walk(
             href: format!("{}.html", u.unit.id),
             summary_html: markdown::render(&u.unit.summary),
             steps: u.steps.len(),
-            crossings: u.steps.iter().filter(|s| s.is_coverage).count(),
+            crossings: u
+                .steps
+                .iter()
+                .filter(|s| s.step.annotation.is_some())
+                .count(),
         })
         .collect();
 

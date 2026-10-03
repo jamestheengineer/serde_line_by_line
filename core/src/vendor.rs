@@ -48,6 +48,14 @@ pub struct Source {
     /// sha256 over the extracted source tree. This is the value that actually
     /// protects line ranges.
     pub src_tree_sha256: String,
+    /// Files outside `src/` that belong to the promise anyway, relative to the
+    /// crate root. `serde_json`'s `build.rs` is the reason this exists: thirty
+    /// lines that emit the `fast_arithmetic` cfg nineteen sites inside `src/`
+    /// read, so "every line" that stopped at the `src/` boundary would leave
+    /// out the lines deciding which of two arithmetic paths compiles (D14).
+    /// They are hashed, counted and claimed exactly as a file under `src/` is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_files: Vec<String>,
 }
 
 impl Source {
@@ -59,6 +67,14 @@ impl Source {
 
     pub fn dir(&self, repo: &Path) -> PathBuf {
         crate_dir(repo, &self.name, &self.version)
+    }
+
+    /// Every file this source's gates look at, in a tree of it at `root`:
+    /// `src/**/*.rs` plus whatever `extra_files` names. `root` is a parameter
+    /// rather than `self.dir()` because a bump asks this of two trees of the
+    /// same source at once.
+    pub fn files_in(&self, root: &Path) -> Result<Vec<String>> {
+        files_in(root, &self.extra_files)
     }
 }
 
@@ -126,6 +142,27 @@ pub fn source_files_in(root: &Path) -> Result<Vec<String>> {
     Ok(out)
 }
 
+/// [`source_files_in`] plus named files outside `src/`. An extra file that is
+/// missing is an error rather than an omission: the pin said it is part of the
+/// promise, and a tree without it is not the tree the pin describes.
+pub fn files_in(root: &Path, extra: &[String]) -> Result<Vec<String>> {
+    let mut out = source_files_in(root)?;
+    for rel in extra {
+        ensure!(
+            root.join(rel).is_file(),
+            "{} names extra file {rel:?} in vendor/pin.toml, and has none",
+            root.display()
+        );
+        ensure!(
+            !out.contains(rel),
+            "extra file {rel:?} is already under src/ and needs no naming"
+        );
+        out.push(rel.clone());
+    }
+    out.sort();
+    Ok(out)
+}
+
 pub fn pin_path(repo: &Path) -> PathBuf {
     repo.join("vendor").join("pin.toml")
 }
@@ -151,10 +188,10 @@ fn collect(dir: &Path, base: &Path, out: &mut Vec<String>) -> Result<()> {
 }
 
 /// Deterministic hash over (relative path, byte length, contents) for every
-/// source file under a crate root.
-pub fn tree_hash_of(root: &Path) -> Result<String> {
+/// file of a crate root the gates look at.
+pub fn tree_hash_of(root: &Path, extra: &[String]) -> Result<String> {
     let mut hasher = Sha256::new();
-    for rel in source_files_in(root)? {
+    for rel in files_in(root, extra)? {
         let bytes = std::fs::read(root.join(&rel))?;
         hasher.update(rel.as_bytes());
         hasher.update(b"\0");
@@ -174,14 +211,14 @@ pub fn line_count_in(root: &Path, rel: &str) -> Result<u32> {
     Ok(n as u32)
 }
 
-/// Every line of every `src/*.rs` in a crate root.
+/// Every line of every file of a crate root the gates look at.
 ///
 /// The size of a tree, which is a different fact from how much of it anything
 /// claims: a walk reports it to say how large the territory is, and the
 /// coverage gate reports it as a denominator.
-pub fn total_lines_in(root: &Path) -> Result<u32> {
+pub fn total_lines_in(root: &Path, extra: &[String]) -> Result<u32> {
     let mut lines = 0;
-    for rel in source_files_in(root)? {
+    for rel in files_in(root, extra)? {
         lines += line_count_in(root, &rel)?;
     }
     Ok(lines)
@@ -214,10 +251,15 @@ pub fn render_pin(pin: &Pin) -> String {
          #               (PLAN.md §13). No coverage promise and no percentage: a walk\n\
          #               reports the lines it cites, not a fraction of a crate.\n\
          #               serde_derive held this role through N1-N5 and gave it up in\n\
-         #               R1 (D12), when the walk became an ordering over annotations\n\
-         #               rather than a track with citations of its own.\n\
+         #               R1 (D12); serde_json held it through J1-J4 and gave it up in\n\
+         #               K1 (D14). Each time the walk became an ordering over\n\
+         #               annotations rather than a track with citations of its own.\n\
+         #               No source holds the role today, and the gates still know it.\n\
          #   glossary  — never annotated at all; quoted verbatim by glossary entries\n\
-         #               (D9). The pin is what keeps a quotation honest.\n",
+         #               (D9). The pin is what keeps a quotation honest.\n\
+         #\n\
+         # extra_files names files outside src/ that the promise covers anyway\n\
+         # (D14). They are hashed, counted and claimed like any file under src/.\n",
     );
     for source in &pin.sources {
         let role = match source.role {
@@ -234,6 +276,14 @@ pub fn render_pin(pin: &Pin) -> String {
              src_tree_sha256 = \"{}\"\n",
             source.name, source.version, source.crate_sha256, source.src_tree_sha256
         ));
+        if !source.extra_files.is_empty() {
+            let quoted: Vec<String> = source
+                .extra_files
+                .iter()
+                .map(|f| format!("{f:?}"))
+                .collect();
+            out.push_str(&format!("extra_files = [{}]\n", quoted.join(", ")));
+        }
     }
     out
 }
@@ -254,7 +304,7 @@ pub fn verify(repo: &Path) -> Result<()> {
                 source.role
             );
         }
-        let actual = tree_hash_of(&root)?;
+        let actual = tree_hash_of(&root, &source.extra_files)?;
         if actual != source.src_tree_sha256 {
             bail!(
                 "vendored source has drifted!\n  source   {}\n  expected src_tree_sha256 {}\n  \
@@ -350,5 +400,18 @@ src_tree_sha256 = "dd"
         assert_eq!(back.sources[1].name, "syn");
         assert_eq!(back.sources[1].role, Role::Glossary);
         assert_eq!(back.sources[0].src_tree_sha256, "bb");
+    }
+
+    /// D14. A file outside `src/` is part of a source only when the pin names
+    /// it, and naming it survives a render.
+    #[test]
+    fn extra_files_round_trip_and_default_to_none() {
+        let mut pin: Pin = toml::from_str(PIN).unwrap();
+        assert!(pin.sources[0].extra_files.is_empty());
+        assert!(!render_pin(&pin).contains("extra_files ="));
+        pin.sources[0].extra_files = vec!["build.rs".to_string()];
+        let back: Pin = toml::from_str(&render_pin(&pin)).unwrap();
+        assert_eq!(back.sources[0].extra_files, ["build.rs"]);
+        assert!(back.sources[1].extra_files.is_empty());
     }
 }

@@ -108,7 +108,8 @@ pub(crate) fn run(repo: &Path, opts: &Opts) -> Result<()> {
         version: opts.version.clone(),
         role: opts.role,
         crate_sha256: actual,
-        src_tree_sha256: vendor::tree_hash_of(&root)?,
+        src_tree_sha256: vendor::tree_hash_of(&root, &[])?,
+        extra_files: Vec::new(),
     };
     let rank = |r: Role| match r {
         Role::Coverage => 0,

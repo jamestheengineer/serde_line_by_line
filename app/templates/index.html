@@ -10,9 +10,9 @@
     <code>serde_json</code> to show all three crates working at once.
   </p>
 
-  {# One block per annotated crate, never a combined figure. The two crates
+  {# One block per annotated crate, never a combined figure. The crates
      promise the same thing about different amounts of code, so a percentage
-     spanning both would describe neither (D12). #}
+     spanning them would describe none of them (D12). #}
   <div class="sources">
   {% for s in sources %}
     <div class="progress">
@@ -58,15 +58,31 @@
   <p>
     Every line of every <i>annotated</i> crate is claimed by exactly one
     annotation, and the coverage gate fails the build over one unclaimed line,
-    one overlap, or one range left behind by a version bump. Both crates above
-    are at 100% and every one of their {{ complete_files }} files is named as
-    complete, so from here a gap is a build failure rather than a warning.
+    one overlap, or one range left behind by a version bump.
+    {%- if all_finished %}
+    All {{ sources.len() }} crates above are at 100% and every one of their
+    {{ complete_files }} files is named as complete, so from here a gap is a
+    build failure rather than a warning.
+    {%- else %}
+    That is a statement about a file once it is named as complete, and
+    {{ complete_files }} are.
+    {%- for s in sources %}
+    {%- if s.finished %}
+    <code>{{ s.name }}</code> is at 100% with all {{ s.files }} of its files
+    named, so a gap anywhere in it is a build failure.
+    {%- else %}
+    <code>{{ s.name }}</code> is being claimed now: {{ s.complete_files }} of
+    its {{ s.files }} files are named, and in the rest a gap is still a warning
+    and the figure above says how far there is to go.
+    {%- endif %}
+    {%- endfor %}
+    {%- endif %}
   </p>
   <p>
-    There are two figures above and there is deliberately no third combining
-    them. The two crates make the same promise about different amounts of code;
-    a percentage spanning them would be a fact about an arithmetic operation
-    rather than about either crate
+    There are {{ sources.len() }} figures above and there is deliberately not
+    one more combining them. The crates make the same promise about different
+    amounts of code; a percentage spanning them would be a fact about an
+    arithmetic operation rather than about any of them
     (<a href="https://github.com/jamestheengineer/serde_line_by_line/blob/main/docs/decisions.md">D12</a>).
   </p>
   {#- One paragraph per walk, and which one is read off the pin: a walk over

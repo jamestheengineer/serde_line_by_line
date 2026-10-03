@@ -1,0 +1,13 @@
+# Per-file completion status.
+#
+# A file listed under `complete` turns coverage gaps from a warning into a hard
+# CI failure. Add a file here only when every one of its lines is claimed.
+#
+# K1 made `serde_json` an annotated source (D14) with this list empty; K2
+# through K6 fill it. Until a file is named here the gate reports its gaps as
+# warnings, and the json walk's steps into that file are not yet asked to name
+# a containing annotation, because there is not one to name. Naming a file here
+# turns both of those on at once.
+source = "serde_json-1.0.151"
+
+complete = []

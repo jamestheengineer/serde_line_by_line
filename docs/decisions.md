@@ -537,7 +537,17 @@ D13 is PLAN.md §13's one question, and it is D10's asked about a crate that
 runs rather than one that generates: how a walk proves what it claims the code
 produces. It is answered below.
 
-**Still open: nothing.**
+D14 is PLAN.md §14's: what "every line" means for a third crate that carries
+somebody else's float parser inside it and thirty load-bearing lines outside
+`src/`. It is answered below, and it leaves one thing open on purpose.
+
+**Still open: `serde_core`'s `build.rs`.** D14 names `serde_json`'s as part of
+the promise and does not name `serde_core`'s 113 lines, which are the same
+shape and have been outside the walk since phase 0. Naming them is one line in
+the pin and a handful of annotations, and it moves a figure — 12,037 — that
+this project has printed since its first commit. That is a decision about the
+first crate, not the third, so it is recorded here rather than taken in
+passing.
 
 ---
 
@@ -876,3 +886,85 @@ way to get them.
 **It does not replace `emits`.** Both fields stay, they mean different things,
 and a step may carry either. The symmetry is the argument for the naming:
 `run_example` is to `produces` what `expand_case` is to `emits`.
+
+---
+
+## D14 — a third coverage source, `lexical/` claimed, and `build.rs` named
+
+**Decided in K1.** `serde_json` moves from `role = "narrative"` to
+`role = "coverage"`. Every line of it is to be claimed, including the 3,708
+lines of `src/lexical/` and the 30 lines of `build.rs`.
+
+### Why the role moves at all
+
+PLAN.md §13 took the smaller shape and said the larger one stayed available:
+"If it lands well, §6 of the scope doc is still available and nothing here is
+in its way." This is that. Nothing structural had to be built — R1 made
+`Store` and `Report` lists, and a third `[[source]]` with the coverage role
+was accepted by every gate on the first run, at 0 of 18,329.
+
+What the walk becomes is what the derive walk became in §12: an ordering over
+annotations. The crossing rule is per file (D12), so the json walk's 83 steps
+on `serde_json` ground are each asked to name a containing annotation on the
+day their file is declared complete, and not before.
+
+### `lexical/` is claimed
+
+PLAN.md §10 settled this in advance so it would not be re-argued here, and the
+reasoning is the scope doc's §3. The three options were to claim it, to
+declare a feature set and promise only what the pinned build compiles, or to
+call it borrowed and quote it.
+
+The second leaks: `arbitrary_precision` and `raw_value` are interleaved inside
+files at 188 sites, so "the lines the default build compiles" is not a set of
+files and would need a gate state that reads `#[cfg]`. The third is dishonest
+as stated: a glossary source is a separate pinned crate, and this code is
+inside the crate being claimed, with no pin of its own to keep a quotation
+honest.
+
+So the promise is unchanged, and one section of the site is about floats. The
+lines earn it: the same input parses to two different doubles one ULP apart
+with the feature off and on, so they are not dead weight a reader can ignore.
+
+### `build.rs` is named, and how
+
+`vendor::source_files_in` walks `src/`, so "every line" stopped at a directory
+boundary nobody chose. `serde_json`'s `build.rs` emits `fast_arithmetic`,
+which 19 sites in 5 files read to decide which of two arithmetic paths
+compiles. An annotation at any of those sites would have had to explain a cfg
+whose definition the site does not show.
+
+A source may now carry `extra_files` in the pin. Those files are hashed into
+`src_tree_sha256`, counted in the denominator, listed in the coverage table
+and claimed like any other. `serde_json`'s tree is 38 files and 18,359 lines
+as a result, not the 37 and 18,329 the scope doc measured.
+
+It is a named list rather than "every `.rs` file in the crate" because the
+second would sweep in `tests/`, and it is per source rather than global
+because a global rule would change three other trees' hashes to claim files
+nothing reads.
+
+### What had to change besides the pin
+
+- **The front page said "both crates above are at 100%".** With a third at 0%
+  that sentence was false on the first build. The promise is now stated per
+  crate while any one of them is unfinished, and collapses back to one
+  sentence when all are.
+- **The site counted a crossing by the role of the crate cited.** That was the
+  same number as "names an annotation" for as long as the json walk stood on
+  a narrative source. The moment the role flipped it read *all 104 stops land
+  inside an annotation*, with no annotation written. The gate had always
+  counted the stricter thing; the site now counts it too.
+
+### What it does not do
+
+**It does not add a combined figure.** Three crates, three percentages, no
+total, for D12's reason.
+
+**It does not pin `itoa`, `zmij`, `memchr` or `indexmap` as glossary
+sources.** The scope doc counted 16 borrowed items against the derive track's
+62, most of them a two-method buffer type. They are described where they are
+used. If an annotation turns out to need a quoted definition, that source is
+pinned then.
+
+**It does not name `serde_core`'s `build.rs`.** See "Still open" above.

@@ -24,7 +24,7 @@ rather than annotated is D9 in `docs/decisions.md`.
 - License: MIT OR Apache-2.0 (see `serde_derive-1.0.229/LICENSE-MIT` and `serde_derive-1.0.229/LICENSE-APACHE`)
 - Copyright: Erick Tryzelaar <erick.tryzelaar@gmail.com>, David Tolnay <dtolnay@gmail.com>
 
-## serde_json 1.0.151 (narrative)
+## serde_json 1.0.151 (coverage)
 
 - crates.io: https://crates.io/crates/serde_json/1.0.151
 - Upstream: https://github.com/serde-rs/json

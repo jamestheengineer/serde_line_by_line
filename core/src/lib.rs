@@ -239,7 +239,7 @@ pub fn load(repo: &Path) -> Result<Store> {
             ..SourceStore::default()
         };
 
-        for rel in vendor::source_files_in(&root)? {
+        for rel in source.files_in(&root)? {
             let n = vendor::line_count_in(&root, &rel)?;
             s.files.push((rel, n));
         }
@@ -616,7 +616,7 @@ fn read_narrative_track(repo: &Path, dir: &Path) -> Result<NarrativeTrackItem> {
     Ok(NarrativeTrackItem {
         crate_name: about.name.clone(),
         version: about.version.clone(),
-        lines: vendor::total_lines_in(&about.dir(repo))?,
+        lines: vendor::total_lines_in(&about.dir(repo), &about.extra_files)?,
         role: about.role,
         track,
         units,

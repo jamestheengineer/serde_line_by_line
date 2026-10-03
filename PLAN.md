@@ -284,6 +284,7 @@ serde_line_by_line/
 │   │   ├── manifest.toml       ← per-file completion status
 │   │   └── *.toml              ← the content
 │   └── serde_derive/           ← the same, from §12 onward
+│   └── serde_json/             ← the same, from §14 onward
 ├── narrative/                  ← one directory per walk, from §13
 │   └── derive/
 │       ├── track.toml          ← what this walk is and what it is about
@@ -454,9 +455,18 @@ measurements behind each:
     harness was built; the mechanism is a way of citing one that has existed
     since phase 0.
 
-**Still open: nothing.** §9's eight phases, §11's five, §12's seven and §13's
-four have all shipped; the gates listed in §9 are what keep their promises
-checkable rather than stated.
+**Resolved in §14:**
+
+14. **D14 — a third coverage source, `lexical/` claimed, and `build.rs`
+    named.** `serde_json` gives up the narrative role the way `serde_derive`
+    did in R1. Every line of it is to be claimed, the float parser included,
+    and a source may name files outside `src/` that the promise covers anyway.
+
+**Still open: `serde_core`'s `build.rs`**, which is the same shape as the file
+D14 named and has been outside the walk since phase 0 (decisions.md). §9's
+eight phases, §11's five, §12's seven and §13's four have all shipped; §14 is
+in progress. The gates listed in §9 are what keep their promises checkable
+rather than stated.
 
 **Measured, and decided — the smaller way.** `serde_json` is the next crate and
 it is **walked, not claimed**: §8 of the scope doc rather than §6, which is
@@ -1192,3 +1202,81 @@ about floats — in exchange for the walk this repo does not have.
 
 If it lands well, §6 of the scope doc is still available and nothing here is in
 its way. That was true of §11 too, and §12 is what happened next.
+
+---
+
+## 14. The `serde_json` reference track
+
+[`docs/json-track-scope.md`](docs/json-track-scope.md) measured two shapes and
+§13 built the smaller one. **This is the larger one**: §6 of that document.
+Every line of `serde_json` claimed by exactly one annotation, the promise the
+first two crates already carry, defended by the same gate.
+
+§13 ended by saying this stayed available and that nothing there was in its
+way. That held. The role moved in one line of the pin and every gate accepted
+a third coverage source on the first run.
+
+### What the json walk becomes
+
+What the derive walk became in §12: an ordering over the annotation store. 83
+of its 104 steps stand on `serde_json` and name no annotation today, because
+there is none to name. The crossing rule is per file (D12), so each of those
+steps is asked to name its containing annotation when its file is declared
+complete. The other 21 already cross into `serde_core` or `serde_derive` and
+already name theirs.
+
+### The measurement, re-taken
+
+Against the tree as pinned in K1, which is 38 files and 18,359 lines because
+`build.rs` is now part of it:
+
+| group | files | lines | lines/annot | annotations |
+|---|---:|---:|---:|---:|
+| the engines — `de.rs`, `ser.rs`, `read.rs`, `io/*`, `iter.rs`, `build.rs` | 7 | 6,287 | 23.2 | ~271 |
+| the `Value` tree — `value/*`, `map.rs`, `number.rs`, `raw.rs` | 9 | 7,079 | 25.0 | ~283 |
+| `lexical/` — the float parser | 19 | 3,708 | 35.1 | ~106 |
+| plumbing — `lib.rs`, `error.rs`, `macros.rs` | 3 | 1,285 | 29.4 | ~44 |
+| **total** | **38** | **18,359** | **26.1** | **~704** |
+
+The scope doc's bounds stand: 600 if the 21 trait impls compress against each
+other and against `serde_core`'s contracts, 780 if the byte-level state
+machines in `read.rs` and `ser.rs` refuse large spans.
+
+### Roadmap
+
+| phase | scope | annots | exit criteria |
+|---|---|---:|---|
+| **K1 — Three coverage sources** ✅ | The role moves; `extra_files` in the pin; the front page stops saying "both"; D14 | 0 | `cargo xtask coverage` reports the first two crates unchanged and `serde_json` at 0/18,359 without error; the json walk's crossings still read 1, 0, 2, 1, 1, 2, 3, 1, 10 |
+| **K2 — Vertical slice: `read.rs`** | The byte-level state machine, 1,089 lines, and the refusal case the scope doc named | ~47 | `read.rs` at 100%; its narrative steps retargeted; the density either confirms 23 lines per annotation or moves the estimate before 650 more are written |
+| **K3 — The rest of the engines** | `de.rs`, `ser.rs`, `io/*`, `iter.rs`, `build.rs` | ~224 | the engines at 100%; every `Deserializer` and `Serializer` method leans on its `serde_core` contract by `prereqs` rather than re-explaining it |
+| **K4 — The `Value` tree** | `value/*`, `map.rs`, `number.rs`, `raw.rs` | ~283 | the tree at 100%; `value/de.rs` and `value/ser.rs` read as the second implementation of a surface the reader has seen, not a second transcript |
+| **K5 — `lexical/`** | The float parser, 19 files | ~106 | `lexical/` at 100%; the five constant tables are a table each |
+| **K6 — Plumbing** | `lib.rs`, `error.rs`, `macros.rs` | ~44 | **every line of `serde_json` claimed**; all 38 files in its manifest; all 104 narrative steps name a containing annotation |
+| **K7 — Course units** | 8 new units, 22 through 29 (scope §6) | — | the course track spans three crates, walkable start to finish, D8's forward-reference check enforcing across all of them |
+| **K8 — Ship** | Three reference file-trees, the restated promise, `README` | — | three figures, no total, and each track honest about what it claims |
+
+K2 is a vertical slice for the reason phase 1 and R2 were. `read.rs` is the
+right file because it is where the scope doc's upper bound lives: if a
+byte-level scanner will not take large spans, that is known after 1,089 lines
+instead of after 6,000.
+
+K3 through K6 are content throughput and can be reordered. K6 is last because
+`lib.rs` and `error.rs` are the files most easily written once everything they
+re-export has been read.
+
+### What K1 shipped
+
+`serde_json` is the third `coverage` source, at 0 of 18,359. The reasoning,
+and the two places the site would have overstated on the first build, are
+[D14](docs/decisions.md).
+
+The scope doc costed this phase at a quarter of a session for the role and
+half a session for the `lexical/` decision "and whatever gate it implies".
+The decision implied no gate, because it was to claim the lines. The gate
+change came from the other direction: `build.rs`, which the scope doc filed
+under smaller mechanics, needed the pin to learn `extra_files`, and that
+touched the tree hash, the bump, and every place a tree's files are listed.
+
+The narrative role has no holder now. It stays in the pin's header and in the
+gates, for the reason it stayed after R1: it is the right role for the next
+crate that is walked before anybody decides whether to claim it.

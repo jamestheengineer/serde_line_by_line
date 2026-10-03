@@ -163,7 +163,7 @@ pub fn run(repo: &Path, write_json: bool) -> Result<Report> {
     for source in pin.coverage()? {
         let source_id = source.source_id();
         let root = source.dir(repo);
-        let files = vendor::source_files_in(&root)?;
+        let files = source.files_in(&root)?;
 
         let manifest = Manifest::load(&slbl_core::manifest_path(repo, &source.name))?;
         if manifest.source != source_id {
@@ -1406,7 +1406,7 @@ fn print_sources(repo: &Path) -> Result<()> {
     );
     for source in &pin.sources {
         let root = source.dir(repo);
-        let files = vendor::source_files_in(&root)?;
+        let files = source.files_in(&root)?;
         let mut lines = 0u32;
         for rel in &files {
             lines += vendor::line_count_in(&root, rel)?;
