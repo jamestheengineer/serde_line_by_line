@@ -1250,7 +1250,7 @@ machines in `read.rs` and `ser.rs` refuse large spans.
 | **K2 — Vertical slice: `read.rs`** ✅ | The byte-level state machine, 1,089 lines, and the refusal case the scope doc named | ~47 | `read.rs` at 100%; its narrative steps retargeted; the density either confirms 23 lines per annotation or moves the estimate before 650 more are written |
 | **K3 — The rest of the engines** ✅ | `de.rs`, `ser.rs`, `io/*`, `iter.rs`, `build.rs` | ~224 | the engines at 100%; every `Deserializer` and `Serializer` method leans on its `serde_core` contract by `prereqs` rather than re-explaining it |
 | **K4 — The `Value` tree** ✅ | `value/*`, `map.rs`, `number.rs`, `raw.rs` | ~283 | the tree at 100%; `value/de.rs` and `value/ser.rs` read as the second implementation of a surface the reader has seen, not a second transcript |
-| **K5 — `lexical/`** | The float parser, 19 files | ~106 | `lexical/` at 100%; the five constant tables are a table each |
+| **K5 — `lexical/`** ✅ | The float parser, 19 files | ~106 | `lexical/` at 100%; the five constant tables are a table each |
 | **K6 — Plumbing** | `lib.rs`, `error.rs`, `macros.rs` | ~44 | **every line of `serde_json` claimed**; all 38 files in its manifest; all 104 narrative steps name a containing annotation |
 | **K7 — Course units** | 8 new units, 22 through 29 (scope §6) | — | the course track spans three crates, walkable start to finish, D8's forward-reference check enforcing across all of them |
 | **K8 — Ship** | Three reference file-trees, the restated promise, `README` | — | three figures, no total, and each track honest about what it claims |
@@ -1399,3 +1399,39 @@ was written:
 cited a closing brace or a blank line belonging to the neighbouring function.
 All 104 steps of the json walk now stand on complete files except the nine in
 `error.rs`, which is K6's.
+
+### What K5 shipped
+
+`lexical/` is complete: 19 files, 3,708 lines, 85 annotations. `serde_json` is
+at 93.0%, with three plumbing files left.
+
+**The decision D14 took cost what the scope doc said it would, slightly
+less.** 85 annotations against a projected ~106, at 43.6 lines each against
+35.1. The exit criterion was that the constant tables be a table each, and
+they are: `large_powers64.rs` is 625 lines and two annotations, one of which
+claims 621 lines and is the longest in the project. It says so, and says why:
+those lines are data, and the decisions about them are in `imul_pow5`, which
+reads the table, and in `build.rs`, which chose it.
+
+**The section about floats has a shape.** The files are annotated in the
+order a reader needs them, which is not the order they sort in. `parse.rs` is
+the outline: fast path, moderate path, slow path. `algorithm.rs` is the first
+two. `bhcomp.rs` is the third. `float.rs`, `rounding.rs` and `errors.rs` are
+what the moderate path computes with, and `math.rs` and the tables are what
+the slow path computes with. Each file's first annotation says which of those
+it is.
+
+**Upstream's comments were read against upstream's code, and three do not
+match.** `large::imul` carries a comment saying Karatsuba multiplication is
+not used and that long multiplication is 20% faster, directly above the line
+that calls Karatsuba. `imul_pow5` describes its two branches the other way
+round from what they do. And `errors.rs` labels both comparisons in its worked
+example `cmp1`. The annotations say so plainly, as annotation-style.md asks:
+this is code somebody condensed from a larger crate, and the comments were
+condensed less carefully than the code.
+
+**Nothing here was run.** K3 and K4 checked behavioural claims against the
+pinned crate. This phase makes almost none. The claims are about what the
+code does line by line, which is read off the source, and the one observable
+behaviour, that the feature changes a parse by one ULP, is the scope doc's
+measurement and is cited as that.

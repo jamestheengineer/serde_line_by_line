@@ -1,0 +1,55 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-lexical-exponent-0001"
+file  = "src/lexical/exponent.rs"
+lines = "1-17"
+title = "into_i32 — a clamp, for absurd inputs"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["inlining"]
+body = """
+Converts a `usize` to an `i32`, saturating at `i32::MAX`.
+
+The doc comment gives the scenario: "comically-long" inputs. A count of
+digits is a `usize` and an exponent is an `i32`. A string with more than two
+billion digits would overflow the conversion, and clamping keeps the
+arithmetic defined.
+"""
+
+[[annotation]]
+id    = "json-lexical-exponent-0002"
+file  = "src/lexical/exponent.rs"
+lines = "18-36"
+title = "scientific_exponent — where the first significant digit is"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["inlining"]
+body = """
+Given the written exponent and the shape of the digits, this returns the
+exponent the number would have in scientific notation, with one digit
+before the point.
+
+If there are integer digits, each one beyond the first raises the exponent
+by one. If there are none, the leading zeros of the fraction lower it. All
+arithmetic is saturating.
+"""
+
+[[annotation]]
+id    = "json-lexical-exponent-0003"
+file  = "src/lexical/exponent.rs"
+lines = "37-50"
+title = "mantissa_exponent — the exponent that goes with the u64 mantissa"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["inlining"]
+body = """
+The digits were accumulated into an integer mantissa, which loses track of
+the decimal point. This function computes the power of ten that mantissa
+must be multiplied by.
+
+Each fraction digit that was folded in lowers the exponent by one. Each
+digit that did not fit, and was truncated, raises it by one. The two
+effects are combined and applied to the written exponent, saturating.
+"""

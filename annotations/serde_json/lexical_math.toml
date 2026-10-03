@@ -1,0 +1,403 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-lexical-math-0001"
+file  = "src/lexical/math.rs"
+lines = "1-14"
+title = "math — arbitrary-precision arithmetic, least significant limb first"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["modules"]
+body = """
+The module comment fixes the convention every function below assumes. A big
+integer is a slice of limbs in little-endian order: index 0 is the least
+significant.
+
+Little-endian order means the number grows at the end of the vector. A
+carry out of the top limb is a `push`, and removing leading zeros is a
+`pop`.
+"""
+
+[[annotation]]
+id    = "json-lexical-math-0002"
+file  = "src/lexical/math.rs"
+lines = "15-64"
+title = "Limb and Wide — the two types build.rs chooses"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+The long comment explains the choice the build script makes. A limb is one
+"digit" of the big integer in base 2^32 or 2^64. Multiplying two limbs needs
+a type twice as wide to hold the product. Where the target has fast 64-bit
+multiplication with access to the high half, limbs are `u64` and the wide
+type is `u128`. Otherwise limbs are `u32` and the wide type is `u64`.
+
+The comment lists which instructions provide the high half on each
+architecture.
+
+Two blocks of four items follow, one per cfg value. `POW5_LIMB` and
+`POW10_LIMB` name the small-power tables for the chosen width.
+"""
+
+[[annotation]]
+id    = "json-lexical-math-0003"
+file  = "src/lexical/math.rs"
+lines = "65-76"
+title = "as_limb and as_wide"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["generic-params", "inlining"]
+body = """
+Casts into the limb and wide types, through the `AsCast` trait from
+`num.rs`. They exist so that the arithmetic below reads the same for either
+limb width.
+"""
+
+[[annotation]]
+id    = "json-lexical-math-0004"
+file  = "src/lexical/math.rs"
+lines = "77-93"
+title = "split_u64 — one limb or two"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+Converts a `u64` into limbs. With 64-bit limbs that is an array of one.
+With 32-bit limbs it is the low half and the high half.
+
+The two functions have the same name and different return types, which is
+possible only because exactly one of them exists in a build.
+"""
+
+[[annotation]]
+id    = "json-lexical-math-0005"
+file  = "src/lexical/math.rs"
+lines = "94-128"
+title = "The top 64 bits of one or two words"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "closures", "iterators"]
+body = """
+Helpers for extracting the most significant 64 bits of a big integer,
+normalized so that the top bit is set.
+
+`u64_to_hi64_1` shifts a single word left by its leading zeros.
+`u64_to_hi64_2` does the same for a pair, bringing bits up from the second
+word, and reports whether any bits of the second word were left behind.
+
+`nonzero` checks whether any limb below a given position is non-zero. The
+callers use it to learn whether the discarded part of the number was
+exactly zero, which decides ties when rounding.
+"""
+
+[[annotation]]
+id    = "json-lexical-math-0006"
+file  = "src/lexical/math.rs"
+lines = "129-151"
+title = "Hi64 — a trait over slices of limbs"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "default-methods", "supertraits"]
+body = """
+A trait implemented for `[u32]` and `[u64]`. The required methods handle a
+slice of one, two, or three-or-more limbs, and the provided `hi64` picks
+among them by length.
+
+The result is a pair: the top 64 bits, and a flag for whether lower bits
+were truncated.
+"""
+
+[[annotation]]
+id    = "json-lexical-math-0007"
+file  = "src/lexical/math.rs"
+lines = "152-201"
+title = "Hi64 for [u32] and [u64]"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "inlining"]
+body = """
+The two implementations. With 32-bit limbs, three limbs are needed to be
+sure of 64 significant bits after normalizing. With 64-bit limbs, two
+suffice, and `hi64_3` forwards to `hi64_2`.
+
+Both impls are compiled in every build, whichever limb width is in use.
+"""
+
+[[annotation]]
+id    = "json-lexical-math-0008"
+file  = "src/lexical/math.rs"
+lines = "202-266"
+title = "mod scalar — one limb with carry"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["modules", "inlining"]
+body = """
+The lowest layer: operations on single limbs. Addition and subtraction use
+`overflowing_add` and `overflowing_sub` and return the carry or borrow as a
+`bool`.
+
+`mul` is the important one. It multiplies two limbs and adds a carry in the
+wide type, and returns the low and high halves. The comment explains why
+the addition cannot overflow: the largest product of two limbs leaves room
+for one more limb.
+"""
+
+[[annotation]]
+id    = "json-lexical-math-0009"
+file  = "src/lexical/math.rs"
+lines = "267-329"
+title = "mod small — adding and subtracting one limb"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["modules", "collections"]
+body = """
+The second layer: a big integer combined with a single limb.
+
+`iadd_impl` adds at a given position and then propagates the carry upward
+for as long as limbs overflow. If the carry runs off the end, a new limb is
+pushed. `isub_impl` is the mirror image, and normalizes afterwards, since
+subtraction can leave zero limbs at the top.
+"""
+
+[[annotation]]
+id    = "json-lexical-math-0010"
+file  = "src/lexical/math.rs"
+lines = "330-355"
+title = "small::imul — multiply every limb, carrying"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["collections", "iterators"]
+body = """
+Multiplying a big integer by one limb. Each limb is multiplied in turn, with
+the high half of each product carried into the next. A final non-zero carry
+becomes a new limb.
+
+This is the operation `parse_mantissa` performs once per batch of digits.
+"""
+
+[[annotation]]
+id    = "json-lexical-math-0011"
+file  = "src/lexical/math.rs"
+lines = "356-441"
+title = "imul_pow5 — a benchmark in a doc comment, and two strategies"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["collections"]
+body = """
+The slow path needs to multiply by powers of five. The doc comment argues
+about how.
+
+In theory, exponentiation by squaring is the efficient method. The comment
+then gives measurements showing it was slower here than repeatedly
+multiplying by the largest power that fits in a limb, by a wide margin. The
+conclusion is to use small powers in simple cases and precomputed large
+powers otherwise.
+
+The code does that. If the operands are small, it multiplies by the largest
+small power repeatedly and then by the remainder. Otherwise it walks the
+bits of `n`, multiplying by a precomputed `5^(2^k)` from `large_powers` for
+each bit that is set.
+
+The comment inside the function describes the branches the other way round
+from what they do.
+"""
+
+[[annotation]]
+id    = "json-lexical-math-0012"
+file  = "src/lexical/math.rs"
+lines = "442-460"
+title = "leading_zeros and bit_length"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["option", "closures"]
+body = """
+The bit length of a big integer is the total number of bits in its limbs
+minus the leading zeros of the top limb. `checked_mul` guards the
+multiplication, returning `usize::MAX` on overflow.
+"""
+
+[[annotation]]
+id    = "json-lexical-math-0013"
+file  = "src/lexical/math.rs"
+lines = "461-522"
+title = "Shifting left — by bits, by limbs, and both"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["collections", "iterators"]
+body = """
+Multiplication by a power of two is a shift. `ishl` divides the shift count
+by the limb width. The remainder is handled by `ishl_bits`, which shifts
+each limb and carries the bits that fall off into the next. The quotient is
+handled by `ishl_limbs`, which inserts whole zero limbs at the front.
+
+`x.splice(..0, iter::repeat(0).take(n))` is the insertion. It replaces the
+empty range at the start of the vector with `n` zeros.
+"""
+
+[[annotation]]
+id    = "json-lexical-math-0014"
+file  = "src/lexical/math.rs"
+lines = "523-535"
+title = "normalize — drop zero limbs from the top"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["collections"]
+body = """
+Pops limbs while the last one is zero. A normalized big integer has no
+leading zeros, which is what lets comparison begin by comparing lengths.
+"""
+
+[[annotation]]
+id    = "json-lexical-math-0015"
+file  = "src/lexical/math.rs"
+lines = "536-578"
+title = "mod large — comparing two big integers"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["modules", "iterators"]
+body = """
+The third layer: big integer against big integer.
+
+`compare` relies on both operands being normalized. A longer number is
+larger. Equal lengths are compared limb by limb from the most significant
+end, which is the back of the slice.
+
+This is the function `small_atof` calls to decide whether the true value is
+above or below the halfway point.
+"""
+
+[[annotation]]
+id    = "json-lexical-math-0016"
+file  = "src/lexical/math.rs"
+lines = "579-626"
+title = "large addition"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["collections", "iterators"]
+body = """
+`iadd_impl` adds `y` into `x` starting at a limb offset. Starting at an
+offset is how a shifted addition is done without building a shifted copy,
+and the multiplication routines below depend on it.
+
+Each limb addition can carry, and adding the previous carry can carry
+again. The comment notes that only one of the two can overflow for a given
+limb, so OR-ing the flags is correct.
+"""
+
+[[annotation]]
+id    = "json-lexical-math-0017"
+file  = "src/lexical/math.rs"
+lines = "627-653"
+title = "large subtraction"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["collections", "iterators"]
+body = """
+The same loop with borrows. It requires `x >= y`, checked in debug builds.
+"""
+
+[[annotation]]
+id    = "json-lexical-math-0018"
+file  = "src/lexical/math.rs"
+lines = "654-688"
+title = "long_mul — the schoolbook method"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["collections", "iterators"]
+body = """
+Multiply `x` by each limb of `y` and add the partial products at increasing
+offsets. The doc comment is frank about it: slow, simple, `O(n·m)`, and
+"fine by me".
+
+`KARATSUBA_CUTOFF` is 32 limbs. Below that size, this is the algorithm
+used.
+"""
+
+[[annotation]]
+id    = "json-lexical-math-0019"
+file  = "src/lexical/math.rs"
+lines = "689-731"
+title = "karatsuba_mul — three multiplications in place of four"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["collections"]
+body = """
+Karatsuba's method splits each operand in half and computes the product
+from three half-size multiplications: low times low, high times high, and
+the product of the sums. The middle term is recovered by subtracting the
+other two.
+
+The function recurses, and falls back to `long_mul` once the operands are
+at or below the cutoff. The comment there says "long division" and means
+long multiplication.
+"""
+
+[[annotation]]
+id    = "json-lexical-math-0020"
+file  = "src/lexical/math.rs"
+lines = "732-765"
+title = "Uneven operands, and a forwarder"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["collections"]
+body = """
+When one operand is much longer than the other, splitting both in half is
+wasteful. `karatsuba_uneven_mul` cuts the longer operand into pieces the
+size of the shorter one and multiplies each piece.
+
+`karatsuba_mul_fwd` orders the arguments so that the shorter is first.
+"""
+
+[[annotation]]
+id    = "json-lexical-math-0021"
+file  = "src/lexical/math.rs"
+lines = "766-780"
+title = "large::imul — and a comment that disagrees with its code"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["collections"]
+body = """
+A one-limb multiplier uses the small routine. Anything else uses
+Karatsuba.
+
+The comment says the opposite. It says Karatsuba does not make sense here,
+that long multiplication is used, and that this is about 20% faster than
+the Karatsuba call. The line that follows *is* the Karatsuba call. Either
+the comment or the code was changed without the other.
+"""
+
+[[annotation]]
+id    = "json-lexical-math-0022"
+file  = "src/lexical/math.rs"
+lines = "781-841"
+title = "Math — the big-integer interface"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "default-methods", "supertraits"]
+body = """
+The trait `Bigint` implements. Two required methods expose the limb vector.
+Everything else has a default body that forwards to the three modules
+above.
+
+The doc comment explains a decision. None of this uses the operator traits.
+There is no `impl Mul for Bigint`. These operations are expensive, and the
+author wanted each one to be a visible method call.
+"""
+
+[[annotation]]
+id    = "json-lexical-math-0023"
+file  = "src/lexical/math.rs"
+lines = "842-884"
+title = "Math's multiplication and shift methods"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "default-methods"]
+body = """
+`imul_pow10` is the line to read. Ten is two times five, so multiplying by
+`10^n` is multiplying by `5^n` and shifting left by `n` bits.
+
+That split is why the tables hold powers of five and not powers of ten.
+The powers of two are free.
+"""

@@ -1,0 +1,24 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-lexical-shift-0001"
+file  = "src/lexical/shift.rs"
+lines = "1-46"
+title = "shr, overflowing_shr, shl — shifting the mantissa and adjusting the exponent"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["inlining"]
+body = """
+An `ExtendedFloat` is a 64-bit mantissa and a binary exponent, representing
+`mant × 2^exp`. Shifting the mantissa right by `n` and adding `n` to the
+exponent leaves the value unchanged, apart from the bits shifted out. These
+three functions do that in each direction.
+
+The comments say "bytes" where they mean bits.
+
+`overflowing_shr` exists for one case. In Rust, shifting a `u64` by 64 is an
+overflow: it panics in debug builds and is masked in release. A shift by the
+full width should produce zero, and this function special-cases it. The
+plain `shr` and `shl` assert that the shift is smaller than the width.
+"""

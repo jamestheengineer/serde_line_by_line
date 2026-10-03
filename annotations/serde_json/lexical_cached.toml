@@ -1,0 +1,57 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-lexical-cached-0001"
+file  = "src/lexical/cached.rs"
+lines = "1-33"
+title = "ExtendedFloatArray — two parallel slices"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["lifetimes"]
+body = """
+A table of extended floats stored as two arrays, one of mantissas and one
+of exponents. The doc comment gives the reason: memory efficiency. An array
+of structs holding a `u64` and an `i32` would be padded to sixteen bytes per
+entry. Two arrays use twelve.
+
+`get_extended_float` reassembles one entry. The doc comment above the impl
+says "without bounds checking". The code uses ordinary indexing, which is
+bounds-checked.
+"""
+
+[[annotation]]
+id    = "json-lexical-cached-0002"
+file  = "src/lexical/cached.rs"
+lines = "34-67"
+title = "ModeratePathPowers — small powers, large powers, and a step"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["lifetimes"]
+body = """
+The tables the moderate path multiplies by. To scale by any power of ten
+without storing every one, the exponent is split in two. `large` holds
+every `step`-th power across the whole range. `small` holds the first
+`step` powers. Any exponent is one large entry times one small entry.
+
+`small_int` holds the small powers again as plain integers, for the case
+where the multiplication can be done exactly in a `u64`. `bias` shifts
+negative exponents into the non-negative index range.
+"""
+
+[[annotation]]
+id    = "json-lexical-cached-0003"
+file  = "src/lexical/cached.rs"
+lines = "68-82"
+title = "ModeratePathCache — the table, reached through a trait"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits"]
+body = """
+A trait with one associated function returning the tables, and one impl,
+for `ExtendedFloat`.
+
+In the original `lexical` crate this abstraction selected among several
+radixes and float widths. Here there is one radix and one table, and the
+trait is what remains of that generality.
+"""

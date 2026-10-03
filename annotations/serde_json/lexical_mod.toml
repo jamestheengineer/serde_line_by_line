@@ -1,0 +1,50 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-lexical-mod-0001"
+file  = "src/lexical/mod.rs"
+lines = "1-12"
+title = "lexical — somebody else's float parser, and why it is here"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["modules"]
+body = """
+The header comment is a statement of origin and of intent. This module is a
+condensed copy of the `lexical` crate, made by that crate's author for use
+in `serde_json`. It is dual-licensed like the rest of the crate and the
+copyright is Alexander Huszagh's.
+
+The second sentence is the design constraint. What matters here is that
+every float round-trips: a value written by the serializer and read back
+gives the same bits. Parsing arbitrarily long digit strings with perfect
+accuracy is explicitly not the goal, because of what it would cost in
+compile time and speed.
+
+This module is compiled only with the `float_roundtrip` feature. The gate
+is on `mod lexical;` in `lib.rs`. In a default build none of these nineteen
+files exists, and numbers go through the multiply-by-a-power-of-ten code in
+`de.rs`.
+"""
+
+[[annotation]]
+id    = "json-lexical-mod-0002"
+file  = "src/lexical/mod.rs"
+lines = "13-38"
+title = "Sixteen modules, one of two tables, and a two-function API"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["modules", "visibility", "cfg"]
+body = """
+The module list. Some are `pub(crate)` and some private, which matters
+little, since the parent module is itself private.
+
+`large_powers32` and `large_powers64` are alternatives, selected by the
+`fast_arithmetic` cfg that `build.rs` emits. Only one is compiled. This is
+the cfg's main use: the big-integer code works in 32-bit or 64-bit limbs,
+and the tables of precomputed powers have to match.
+
+The last line is the whole interface. `parse_concise_float` and
+`parse_truncated_float` are the two functions `de.rs` calls, and everything
+else in the directory exists to serve them.
+"""

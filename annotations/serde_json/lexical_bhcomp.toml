@@ -1,0 +1,123 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-lexical-bhcomp-0001"
+file  = "src/lexical/bhcomp.rs"
+lines = "1-15"
+title = "bhcomp — comparing against the halfway point, exactly"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["modules"]
+body = """
+The slow path. The name is "b plus h comparison". `b` is a float just at or
+below the true value. `h` is half the gap to the next float. The true
+value rounds up if it is above `b + h` and down if below.
+
+That comparison is done with big integers, so there is no rounding in it.
+"""
+
+[[annotation]]
+id    = "json-lexical-bhcomp-0002"
+file  = "src/lexical/bhcomp.rs"
+lines = "16-74"
+title = "parse_mantissa — the digits, as a big integer"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "iterators"]
+body = """
+Reads the decimal digits into a `Bigint`.
+
+Multiplying a big integer by ten for every digit would be slow. Digits are
+first accumulated into a single limb, `value`, and the big integer is
+updated once per batch: multiply by the right power of ten, add the limb.
+`step` is the number of digits a limb can safely hold.
+
+`max_digits` caps the work. Past a certain number of significant digits,
+769 for an `f64`, further digits cannot change which float is nearest
+except through whether any of them is non-zero.
+
+The last block handles that. If digits remain, a final `1` is appended. The
+remaining digits are known not to be all zeros, since trailing zeros were
+trimmed, so the true value is strictly greater than the parsed prefix, and
+the appended digit records that.
+"""
+
+[[annotation]]
+id    = "json-lexical-bhcomp-0003"
+file  = "src/lexical/bhcomp.rs"
+lines = "75-106"
+title = "b, b+h, and a rounding rule that knows about truncation"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "inlining"]
+body = """
+`b_extended` converts the float to mantissa and exponent. `bh_extended`
+computes the halfway point to the next float: shift the mantissa left one
+bit, add one, and lower the exponent by one. That is `2·mant + 1` in units
+half the size.
+
+The local `round_nearest_tie_even` adjusts the standard rule. If the bits
+look exactly halfway but the big integer had more bits below those examined,
+the value is really above halfway.
+"""
+
+[[annotation]]
+id    = "json-lexical-bhcomp-0004"
+file  = "src/lexical/bhcomp.rs"
+lines = "107-130"
+title = "large_atof — a non-negative exponent needs no comparison"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "closures"]
+body = """
+When the scaled exponent is zero or positive, the true value is an integer:
+the digit string times a power of ten. It can be computed exactly as a big
+integer.
+
+`hi64` returns the top 64 bits and whether any lower bit was set. Those 64
+bits with the right exponent are an extended float, and rounding it to
+nearest, with the truncation flag, gives the correctly rounded result.
+"""
+
+[[annotation]]
+id    = "json-lexical-bhcomp-0005"
+file  = "src/lexical/bhcomp.rs"
+lines = "131-188"
+title = "small_atof — scale both sides to integers and compare"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "pattern-matching"]
+body = """
+With a negative exponent the true value is a fraction, and the code
+compares it with `b + h` by clearing denominators.
+
+The true value is `real_digits × 10^real_exp`. The halfway point is
+`theor_digits × 2^theor_exp`. Since `10 = 2 × 5`, multiplying the halfway
+side by `5^(−real_exp)` removes the fives, and the remaining powers of two
+are applied to whichever side needs them. Both sides are then integers in
+the same units.
+
+The match is the decision. Greater than halfway: the next float up. Less:
+`b`. Equal: round to even.
+
+`radix_exp` is always zero and its branch never runs. It is left from the
+original crate, which supported radixes other than ten.
+"""
+
+[[annotation]]
+id    = "json-lexical-bhcomp-0006"
+file  = "src/lexical/bhcomp.rs"
+lines = "189-218"
+title = "bhcomp — set up the digits and choose a branch"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "iterators", "closures"]
+body = """
+The entry point. It strips leading zeros from a fraction with no integer
+part, computes the scientific exponent, and works out the exponent that
+goes with the digits as an integer.
+
+Then it parses the mantissa and dispatches on the sign of that exponent to
+one of the two functions above.
+"""

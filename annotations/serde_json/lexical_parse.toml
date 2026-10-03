@@ -1,0 +1,69 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-lexical-parse-0001"
+file  = "src/lexical/parse.rs"
+lines = "1-11"
+title = "Imports for the two entry points"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["modules"]
+body = """
+Five glob imports. Glob imports are used throughout `lexical/` and almost
+nowhere else in the crate, a visible sign that this code came from a
+different codebase.
+"""
+
+[[annotation]]
+id    = "json-lexical-parse-0002"
+file  = "src/lexical/parse.rs"
+lines = "12-40"
+title = "parse_concise_float — three paths, tried in order"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "where-clauses", "option"]
+body = """
+The entry point when every digit of the number fitted in a `u64`. It is
+generic over `F: Float`, which is `f32` or `f64`.
+
+The function is the outline of the whole algorithm.
+
+First the fast path. If the mantissa and the power of ten are both exactly
+representable as floats, one floating-point multiplication or division
+gives the correctly rounded answer.
+
+Then the moderate path. The mantissa is scaled using 64-bit extended
+arithmetic, with the accumulated error tracked. If the error is small enough
+that it cannot affect rounding, the result is final.
+
+Otherwise the slow path. The moderate result, rounded down, is `b`, a float
+known to be at or just below the true value. `bhcomp` decides between `b`
+and the next float up using exact big-integer arithmetic. The digits it
+needs are recovered from the mantissa with `itoa`.
+"""
+
+[[annotation]]
+id    = "json-lexical-parse-0003"
+file  = "src/lexical/parse.rs"
+lines = "41-83"
+title = "parse_truncated_float — when the digits did not fit"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["iterators", "generic-params"]
+body = """
+The entry point when the number had more digits than a `u64` holds. The
+digits arrive as two byte slices.
+
+Trailing zeros are trimmed from the fraction first. They carry no
+information, and the algorithms below assume they are gone.
+
+Then the digits are accumulated into a `u64` until `add_digit` reports
+overflow. At that point `truncated` is set to the number of digits not
+consumed. `iter.count()` consumes the rest of the iterator to count them,
+which is why the loop borrows the iterator with `&mut iter` instead of
+moving it.
+
+The fast path is skipped. With digits missing, the mantissa is not exact,
+and the function goes straight to `fallback_path`, telling it so.
+"""

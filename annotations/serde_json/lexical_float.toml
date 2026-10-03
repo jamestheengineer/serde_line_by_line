@@ -1,0 +1,119 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-lexical-float-0001"
+file  = "src/lexical/float.rs"
+lines = "1-19"
+title = "ExtendedFloat — 64 bits of mantissa and an exponent"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["visibility"]
+body = """
+The working representation of the moderate path: `mant × 2^exp`, with a
+64-bit mantissa where an `f64` has 53. The extra eleven bits are guard bits.
+They are what makes it possible to say whether a computation's error could
+affect rounding.
+
+The comments call this an 80-bit float, after the x87 extended format, which
+also has a 64-bit mantissa.
+"""
+
+[[annotation]]
+id    = "json-lexical-float-0002"
+file  = "src/lexical/float.rs"
+lines = "20-68"
+title = "mul — a 64×64 multiplication, keeping the high half"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["inlining"]
+body = """
+Multiplying two 64-bit mantissas gives a 128-bit product, and only the top
+64 bits are kept. The function computes that without a 128-bit type.
+
+Each mantissa is split into high and low 32-bit halves, and the four
+partial products are formed. The high-high product contributes directly.
+The cross products contribute their high halves. The low halves of the
+cross products and the high half of the low-low product are summed in `tmp`
+to produce the carry.
+
+`tmp += 1 << (u64::HALF - 1)` adds half of the last kept bit, so the result
+is rounded to nearest and not truncated.
+
+The exponents add, plus 64 for the bits discarded. The `debug_assert`
+requires both inputs to have bits set in their upper halves, since precision
+is lost otherwise.
+"""
+
+[[annotation]]
+id    = "json-lexical-float-0003"
+file  = "src/lexical/float.rs"
+lines = "69-100"
+title = "normalize — shift left until the top bit is set"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["inlining"]
+body = """
+A normalized extended float has its highest mantissa bit set, which makes
+full use of the 64 bits.
+
+The comment records two measurements: using `leading_zeros` is about ten
+times faster than shifting one bit at a time, and about twice as fast as an
+unrolled binary search. `leading_zeros` compiles to a single instruction on
+most targets.
+
+A zero mantissa is left alone. The shift count is returned, because the
+caller has to scale its error estimate by the same amount.
+"""
+
+[[annotation]]
+id    = "json-lexical-float-0004"
+file  = "src/lexical/float.rs"
+lines = "101-137"
+title = "Rounding and conversion methods — forwarding to free functions"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "closures"]
+body = """
+Four methods that call the free functions below and in `rounding.rs`.
+
+`round_to_native` takes the rounding rule as a closure parameter,
+`Algorithm: FnOnce(&mut ExtendedFloat, i32)`. `into_float` passes
+round-to-nearest-even. `into_downward_float` passes round-down. The same
+machinery produces the final answer on the moderate path and the lower bound
+`b` for the slow path.
+"""
+
+[[annotation]]
+id    = "json-lexical-float-0005"
+file  = "src/lexical/float.rs"
+lines = "138-151"
+title = "from_float — a native float as mantissa and exponent"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params"]
+body = """
+Decomposes an `f32` or `f64` using the `Float` trait's `mantissa` and
+`exponent` methods. This is how the slow path turns `b` back into an integer
+and a power of two.
+"""
+
+[[annotation]]
+id    = "json-lexical-float-0006"
+file  = "src/lexical/float.rs"
+lines = "152-183"
+title = "into_float — assembling the bits"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params"]
+body = """
+The inverse. The extended float has already been rounded so that its
+mantissa is in the native position.
+
+A zero mantissa or an exponent below the subnormal range is zero. An
+exponent at or above the maximum is infinity. Otherwise the biased exponent
+and the mantissa bits are combined with OR and passed to `from_bits`.
+
+The inner test handles subnormals. A subnormal has the minimum exponent and
+no hidden bit, and its stored exponent field is zero.
+"""

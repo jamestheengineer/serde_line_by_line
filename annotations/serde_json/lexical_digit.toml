@@ -1,0 +1,20 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-lexical-digit-0001"
+file  = "src/lexical/digit.rs"
+lines = "1-18"
+title = "to_digit and add_digit — one decimal digit at a time"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["option"]
+body = """
+Two small helpers. `to_digit` converts an ASCII byte to its numeric value,
+through `char::to_digit`. `add_digit` computes `value * 10 + digit` with
+checked arithmetic and returns `None` on overflow.
+
+`add_digit` is how the callers discover that a digit string no longer fits
+in a `u64`. The `None` is the signal to stop accumulating and start counting
+the digits that were left out.
+"""

@@ -1,0 +1,38 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-lexical-large-powers32-0001"
+file  = "src/lexical/large_powers32.rs"
+lines = "1-179"
+title = "Fourteen powers of five, as 32-bit limbs"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["zero-cost"]
+body = """
+Compiled only where `fast_arithmetic` is `"32"`. Each constant is a big
+integer in little-endian limbs.
+
+The fourteen are not consecutive powers. `POW5_1` is 5, `POW5_2` is 25,
+`POW5_3` is 625. Each is the square of the one before, so `POW5_k` is
+`5^(2^(k−1))`, and the last is `5^8192` in 595 limbs.
+
+With powers at each bit position, any exponent up to 16,383 is a product of
+at most fourteen of them, chosen by the bits of the exponent. That is the
+loop in `imul_pow5`.
+"""
+
+[[annotation]]
+id    = "json-lexical-large-powers32-0002"
+file  = "src/lexical/large_powers32.rs"
+lines = "180-183"
+title = "POW5 — the index"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["lifetimes"]
+body = """
+An array of slices, one per constant, so that the table can be indexed by
+bit position. The element type is written `&'static [u32]` here and
+`&[u64]` in the 64-bit file. In a `const` the two spellings mean the same
+thing.
+"""

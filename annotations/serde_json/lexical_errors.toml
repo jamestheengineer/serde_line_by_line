@@ -1,0 +1,84 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-lexical-errors-0001"
+file  = "src/lexical/errors.rs"
+lines = "1-21"
+title = "FloatErrors — can the approximation be trusted?"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits"]
+body = """
+The moderate path computes with 64 bits where the true value may need more.
+This module answers the question of whether the bits it lost could change
+the final rounded float.
+
+The module comment credits Go's `strconv` as the model.
+
+The trait has three associated functions. Two give a scale, and the third
+takes an error count and an extended float and returns a verdict.
+"""
+
+[[annotation]]
+id    = "json-lexical-errors-0002"
+file  = "src/lexical/errors.rs"
+lines = "22-48"
+title = "nearest_error_is_accurate — is the value too close to halfway?"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["inlining"]
+body = """
+Rounding to nearest depends on whether the discarded bits are above or
+below half of the last kept bit. If the computed value is within the error
+bound of that halfway point, the true value could be on either side, and
+the approximation cannot be trusted.
+
+`extra` is the discarded bits. The two comparisons ask whether `extra` lies
+strictly between `halfway - errors` and `halfway + errors`. If both hold,
+the answer is "not accurate".
+
+The first branch handles a shift wider than the mantissa, where the only
+question is whether adding the error could carry out of 64 bits.
+"""
+
+[[annotation]]
+id    = "json-lexical-errors-0003"
+file  = "src/lexical/errors.rs"
+lines = "49-59"
+title = "The error scale — eighths of a unit"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["inlining"]
+body = """
+Errors are counted in units of one eighth of the last bit of the 64-bit
+mantissa. `error_scale` is 8 and `error_halfscale` is 4, so half a unit of
+error is recorded as 4.
+
+Working in eighths lets the caller add fractional errors with integer
+arithmetic.
+"""
+
+[[annotation]]
+id    = "json-lexical-errors-0004"
+file  = "src/lexical/errors.rs"
+lines = "60-132"
+title = "error_is_accurate — how many bits will be discarded, and the long comment"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params"]
+body = """
+The first lines compute `extrabits`, the number of low bits of the 64-bit
+mantissa that will be dropped when rounding to the target float. For a
+normal `f64` that is 63 − 52 = 11. For a subnormal result more bits are
+dropped, and the branch on `denormal_exp` accounts for that.
+
+The long comment is a worked example of why the comparison uses unsigned
+arithmetic. With signed types, `halfway + errors` can wrap negative and the
+comparison gives the wrong answer. The example uses eight bits to keep the
+numbers readable. Its "Comparisons" heading labels both lines `cmp1`. The
+second is `cmp2`.
+
+If more than 65 bits would be dropped, the result is zero whatever the
+error, and the approximation is accepted.
+"""

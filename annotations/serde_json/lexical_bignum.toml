@@ -1,0 +1,41 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-lexical-bignum-0001"
+file  = "src/lexical/bignum.rs"
+lines = "1-23"
+title = "Bigint — a vector of limbs"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["collections", "traits"]
+body = """
+An arbitrary-precision unsigned integer, stored as a `Vec<Limb>` with the
+least significant limb first. `Limb` is `u32` or `u64`, chosen in `math.rs`
+by the `fast_arithmetic` cfg.
+
+`Default` reserves space for twenty limbs. On a 64-bit target that is 1,280
+bits, enough for most inputs the slow path sees without growing.
+
+The `Vec` import carries `allow(unused_imports)`. The file uses `Vec`, and
+the source does not say what the attribute is guarding against.
+"""
+
+[[annotation]]
+id    = "json-lexical-bignum-0002"
+file  = "src/lexical/bignum.rs"
+lines = "24-34"
+title = "Math for Bigint — two accessors, and everything else for free"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "default-methods"]
+body = """
+`Math` is a trait in `math.rs` with two required methods, which return the
+limb vector by shared and by mutable reference. Every arithmetic operation
+on a big integer is a default method of that trait, written in terms of
+these two.
+
+So this impl is the entire connection between the storage and the
+arithmetic. You have seen this shape in `serde_core`: a trait that asks for
+very little and provides a great deal.
+"""

@@ -1,0 +1,105 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-lexical-rounding-0001"
+file  = "src/lexical/rounding.rs"
+lines = "1-56"
+title = "Four mask helpers"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["inlining"]
+body = """
+Small functions for building bit masks: a single bit, the low `n` bits, the
+halfway value for `n` bits, and a run of `n` bits ending at a given
+position.
+
+Each has a `debug_assert` guarding the shift. `lower_n_mask` special-cases
+`n == 64`, where `1 << n` would overflow, and returns all ones.
+"""
+
+[[annotation]]
+id    = "json-lexical-rounding-0002"
+file  = "src/lexical/rounding.rs"
+lines = "57-107"
+title = "round_nearest, tie_even — the standard rounding rule in two steps"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["inlining"]
+body = """
+`round_nearest` examines the bits about to be discarded and reports two
+facts: whether they exceed half, and whether they are exactly half. Then it
+shifts them out.
+
+`tie_even` applies the rule. Round up if above half. If exactly half, round
+up only when the kept value is odd, so that ties go to the even neighbour.
+
+`round_nearest_tie_even` composes them. The split exists because the slow
+path needs to adjust the two flags between the steps.
+"""
+
+[[annotation]]
+id    = "json-lexical-rounding-0003"
+file  = "src/lexical/rounding.rs"
+lines = "108-139"
+title = "Directed rounding — truncate"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["inlining"]
+body = """
+`round_toward` shifts and reports whether any discarded bit was set.
+`round_downward` calls it and then calls a function that does nothing, which
+is the correct action for rounding a positive value toward zero.
+
+That function is named `downard` in the source.
+"""
+
+[[annotation]]
+id    = "json-lexical-rounding-0004"
+file  = "src/lexical/rounding.rs"
+lines = "140-181"
+title = "round_to_float — shift into the native mantissa position"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "closures"]
+body = """
+A normalized extended float has its top bit at position 63. A native float
+wants it at the hidden-bit position. This function shifts right by the
+difference, applying the supplied rounding rule.
+
+The first branch handles results that would be subnormal. They need a larger
+shift, computed from the exponent, and if that shift exceeds 64 bits the
+value underflows to zero.
+
+The last check deals with a carry. Rounding up a mantissa of all ones
+overflows into the bit above the hidden bit, and one more right shift
+restores the form.
+"""
+
+[[annotation]]
+id    = "json-lexical-rounding-0005"
+file  = "src/lexical/rounding.rs"
+lines = "182-212"
+title = "avoid_overflow — a last chance before infinity"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params"]
+body = """
+If the exponent is at or above the maximum, the value would be infinity.
+But if the mantissa has leading zeros below the hidden bit, shifting it
+left reduces the exponent and may bring it back in range. This function
+checks for that with a mask and shifts if it can.
+"""
+
+[[annotation]]
+id    = "json-lexical-rounding-0006"
+file  = "src/lexical/rounding.rs"
+lines = "213-231"
+title = "round_to_native — normalize, round, check"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "closures"]
+body = """
+The three steps in order. Normalize, so the shifts that follow start from a
+known position. Round into the native layout. Then try to avoid overflow.
+"""

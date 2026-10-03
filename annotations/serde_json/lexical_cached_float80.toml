@@ -1,0 +1,71 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-lexical-cached-float80-0001"
+file  = "src/lexical/cached_float80.rs"
+lines = "1-14"
+title = "Powers of ten as extended floats, computed in Python"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["modules"]
+body = """
+The module comment says where the numbers below came from. They were
+computed with Python's arbitrary-precision integers and written out, each
+one the 64-bit normalized mantissa of a power of ten with its binary
+exponent.
+
+"Exact" in the comment is true of the calculation and not of every entry.
+A power of ten with more than 64 significant bits is rounded to 64. That
+rounding is the half unit of error the moderate path adds for each
+multiplication.
+"""
+
+[[annotation]]
+id    = "json-lexical-cached-float80-0002"
+file  = "src/lexical/cached_float80.rs"
+lines = "15-43"
+title = "The small powers — 10^0 through 10^9"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["zero-cost"]
+body = """
+Ten mantissas and ten exponents. Each mantissa has its top bit set, which
+is what normalized means. `10^0` is `2^63` with exponent −63.
+
+These small powers are exact. `10^9` needs thirty bits.
+"""
+
+[[annotation]]
+id    = "json-lexical-cached-float80-0003"
+file  = "src/lexical/cached_float80.rs"
+lines = "44-179"
+title = "The large powers — every tenth exponent"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["zero-cost"]
+body = """
+Sixty-six mantissas and sixty-six exponents, covering `10^−350` to
+`10^300` in steps of ten.
+
+One annotation covers 136 lines here because there is one thing to say.
+This is a table, and the code that reads it is in `algorithm.rs`.
+"""
+
+[[annotation]]
+id    = "json-lexical-cached-float80-0004"
+file  = "src/lexical/cached_float80.rs"
+lines = "180-206"
+title = "Step, bias, and the assembled table"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["lifetimes"]
+body = """
+`BASE10_SMALL_INT_POWERS` repeats the small powers as integers.
+`BASE10_STEP` is 10 and `BASE10_BIAS` is 350. An exponent is biased by 350,
+divided by 10 to index the large table, and the remainder indexes the small
+one.
+
+`BASE10_POWERS` puts the five arrays and two constants into the struct from
+`cached.rs`, and `get_powers` returns a reference to it.
+"""

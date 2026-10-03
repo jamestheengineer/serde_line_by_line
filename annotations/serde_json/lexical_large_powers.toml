@@ -1,0 +1,19 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-lexical-large-powers-0001"
+file  = "src/lexical/large_powers.rs"
+lines = "1-9"
+title = "large_powers — a name for whichever table was compiled"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "modules"]
+body = """
+Two glob re-exports under opposite `#[cfg]`s. Code elsewhere imports from
+`large_powers` and gets the 32-bit or the 64-bit table without a `#[cfg]`
+of its own.
+
+This is the same facade idea as `io/mod.rs`, selecting on a cfg from the
+build script instead of a Cargo feature.
+"""

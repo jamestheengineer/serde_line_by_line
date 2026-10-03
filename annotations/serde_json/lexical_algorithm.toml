@@ -1,0 +1,104 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-lexical-algorithm-0001"
+file  = "src/lexical/algorithm.rs"
+lines = "1-11"
+title = "Imports for the three paths"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["modules"]
+body = """
+The algorithms module draws on nearly everything else in the directory: the
+big-integer comparison, the cached powers, the error estimate, the extended
+float, and the number traits.
+"""
+
+[[annotation]]
+id    = "json-lexical-algorithm-0002"
+file  = "src/lexical/algorithm.rs"
+lines = "12-70"
+title = "fast_path — when one floating-point operation is exact"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "option"]
+body = """
+IEEE arithmetic guarantees that a single multiplication or division of two
+exactly representable values gives the correctly rounded result. The fast
+path applies whenever the problem can be put in that form.
+
+Two conditions. The mantissa must fit in the float's significand, which is
+53 bits for an `f64`. And the power of ten must itself be exact, which for
+an `f64` means an exponent between −22 and 22. Then `F::as_cast(mantissa)`
+is exact, and `pow10` performs one multiplication or division.
+
+The fourth branch is the "disguised" fast path, with a link to an article
+explaining it. If the exponent is a little too large and the mantissa is
+small, some powers of ten can be moved into the mantissa. `1e25` is not in
+range, but `1000e22` is, as long as the enlarged mantissa still fits. The
+`checked_mul` and the second shift test verify that.
+
+Anything else returns `None`.
+"""
+
+[[annotation]]
+id    = "json-lexical-algorithm-0003"
+file  = "src/lexical/algorithm.rs"
+lines = "71-140"
+title = "multiply_exponent_extended — scale by a power of ten, and count the error"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params"]
+body = """
+The core of the moderate path. The mantissa is multiplied by a cached small
+power and a cached large power of ten, each a 64-bit approximation.
+
+Before that, two early exits. A biased exponent below zero is certain
+underflow, and the mantissa is set to zero. An index past the end of the
+table is certain overflow, and the value is set to infinity.
+
+The `errors` variable accumulates the uncertainty in eighths of a unit. A
+truncated input starts with half a unit. If the small power can be applied
+as an exact integer multiplication, that step adds nothing. If it overflows
+and has to be done as an extended multiplication, it adds half a unit. The
+large multiplication adds half a unit and, if there was already error to
+propagate, one more eighth.
+
+Normalizing shifts the mantissa left, and the error count is shifted with
+it. The return value is the verdict from `error_is_accurate`.
+"""
+
+[[annotation]]
+id    = "json-lexical-algorithm-0004"
+file  = "src/lexical/algorithm.rs"
+lines = "141-162"
+title = "moderate_path — a thin wrapper"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "inlining"]
+body = """
+Builds an `ExtendedFloat` with the mantissa and a binary exponent of zero,
+scales it, and returns the result with the accuracy flag.
+"""
+
+[[annotation]]
+id    = "json-lexical-algorithm-0005"
+file  = "src/lexical/algorithm.rs"
+lines = "163-195"
+title = "fallback_path — moderate, then slow"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params"]
+body = """
+The shared tail of both entry points. If the moderate path is accurate, its
+result is rounded to nearest and returned.
+
+If not, the extended float is rounded *down* to give `b`. A special value
+means infinity, and there is nothing to refine. Otherwise `bhcomp` settles
+it exactly.
+
+Rounding down is deliberate. The slow path needs a float that is known not
+to be above the true value, so that the only question left is whether to
+step up by one.
+"""

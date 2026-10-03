@@ -1,0 +1,35 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-lexical-large-powers64-0001"
+file  = "src/lexical/large_powers64.rs"
+lines = "1-621"
+title = "The same fourteen powers, as 64-bit limbs"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["zero-cost"]
+body = """
+Compiled where `fast_arithmetic` is `"64"`, which includes every common
+desktop and server target and `wasm32`.
+
+The values are the same numbers as in the 32-bit file, packed two 32-bit
+limbs to one. The largest, `5^8192`, is 298 limbs here.
+
+This is the longest single annotation in the project, and the reason is
+that these 621 lines are data. Nothing in them is a decision. The decisions
+are in `imul_pow5`, which reads the table, and in `build.rs`, which chose
+this file over the other.
+"""
+
+[[annotation]]
+id    = "json-lexical-large-powers64-0002"
+file  = "src/lexical/large_powers64.rs"
+lines = "622-625"
+title = "POW5 — the index"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["lifetimes"]
+body = """
+The fourteen constants gathered into an array of slices.
+"""

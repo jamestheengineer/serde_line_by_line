@@ -1,0 +1,31 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-lexical-small-powers-0001"
+file  = "src/lexical/small_powers.rs"
+lines = "1-16"
+title = "Powers of five and ten that fit in a u32"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+Two tables for the 32-bit limb configuration. Fourteen powers of five and
+ten powers of ten is as far as each goes before exceeding `u32::MAX`.
+"""
+
+[[annotation]]
+id    = "json-lexical-small-powers-0002"
+file  = "src/lexical/small_powers.rs"
+lines = "17-70"
+title = "The 64-bit tables — and one that is not gated"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+The same for `u64`: twenty-eight powers of five and twenty powers of ten.
+
+`POW5_64` carries the `#[cfg(fast_arithmetic = "64")]` attribute.
+`POW10_64` does not. It is compiled on every target, because the fast path
+in `algorithm.rs` indexes it whatever the limb width.
+"""

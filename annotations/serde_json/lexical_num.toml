@@ -1,0 +1,172 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-lexical-num-0001"
+file  = "src/lexical/num.rs"
+lines = "1-49"
+title = "Exact powers of ten for f32 and f64"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["zero-cost"]
+body = """
+Two tables of powers of ten written as float literals. The doc comments
+state the property that matters: each entry is exactly representable.
+
+An `f32` has 24 bits of precision and can hold powers of ten up to `10^10`
+exactly. An `f64` has 53 bits and reaches `10^22`. Those limits are the
+bounds of the fast path.
+"""
+
+[[annotation]]
+id    = "json-lexical-num-0002"
+file  = "src/lexical/num.rs"
+lines = "50-99"
+title = "AsPrimitive and as_primitive_impl! — `as`, as a trait"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["traits", "supertraits", "macro-rules", "macro-repetition"]
+body = """
+Rust's `as` casts cannot be used in generic code, because `as` is not a
+trait method. This trait wraps six casts in methods so that a function
+generic over a number type can convert.
+
+The macro implements the trait for six types. The body is the same for
+each: `self as u32`, `self as u64`, and so on. One invocation follows.
+"""
+
+[[annotation]]
+id    = "json-lexical-num-0003"
+file  = "src/lexical/num.rs"
+lines = "100-124"
+title = "AsCast and as_cast_impl! — the same casts, from the target's side"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["traits", "macro-rules", "generic-params"]
+body = """
+`AsPrimitive` converts *from* `Self`. `AsCast` converts *to* `Self`, from
+any `AsPrimitive` type. `F::as_cast(mantissa)` in the algorithm files is
+this.
+
+The macro takes a type and the name of the `AsPrimitive` method that
+produces it, and there are six invocations.
+"""
+
+[[annotation]]
+id    = "json-lexical-num-0004"
+file  = "src/lexical/num.rs"
+lines = "125-154"
+title = "Number and Integer — marker traits with operator bounds"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["traits", "supertraits", "macro-rules", "associated-types"]
+body = """
+`Number` adds `Add` to `AsCast`. `Integer` adds `BitAnd` and `Shr` and a
+`ZERO` constant.
+
+The supertrait bounds with `Output = Self` are what allow generic code to
+write `a & b` and `a >> n` on a type parameter and get the same type back.
+
+Each trait has a small macro implementing it for a list of types.
+`integer_impl!` captures its types as `tt` where the others use `ident`,
+for no visible reason.
+"""
+
+[[annotation]]
+id    = "json-lexical-num-0005"
+file  = "src/lexical/num.rs"
+lines = "155-172"
+title = "Mantissa — constants for splitting a u64 in half"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types"]
+body = """
+Four associated constants, implemented only for `u64`. `HIMASK` and
+`LOMASK` select the upper and lower 32 bits. `FULL` is 64 and `HALF` has a
+default computed from it.
+
+These are what `ExtendedFloat::mul` uses to do its four-part multiplication.
+"""
+
+[[annotation]]
+id    = "json-lexical-num-0006"
+file  = "src/lexical/num.rs"
+lines = "173-246"
+title = "Float — the bit layout of an IEEE float, as constants"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types"]
+body = """
+The trait that lets the algorithm be written once for `f32` and `f64`.
+
+It has one associated type, `Unsigned`, the integer of the same width.
+Then constants describing the format: masks for the exponent, hidden bit
+and mantissa, the mantissa width, the exponent bias, and the limits.
+
+The doc comment on `MAX_DIGITS` is the most substantial. It gives a formula
+from the "Handbook of Floating Point Arithmetic" for the largest number of
+decimal digits that can matter when rounding to a given binary format, and
+a Python expression that evaluates it.
+
+The required methods at the end are mostly re-exports of inherent methods
+that exist on both float types but belong to no shared trait in `core`.
+"""
+
+[[annotation]]
+id    = "json-lexical-num-0007"
+file  = "src/lexical/num.rs"
+lines = "247-307"
+title = "Float's provided methods — classification, decomposition, and the next float up"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "default-methods", "inlining"]
+body = """
+Seven methods with default bodies, written against the constants.
+
+`is_denormal`, `is_special` and `is_inf` test the exponent field. `exponent`
+and `mantissa` decompose the value, adding the hidden bit for normal
+numbers and using the fixed minimum exponent for subnormals.
+
+`next_positive` adds one to the bit pattern. For a positive finite float
+that is always the next representable value, including across an exponent
+boundary. This is the step the slow path takes when the true value is above
+halfway. `round_positive_even` takes it only if the mantissa is odd.
+"""
+
+[[annotation]]
+id    = "json-lexical-num-0008"
+file  = "src/lexical/num.rs"
+lines = "308-364"
+title = "Float for f32"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types"]
+body = """
+The constants for single precision. `MANTISSA_SIZE` is 23 and
+`MAX_DIGITS` is 114.
+
+`EXPONENT_BIAS` is written as `127 + MANTISSA_SIZE`. The usual bias is 127.
+Adding the mantissa size makes the exponent refer to the mantissa as an
+integer and not as a fraction between 1 and 2.
+
+`exponent_limit` is ±10 and `mantissa_limit` is 7, the fast-path bounds.
+`pow10` multiplies for a positive exponent and divides for a negative one,
+using the exact table.
+"""
+
+[[annotation]]
+id    = "json-lexical-num-0009"
+file  = "src/lexical/num.rs"
+lines = "365-421"
+title = "Float for f64"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types"]
+body = """
+The same for double precision. `MANTISSA_SIZE` is 52, `MAX_DIGITS` is 769,
+the exponent limit is ±22 and the mantissa limit is 15.
+
+That 769 is the reason the slow path exists as bounded work. No matter how
+long the input, at most 768 digits and a marker for "something non-zero
+follows" decide the result.
+"""
