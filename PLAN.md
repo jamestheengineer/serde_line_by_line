@@ -1251,7 +1251,7 @@ machines in `read.rs` and `ser.rs` refuse large spans.
 | **K3 — The rest of the engines** ✅ | `de.rs`, `ser.rs`, `io/*`, `iter.rs`, `build.rs` | ~224 | the engines at 100%; every `Deserializer` and `Serializer` method leans on its `serde_core` contract by `prereqs` rather than re-explaining it |
 | **K4 — The `Value` tree** ✅ | `value/*`, `map.rs`, `number.rs`, `raw.rs` | ~283 | the tree at 100%; `value/de.rs` and `value/ser.rs` read as the second implementation of a surface the reader has seen, not a second transcript |
 | **K5 — `lexical/`** ✅ | The float parser, 19 files | ~106 | `lexical/` at 100%; the five constant tables are a table each |
-| **K6 — Plumbing** | `lib.rs`, `error.rs`, `macros.rs` | ~44 | **every line of `serde_json` claimed**; all 38 files in its manifest; all 104 narrative steps name a containing annotation |
+| **K6 — Plumbing** ✅ | `lib.rs`, `error.rs`, `macros.rs` | ~44 | **every line of `serde_json` claimed**; all 38 files in its manifest; all 104 narrative steps name a containing annotation |
 | **K7 — Course units** | 8 new units, 22 through 29 (scope §6) | — | the course track spans three crates, walkable start to finish, D8's forward-reference check enforcing across all of them |
 | **K8 — Ship** | Three reference file-trees, the restated promise, `README` | — | three figures, no total, and each track honest about what it claims |
 
@@ -1435,3 +1435,54 @@ pinned crate. This phase makes almost none. The claims are about what the
 code does line by line, which is read off the source, and the one observable
 behaviour, that the feature changes a parse by one ULP, is the scope doc's
 measurement and is cited as that.
+
+### What K6 shipped
+
+**`serde_json` is at 100%.** 38 files, 18,359 lines, 566 annotations, every
+file named in `annotations/serde_json/manifest.toml`, and the gate hard-fails
+on a gap from here on. It is the third crate to carry the promise, and the
+front page went back to stating it in one sentence: all three crates at 100%,
+all 85 files named.
+
+**And the json walk is now an ordering over the store.** All 104 steps name
+the annotation they land in. The crossings column reads 9, 9, 10, 10, 11, 13,
+17, 11, 14, which is every step in every unit. That is the conversion §12
+performed on the derive walk, done again one file at a time, and the walk's
+own page no longer says that most of its ground is explained nowhere else.
+
+Across K2–K6, 83 steps were retargeted and three needed work. All three were
+narrowed by a line or two where they had cited a neighbouring function's
+brace or doc comment. No annotation boundary had to move, against nine merged
+and one shifted in R2–R5. The difference is the order of the work. There the
+annotations were cut around a walk as they were written. Here the walk
+existed first, and every range was drawn knowing where its stops were.
+
+**Final count: 566 against a projected ~700**, at 32.4 lines per annotation
+against 26.1. It is under the scope doc's stated lower bound of 600.
+
+| group | lines | projected | landed | lines each |
+|---|---:|---:|---:|---:|
+| the engines | 6,287 | ~271 | 219 | 28.7 |
+| the `Value` tree | 7,079 | ~283 | 224 | 31.6 |
+| `lexical/` | 3,708 | ~106 | 85 | 43.6 |
+| plumbing | 1,285 | ~44 | 38 | 33.8 |
+| **total** | **18,359** | **~704** | **566** | **32.4** |
+
+Every group came in under, and for one reason stated four ways. `serde_json`
+repeats itself more than either crate before it. It implements `Serializer`
+five times and `Deserializer` eight, and `serde_core` gives those traits few
+default methods, so each implementation spells out thirty answers of which
+two or three are interesting. It wraps a map in a second map and every
+iterator in a second iterator. It writes its number grammar three times and
+its enum refusals three times. Where the first two crates compressed through
+`macro_rules!` or through shared reading paths, this one compresses because
+an annotation can say "the same, except" about a hundred lines at once. The
+scope doc measured 73 and 50 shared function names between the two
+deserializers and predicted the effect. It underestimated how far it went.
+
+**One figure in this project's history is corrected by this phase.** The
+scope doc called `error.rs` "541 lines" of position tracking. It is 541
+lines, and `make_error` at the bottom of it parses a line and column back out
+of its own `Display` output. A custom error whose message ends in
+" at line 3 column 4" reports `line() == 3`. The json walk's unit 08 is
+titled for this. The reference track now has the annotation that says why.

@@ -1,0 +1,205 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-macros-0001"
+file  = "src/macros.rs"
+lines = "1-52"
+title = "json! — what the macro promises"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["macro-rules"]
+body = """
+Three examples and three rules.
+
+A JSON literal becomes a `Value`. Expressions may appear where values go,
+and their types must implement `Serialize`. Expressions may also appear as
+object keys, and those must implement `Into<String>`. Trailing commas are
+allowed, which JSON itself forbids.
+
+One sentence is easy to pass over. If the interpolated value's `Serialize`
+impl fails, or it contains a map with non-string keys, "the `json!` macro
+will panic". The macro has no way to return an error. An expression such as
+`json!(some_map)` can therefore panic at run time.
+"""
+
+[[annotation]]
+id    = "json-macros-0002"
+file  = "src/macros.rs"
+lines = "53-59"
+title = "json! — one rule that forwards"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "macro-repetition"]
+body = """
+The public macro accepts any non-empty sequence of token trees and passes
+them to `json_internal!`.
+
+The comment gives the reason for the indirection. Rustdoc prints a macro's
+rules as its documentation. Dozens of rules about `@array` and `@object` would
+bury the examples above, so they live in a hidden macro.
+
+`$crate::` is used on the forwarded call so that it resolves to this crate
+wherever `json!` is invoked.
+"""
+
+[[annotation]]
+id    = "json-macros-0003"
+file  = "src/macros.rs"
+lines = "60-70"
+title = "A comment addressed to another project"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["macro-rules", "visibility"]
+body = """
+`json_internal!` is hidden and exported, and the comment explains that it
+is depended on from outside. The Rocket web framework exports its own
+`json!` and calls this macro directly.
+
+The comment then states what may and may not change: the macro must keep
+its calling convention and must not call any new helper macros. A
+`#[doc(hidden)]` item has acquired a compatibility contract.
+"""
+
+[[annotation]]
+id    = "json-macros-0004"
+file  = "src/macros.rs"
+lines = "71-131"
+title = "json_internal! @array — a token muncher with an accumulator"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "macro-repetition", "macro-hygiene"]
+body = """
+The first of three groups of rules. It parses the inside of `[ ... ]` one
+element at a time.
+
+The state is `@array [elements so far] remaining tokens`. Each rule looks at
+the front of the remaining tokens, converts one element, appends it to the
+bracketed list, and invokes the macro again on the rest. When nothing
+remains, the first two rules emit `vec![...]`.
+
+The order of the rules is the design. `null`, `true`, `false`, a bracketed
+group and a braced group each have their own rule ahead of the general
+`$next:expr` rule. They have to. `[1, 2]` is also a valid Rust expression,
+an array, and `{ ... }` is a block. If the `expr` rule saw them first, it
+would capture them as Rust, and a captured `expr` is opaque. It could no
+longer be matched against the JSON rules.
+
+The last rule catches a token where a comma should be and passes it to
+`json_unexpected!`, which accepts nothing. The resulting compile error
+points at that token.
+"""
+
+[[annotation]]
+id    = "json-macros-0005"
+file  = "src/macros.rs"
+lines = "132-160"
+title = "@object — the end states"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "macro-repetition"]
+body = """
+The second group parses the inside of `{ ... }`. Its calling convention is
+`@object map (key so far) (remaining) (remaining again)`, and the header
+comment explains the duplicate: one copy is matched against, and the other
+is kept so that an error can be reported at the right token.
+
+These four rules are the states after a complete entry. The square
+brackets around the key mark it as finished. The entry is inserted with
+`$object.insert(($($key)+).into(), $value)`, which is where the
+`Into<String>` requirement on keys comes from. A comma continues with a
+fresh empty key. No comma ends the object.
+
+`let _ =` discards the `Option` that `insert` returns, so a repeated key
+silently replaces the earlier value.
+"""
+
+[[annotation]]
+id    = "json-macros-0006"
+file  = "src/macros.rs"
+lines = "161-195"
+title = "@object values — after the colon"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "macro-repetition"]
+body = """
+Seven rules that fire once the remaining tokens begin with a colon. They
+mirror the array rules: `null`, `true`, `false`, an array, a map, an
+expression followed by a comma, and a final expression.
+
+Each converts the value with a nested `json_internal!` call and moves to
+the finished-entry state, with the key now in square brackets.
+"""
+
+[[annotation]]
+id    = "json-macros-0007"
+file  = "src/macros.rs"
+lines = "196-236"
+title = "@object keys — one token at a time, and five error rules"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "macro-repetition"]
+body = """
+The key is accumulated by the last rule here, which moves one token from
+the remaining input into the key list and recurses. That continues until a
+colon appears, at which point the value rules above take over. So a key
+can be any sequence of tokens, such as `features[0]`.
+
+The rules before it catch mistakes and turn them into readable compiler
+errors. A missing value and a missing colon both invoke `json_internal!()`
+with no arguments, which fails with "unexpected end of macro invocation".
+A misplaced colon or a comma inside a key is passed to `json_unexpected!`.
+This is where the duplicate copy of the tokens is used: the offending token
+is taken from the copy, so the error points at the user's source.
+
+The parenthesized-key rule lets `(expr): value` work when the key
+expression itself contains a colon.
+"""
+
+[[annotation]]
+id    = "json-macros-0008"
+file  = "src/macros.rs"
+lines = "237-281"
+title = "The main rules — seven cases, and the catch-all"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "macro-hygiene"]
+body = """
+The entry point. `null`, `true` and `false` become the matching variants.
+Empty brackets and braces are handled without invoking the munchers.
+Non-empty ones start the `@array` or `@object` state machine.
+
+For an object, the expansion is a block that declares `let mut object`,
+fills it, and evaluates to it. The identifier `object` is created by the
+macro, and hygiene keeps it from colliding with any variable of the same
+name in an interpolated expression.
+
+The last rule handles everything else. Any Rust expression becomes
+`$crate::to_value(&$other).unwrap()`. This is how numbers, strings and
+variables are converted, and it is the `unwrap` the documentation warns
+about.
+
+The comment says this rule must be last. It matches any expression,
+including ones the rules above are meant to intercept.
+"""
+
+[[annotation]]
+id    = "json-macros-0009"
+file  = "src/macros.rs"
+lines = "282-303"
+title = "Three helper macros"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "visibility"]
+body = """
+`json_internal_vec!` is unused. Its comment says so, names the Rocket
+commit after which it stopped being needed, and it remains exported because
+removing an exported macro would break old versions of that framework.
+
+`json_unexpected!` accepts only empty input. Invoking it with a token is a
+guaranteed compile error mentioning that token, which is its purpose.
+
+`json_expect_expr_comma!` accepts an expression followed by a comma. It is
+invoked with tokens that should have been a value and are not, and the
+compiler's complaint about the mismatch is the error message.
+"""

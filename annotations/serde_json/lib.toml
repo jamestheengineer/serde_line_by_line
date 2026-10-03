@@ -1,0 +1,284 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-lib-0001"
+file  = "src/lib.rs"
+lines = "1-37"
+title = "The crate documentation — three ways to hold JSON"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["modules"]
+body = """
+The crate-level docs open by sorting JSON handling into three kinds: as
+text, as a loosely typed tree, and as a strongly typed Rust structure.
+
+That list is also a map of the crate. Text to and from types is `de.rs`
+and `ser.rs`. The tree is `value/`. And the conversions between tree and
+types are the second `Serializer` and `Deserializer` in `value/`. You have
+now read all of them.
+"""
+
+[[annotation]]
+id    = "json-lib-0002"
+file  = "src/lib.rs"
+lines = "38-114"
+title = "Untyped values — and an honest account of their limits"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+This section shows the `Value` enum, parses a document into one, and
+indexes it.
+
+Two paragraphs are worth more than the example. The first explains why
+printing `v["name"]` shows quotation marks: a `Value` prints as JSON. The
+second is a warning. `Value` is "tedious" for anything substantial, error
+handling is verbose, and "the compiler is powerless to help you" when a key
+is misspelled. `v["nmae"]` compiles and evaluates to null.
+
+The enum shown in the first code block is a copy written into the docs,
+with hidden lines to make it compile as a doctest. It is not the
+definition.
+"""
+
+[[annotation]]
+id    = "json-lib-0003"
+file  = "src/lib.rs"
+lines = "115-176"
+title = "Typed parsing — the same function, a different type annotation"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["traits"]
+body = """
+The typed example parses the same text into a `Person` struct. The comment
+inside it makes the point: this is the same `from_str`, and the only
+difference is the type of the variable the result is assigned to.
+
+That works because `from_str` is generic over `T: Deserialize`, and type
+inference fills in `T` from the annotation.
+
+The closing paragraph gives the argument for typed data in terms of tools.
+Field names autocomplete, and `p.phones[0]` is known to be a `String`.
+"""
+
+[[annotation]]
+id    = "json-lib-0004"
+file  = "src/lib.rs"
+lines = "177-233"
+title = "json! — convenient, with the same caveat"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["macro-rules"]
+body = """
+The macro is introduced with the same examples that appear in
+`value/mod.rs`. The text was written once and placed in both.
+
+The section ends by repeating the limitation. A tree built with `json!` is
+still a tree, and the compiler still cannot check its shape.
+"""
+
+[[annotation]]
+id    = "json-lib-0005"
+file  = "src/lib.rs"
+lines = "234-277"
+title = "Serializing — to_string, to_vec, to_writer"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["traits"]
+body = """
+The serializing counterpart: derive `Serialize`, call `to_string`.
+
+The last paragraph says which types qualify. Anything implementing
+`Serialize`, which covers the standard library types `serde_core`
+implements it for and anything with the derive.
+"""
+
+[[annotation]]
+id    = "json-lib-0006"
+file  = "src/lib.rs"
+lines = "278-301"
+title = "no_std — an allocator is the requirement"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["no-std", "feature-unification"]
+body = """
+The crate works without the standard library as long as there is an
+allocator. The instructions are to disable default features and enable
+`alloc`.
+
+For targets with no allocator at all, the docs point to a different crate.
+`serde_json` needs `Vec` and `String` throughout, as every file's imports
+from `alloc` have shown.
+
+The lines after that are link definitions for the reference-style links
+used above.
+"""
+
+[[annotation]]
+id    = "json-lib-0007"
+file  = "src/lib.rs"
+lines = "302-325"
+title = "Crate attributes — a documentation root and twenty allowed lints"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["modules"]
+body = """
+`html_root_url` tells rustdoc where this crate's docs live, so that links
+from other crates' documentation resolve. It contains the version number,
+which is one of the lines that changes in every release.
+
+The first `allow` block silences twenty Clippy lints from the default set.
+One carries a link to a Clippy bug report. The rest are places where
+upstream prefers its own style, such as `float_cmp`, which a float parser
+cannot avoid.
+"""
+
+[[annotation]]
+id    = "json-lib-0008"
+file  = "src/lib.rs"
+lines = "326-363"
+title = "Pedantic lints, sorted by reason"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["modules"]
+body = """
+A second `allow` block for Clippy's stricter, opt-in group. The comments
+divide the list into reasons: required by the nature of the code, correctly
+used, more readable this way, needed for older compilers, noisy.
+
+`should_implement_trait` is annotated with the two methods that trigger
+it. `Deserializer::from_str` and `into_iter` have names that match standard
+traits and are deliberately inherent methods.
+"""
+
+[[annotation]]
+id    = "json-lib-0009"
+file  = "src/lib.rs"
+lines = "364-370"
+title = "Restrictions — no question mark, documented, no_std"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["no-std", "cfg"]
+body = """
+Six attributes that constrain the crate.
+
+`deny(clippy::question_mark_used)` forbids the `?` operator anywhere in
+the crate. The replacement is the `tri!` macro defined below, and the
+reason is given there.
+
+`allow(non_upper_case_globals)` is for one item: the associated constant
+`should_early_return_if_failed` in `read.rs`.
+
+`deny(missing_docs)` makes an undocumented public item a compile error.
+`no_std` removes the standard prelude, which is why every file imports
+`String` and `Vec` from `alloc` by name.
+"""
+
+[[annotation]]
+id    = "json-lib-0010"
+file  = "src/lib.rs"
+lines = "371-383"
+title = "A compile error for an impossible configuration, and three extern crates"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "no-std"]
+body = """
+If neither `std` nor `alloc` is enabled, `compile_error!` stops the build
+with a sentence explaining what to do. Without it, the user would get
+hundreds of errors about missing types.
+
+`extern crate alloc` is unconditional. `extern crate std` is added when the
+feature is on, which is how a `no_std` crate regains `std`.
+
+`extern crate serde_core as serde` is the line behind every `serde::de` and
+`serde::ser` path in this crate. The dependency is `serde_core`, the crate
+this site annotated first, under the name `serde`.
+"""
+
+[[annotation]]
+id    = "json-lib-0011"
+file  = "src/lib.rs"
+lines = "384-390"
+title = "__private — a path for macro-generated code"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["modules", "visibility", "macro-hygiene"]
+body = """
+A public, hidden module containing a re-export of `alloc::vec`.
+
+The `json!` macro expands in the caller's crate and needs to construct a
+`Vec`. It cannot assume the caller has `vec!` in scope, since the caller
+may be `no_std`. So the expansion names `$crate::__private::vec!`, a path
+that is valid from anywhere.
+"""
+
+[[annotation]]
+id    = "json-lib-0012"
+file  = "src/lib.rs"
+lines = "391-407"
+title = "The public API — six re-exports"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["modules", "visibility", "cfg"]
+body = """
+Everything a user calls as `serde_json::something`. The functions, the two
+engine types, the error, and the `Value` family.
+
+`from_reader`, `to_writer`, `to_writer_pretty` and `Serializer` are
+re-exported only with `std`. `to_string` and `to_vec` are available without
+it.
+
+`#[doc(inline)]` makes the documentation for each item appear at the crate
+root, as though it were defined here.
+"""
+
+[[annotation]]
+id    = "json-lib-0013"
+file  = "src/lib.rs"
+lines = "408-418"
+title = "tri! — the question mark, without the conversion"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "result", "zero-cost"]
+body = """
+The macro you have seen on nearly every fallible line of this crate. It
+matches a `Result`, yields the value on `Ok`, and returns the error on
+`Err`.
+
+The `?` operator does the same and one thing more. It passes the error
+through `From::from`, so that a function can return a different error type
+from the one it received. This crate has one error type and never needs the
+conversion.
+
+The comment gives the measured benefit of leaving it out: four percent
+fewer lines of LLVM IR. Each `?` instantiates a `From` call for the
+optimizer to remove, and with this macro it is never generated.
+
+It is defined before the `mod` declarations because a `macro_rules!` macro
+is visible only to code that comes after it in the source.
+"""
+
+[[annotation]]
+id    = "json-lib-0014"
+file  = "src/lib.rs"
+lines = "419-441"
+title = "Twelve modules — which are public, and which exist at all"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["modules", "visibility", "cfg"]
+body = """
+The module tree. `#[macro_use]` on `macros` makes the `json!` family
+available to the modules declared after it.
+
+`de`, `error`, `map` and `value` are public modules. `ser` is declared
+twice. With `std` it is `pub mod ser`. Without, it is a private `mod ser`,
+and its functions are reachable only through the re-exports above.
+
+`io`, `number` and `read` are always private. Their public types reach
+users through `de`, `value` and the crate root.
+
+Three modules exist only under a feature. `iter` needs `std`, `lexical`
+needs `float_roundtrip`, and `raw` needs `raw_value`. These three lines are
+the gates the files themselves do not carry.
+"""

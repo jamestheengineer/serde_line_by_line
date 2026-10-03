@@ -1,0 +1,317 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-error-0001"
+file  = "src/error.rs"
+lines = "1-14"
+title = "Imports — both of serde_core's Error traits"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "modules"]
+body = """
+`use serde::{de, ser}` brings in the two modules that each define an
+`Error` trait. This file implements both for one type, so that the same
+`serde_json::Error` is returned from serializing and deserializing.
+
+`crate::io` is the facade, which matters here because an I/O error is one
+of the things an `Error` can hold. The two `std`-gated imports are for the
+parts that only make sense with the real standard library: the `Error`
+trait's `source` chain and `io::ErrorKind`.
+"""
+
+[[annotation]]
+id    = "json-error-0002"
+file  = "src/error.rs"
+lines = "15-26"
+title = "Error — one pointer wide"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["smart-pointers", "custom-errors", "result"]
+body = """
+The public error type is a struct holding a `Box`. The doc comment on the
+field gives the reason, and it is a measurement: a larger `Error` made the
+crate "substantially slower".
+
+Almost every function in the parser returns `Result<T, Error>`. A `Result`
+is at least as large as its larger variant, so a wide error type makes every
+return value wide, including the successful ones that are nearly all of
+them. Boxing moves the cost to the failure path, which allocates. `Error`
+is the size of one pointer.
+
+`Result<T>` is the alias used throughout the crate. It shadows the
+standard `Result`, which is why some files import `core::result` to name
+the two-parameter form.
+"""
+
+[[annotation]]
+id    = "json-error-0003"
+file  = "src/error.rs"
+lines = "27-47"
+title = "line and column — one-based, except when they are zero"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["custom-errors"]
+body = """
+Two accessors with careful doc comments. Lines and columns are counted from
+1.
+
+The note on `column` admits an exception. A column of 0 is possible, for
+example when a read fails immediately after a newline. That is the
+`LineColIterator` convention showing through: its column is 0 after a
+newline until the next byte arrives.
+
+A line of 0 has a different meaning, used throughout this file. It means the
+error has no position at all.
+"""
+
+[[annotation]]
+id    = "json-error-0004"
+file  = "src/error.rs"
+lines = "48-113"
+title = "classify — four categories from twenty-five codes"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "custom-errors"]
+body = """
+`classify` maps the private error code to a public category. The match is
+exhaustive with no wildcard, so adding a code without categorising it is a
+compile error.
+
+`Message` is `Data`. Those are the errors created through `serde_core`'s
+`Error::custom`, which is what a `Deserialize` impl uses to say the input
+was well-formed and wrong for the type. The four end-of-input codes are
+`Eof`. Everything else is `Syntax`.
+
+Some of the `Syntax` entries are not about syntax. `KeyMustBeAString` and
+`FloatKeyMustBeFinite` arise when serializing, and
+`RecursionLimitExceeded` is a limit and not a grammar rule. The four
+categories are coarse, and these had to go somewhere.
+
+The four `is_*` methods compare against `classify`. `is_eof`'s doc comment
+names its use: a streaming caller can wait for more input and retry.
+"""
+
+[[annotation]]
+id    = "json-error-0005"
+file  = "src/error.rs"
+lines = "114-163"
+title = "io_error_kind — looking inside an I/O failure"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "option"]
+body = """
+Returns the `ErrorKind` of the underlying I/O error, if that is what this
+error is. The example defines a reader that times out and shows a caller
+distinguishing that from other failures.
+
+It needs `std` because `ErrorKind` is a `std::io` type with no substitute
+in the `no_std` facade worth exposing.
+"""
+
+[[annotation]]
+id    = "json-error-0006"
+file  = "src/error.rs"
+lines = "164-186"
+title = "Category"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["traits"]
+body = """
+The public enum `classify` returns. It derives `Copy`, `PartialEq` and
+`Debug`, which the comparison methods above need.
+
+The doc comments repeat the definitions, and `Data`'s has the clearest
+example: a JSON number where the type being built holds a `String`.
+"""
+
+[[annotation]]
+id    = "json-error-0007"
+file  = "src/error.rs"
+lines = "187-229"
+title = "From Error for io::Error — unwrap it, or wrap it"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "traits", "pattern-matching"]
+body = """
+A `serde_json::Error` can be converted into an `io::Error`. If it was
+holding one, that one is returned. Otherwise a new `io::Error` is built
+with the JSON error inside it as the cause, with kind `UnexpectedEof` for
+end-of-input and `InvalidData` for the rest.
+
+The doc example shows the pattern this supports: an application error enum
+that routes I/O failures one way and JSON failures another.
+
+`Category::Io => unreachable!()` is correct because the `if let` above has
+already taken that case. The `allow` silences a lint that objects to a
+`From` impl containing a panic path.
+"""
+
+[[annotation]]
+id    = "json-error-0008"
+file  = "src/error.rs"
+lines = "230-312"
+title = "ErrorImpl and ErrorCode — what is inside the box"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["custom-errors", "visibility", "smart-pointers"]
+body = """
+`ErrorImpl` is the boxed payload: a code, a line and a column.
+
+`ErrorCode` is `pub(crate)`. Callers of the crate cannot match on it. They
+get `classify` and the `Display` text. That keeps the list of codes free to
+change.
+
+Two variants carry data. `Message(Box<str>)` holds free text, boxed as a
+`str` and not a `String` because it is never modified and a `Box<str>` is
+one word smaller. `Io` holds the I/O error.
+
+The other twenty-three are unit variants, each naming one thing the parser
+or serializer can object to. You have seen most of them raised.
+`LoneLeadingSurrogateInHexEscape` is the one whose name `read.rs` admits is
+wrong for one of its uses. The doc comment on `RecursionLimitExceeded` says
+"more than 128 layers deep", and the limit you saw enforced is reached at
+128.
+"""
+
+[[annotation]]
+id    = "json-error-0009"
+file  = "src/error.rs"
+lines = "313-348"
+title = "syntax, io, fix_position — three constructors"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["custom-errors", "closures", "inlining"]
+body = """
+`syntax` builds an error with a code and a position. It is the constructor
+`read.rs` and `de.rs` call. Serializers call it too, with zeros.
+
+`io` wraps an I/O error with no position. It is `pub` and hidden, with a
+comment saying it should be `pub(crate)` and naming another crate that
+depends on it.
+
+`fix_position` is the mechanism behind every "error with no position"
+remark in `de.rs`. If the line is 0, the error is taken apart and its code
+is passed to a closure, which builds a new error at the parser's current
+position. If the line is already set, the error is returned unchanged.
+
+All three are `#[cold]`.
+"""
+
+[[annotation]]
+id    = "json-error-0010"
+file  = "src/error.rs"
+lines = "349-388"
+title = "Display for ErrorCode — the message text"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "pattern-matching"]
+body = """
+One string per code. These are the messages users see, and several are
+quoted in tests across the ecosystem, which makes them hard to change.
+
+`ExpectedNumericKey` begins with "invalid value:", imitating the prefix
+`serde_core` puts on its own `invalid_value` errors.
+"""
+
+[[annotation]]
+id    = "json-error-0011"
+file  = "src/error.rs"
+lines = "389-398"
+title = "The standard Error trait — through serde_core's alias"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "cfg", "no-std"]
+body = """
+`serde::de::StdError` is `std::error::Error` when `std` is available, and
+`serde_core`'s own minimal substitute when it is not. You read that
+substitute in `std_error.rs`. Implementing the alias lets this impl exist
+in both builds.
+
+`source` is defined only with `std`. For an I/O error it returns that
+error's own source, skipping the I/O error itself.
+"""
+
+[[annotation]]
+id    = "json-error-0012"
+file  = "src/error.rs"
+lines = "399-418"
+title = "Display for Error — the position is a suffix"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits"]
+body = """
+`Error`'s `Display` forwards to `ErrorImpl`'s. That impl prints the code,
+and if the line is not 0, appends " at line L column C".
+
+The format matters beyond presentation. A function at the bottom of this
+file parses this exact suffix back out of a string.
+"""
+
+[[annotation]]
+id    = "json-error-0013"
+file  = "src/error.rs"
+lines = "419-432"
+title = "Debug for Error — written for unwrap"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits"]
+body = """
+The comment explains the audience. `unwrap()` on an `Err` prints the
+`Debug` form, so this is the representation people most often see.
+
+A derived `Debug` would show the `Box`, the `ErrorImpl` struct and the
+`ErrorCode` variant. This prints `Error("message", line: 1, column: 3)`,
+with the code rendered through `Display`.
+"""
+
+[[annotation]]
+id    = "json-error-0014"
+file  = "src/error.rs"
+lines = "433-480"
+title = "de::Error and ser::Error — custom messages, and JSON's own words"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "custom-errors", "trait-objects"]
+body = """
+Both of `serde_core`'s `Error` traits require `custom`, which takes any
+`Display` value. Both impls format it to a string and call `make_error`.
+
+`de::Error` also has provided methods for common failures. Two are
+overridden here, `invalid_type` and `invalid_value`, to change how the
+unexpected value is described. `JsonUnexpected` wraps `serde_core`'s
+`Unexpected` and replaces two of its renderings. A unit is printed as
+`null`, where `serde_core` would say "unit value", since that is what a
+JSON user wrote. A float is printed with `zmij`, so that `1.0` appears as
+`1.0` and not as `1`.
+
+Everything else falls through to `serde_core`'s `Display`.
+"""
+
+[[annotation]]
+id    = "json-error-0015"
+file  = "src/error.rs"
+lines = "481-541"
+title = "make_error — parsing a position back out of a message"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings", "option"]
+body = """
+The comment states the problem. Some crates, `erased-serde` among them,
+pass errors through `de::Error::custom` by formatting them and rebuilding
+them from the string. An error that had a line and column comes out the
+other side as plain text ending in " at line 3 column 4", with its numeric
+position lost.
+
+`make_error` recovers it. `parse_line_col` finds the last " at line ",
+reads digits, requires " column ", reads digits, and requires that nothing
+follows. If all of that matches, the suffix is cut off the message and the
+numbers are stored in the error's fields.
+
+The effect is that any custom message that happens to end in that pattern
+has it interpreted as a position. A `Deserialize` impl that calls
+`custom("x at line 3 column 4")` produces an error whose `line()` is 3.
+
+`starts_with_digit` checks one byte, and the scanning loops are by hand.
+The crate does not pull in a parser for its own error messages.
+"""

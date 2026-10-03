@@ -46,4 +46,7 @@ complete = [
     "src/lexical/rounding.rs",
     "src/lexical/shift.rs",
     "src/lexical/small_powers.rs",
+    "src/error.rs",
+    "src/lib.rs",
+    "src/macros.rs",
 ]

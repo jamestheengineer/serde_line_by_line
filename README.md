@@ -34,10 +34,10 @@ the way through and running the expansion in your browser.
 > 21 units. Two walks follow a path rather than claiming ground: one through
 > `serde_derive`, and one through `serde_json` (PLAN.md §13).
 >
-> `serde_json` is the third `coverage` source as of PLAN.md §14 and its
-> reference track is in progress. The front page states how far it has got,
-> counted during the build; this file does not repeat a figure that moves
-> every phase.
+> `serde_json` is the third `coverage` source as of PLAN.md §14. Every line of
+> it is claimed — 18,359 of 18,359, in 566 annotations — and all 38 of its
+> files are named complete. Its course units are being written, and until
+> they are this file leaves the first two crates' sections as they stood.
 >
 > **Reference** — every line of both annotated crates: `serde_core`'s 19 files
 > and `serde_derive`'s 28, all at 100% and all listed in their
