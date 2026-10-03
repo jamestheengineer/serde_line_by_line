@@ -1,0 +1,50 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-build-0001"
+file  = "build.rs"
+lines = "1-6"
+title = "A build script that declares the cfg it is about to set"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+This file is not under `src/`. It is compiled and run by Cargo before the
+crate, and what it prints to standard output is read as instructions.
+
+Two instructions come first. `rerun-if-changed=build.rs` tells Cargo the
+script depends on nothing but itself, so it is not re-run when a source file
+changes. `rustc-check-cfg` declares that `fast_arithmetic` is a real cfg with
+exactly two values. Without that declaration the compiler's `unexpected_cfgs`
+lint would warn at every `#[cfg(fast_arithmetic = "64")]` in the crate, since
+a name set by a build script is otherwise unknown to it.
+"""
+
+[[annotation]]
+id    = "json-build-0002"
+file  = "build.rs"
+lines = "7-30"
+title = "fast_arithmetic — choosing a limb width the target does well"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+The script answers one question: is 64-bit arithmetic cheap on this target?
+It prints `fast_arithmetic="64"` or `"32"`, and code under `src/` picks a type
+on that basis.
+
+Cargo passes the target's properties to build scripts as environment
+variables, which is why this reads `CARGO_CFG_TARGET_ARCH` instead of using
+`#[cfg(target_arch)]`. A `#[cfg]` inside a build script describes the machine
+doing the build, which is the wrong machine when cross-compiling.
+
+The comment explains why the test is not just pointer width. Some targets
+have 64-bit registers and 32-bit pointers, such as the x32 ABI on x86_64.
+`usize` there is 32 bits and 64-bit arithmetic is still native. `wasm32` is in
+the list for the same reason.
+
+The cfg is read in two places. `read.rs` uses it for the chunk size of the
+string scanner. The float parser in `lexical/` uses it for the limb type of
+its big integers and for which tables of powers to compile.
+"""

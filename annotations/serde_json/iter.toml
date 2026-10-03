@@ -1,0 +1,66 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-iter-0001"
+file  = "src/iter.rs"
+lines = "1-21"
+title = "LineColIterator — three counters around a byte iterator"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["generic-params", "iterators"]
+body = """
+This is the stream reader's position tracker. It wraps any iterator of bytes
+and counts as they go past, because a stream cannot be searched afterwards
+the way a slice can.
+
+The doc comments on the fields define the conventions. Lines start at 1.
+Column is 0 immediately after a newline and 1 on the first character of a
+line, so `col` is the number of bytes consumed on the current line.
+
+`start_of_line` is the field to notice. It is the byte offset where the
+current line began. Storing it means an ordinary byte updates only `col`, and
+the total offset is derived when asked for.
+"""
+
+[[annotation]]
+id    = "json-iter-0002"
+file  = "src/iter.rs"
+lines = "22-47"
+title = "new and the three accessors"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["iterators", "where-clauses"]
+body = """
+The bound is `I: Iterator<Item = io::Result<u8>>`, which is the item type of
+`io::Bytes`. Each byte arrives already wrapped in a `Result`, since any read
+can fail.
+
+`new` starts at line 1, column 0, offset 0. `line` and `col` return fields.
+`byte_offset` is the sum described above: bytes before this line plus bytes
+on it.
+"""
+
+[[annotation]]
+id    = "json-iter-0003"
+file  = "src/iter.rs"
+lines = "48-70"
+title = "Iterator for LineColIterator — counting on the way through"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["iterators", "pattern-matching", "associated-types"]
+body = """
+Every item is passed through unchanged. The match exists to update counters.
+
+A newline closes the line. `start_of_line` grows by the line's length plus
+one for the newline itself, the line number goes up, and the column resets to
+0. Any other byte increments the column. An error or the end of input changes
+nothing.
+
+Only `\\n` counts as a line break. A `\\r` is an ordinary byte and advances the
+column, so a file with Windows line endings reports columns one higher at the
+end of each line than its visible characters would suggest.
+
+The counters move when the byte is pulled, not when the parser consumes it.
+That is why `IoRead::peek_position` can return the same value as `position`.
+"""

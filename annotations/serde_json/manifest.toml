@@ -12,4 +12,10 @@ source = "serde_json-1.0.151"
 
 complete = [
     "src/read.rs",
+    "src/de.rs",
+    "src/iter.rs",
+    "src/io/mod.rs",
+    "src/io/core.rs",
+    "build.rs",
+    "src/ser.rs",
 ]

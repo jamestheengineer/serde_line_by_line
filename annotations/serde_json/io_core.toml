@@ -1,0 +1,100 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-io-core-0001"
+file  = "src/io/core.rs"
+lines = "1-7"
+title = "The no_std stand-in for std::io"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["no-std"]
+body = """
+This file is compiled only when the `std` feature is off. Its three imports
+are from `alloc` and `core`, which is the whole budget.
+
+It is not a general I/O library. It contains what the serializer needs to
+write into a `Vec<u8>` and nothing else.
+"""
+
+[[annotation]]
+id    = "json-io-core-0002"
+file  = "src/io/core.rs"
+lines = "8-29"
+title = "An Error that cannot occur"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["no-std", "custom-errors"]
+body = """
+`Error` is a unit struct and `ErrorKind` has one variant. They exist so that
+code written against `std::io` compiles unchanged: the same
+`io::Error::new(io::ErrorKind::Other, "...")` expression type-checks in both
+builds.
+
+The comment states the invariant. Every writer available without `std` is
+infallible, so no code path produces one of these as a real failure. The
+`Display` impl says the same thing more forcefully. It is `unreachable!()`,
+which is a claim that nobody will ever format this value, and a panic if the
+claim is wrong.
+
+`Error::new` throws away both arguments. In the `std` build the message
+matters. Here there is nowhere to keep it.
+"""
+
+[[annotation]]
+id    = "json-io-core-0003"
+file  = "src/io/core.rs"
+lines = "30-44"
+title = "Write — three methods, one of them trusting"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "default-methods", "no-std"]
+body = """
+The same three method names as `std::io::Write`, with the same signatures in
+terms of this module's `Result`.
+
+`write_all` has a default body and it is not the loop `std` uses. It calls
+`write` once and returns `Ok(())`. That would be wrong for a writer that can
+accept part of a buffer. The comment says no such writer exists here, and the
+two `debug_assert!` lines check it in debug builds: the call succeeded and
+the count equals the buffer length. In a release build the checks are gone
+and the assumption is simply relied on.
+"""
+
+[[annotation]]
+id    = "json-io-core-0004"
+file  = "src/io/core.rs"
+lines = "45-61"
+title = "Write for &mut W — lending a writer"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["blanket-impls", "inlining"]
+body = """
+The blanket impl `std` also has. A `&mut W` is a writer when `W` is, so a
+function that takes a writer by value can be given a borrowed one.
+
+Each method dereferences once and forwards. `(*self).write(buf)` calls `W`'s
+method on the `W` behind the reference. All three are forwarded, including
+`write_all`, so a type that overrides the default keeps its override when it
+is used through a reference.
+"""
+
+[[annotation]]
+id    = "json-io-core-0005"
+file  = "src/io/core.rs"
+lines = "62-79"
+title = "Write for Vec<u8> — the only real writer without std"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["collections", "inlining", "no-std"]
+body = """
+This is the impl the `no_std` build exists for. `to_vec` and `to_string`
+serialize into a `Vec<u8>`, and this makes that vector a writer.
+
+`write` appends the whole buffer and reports its full length. `write_all` is
+overridden to skip the default's bookkeeping and do the same append. `flush`
+has nothing to flush.
+
+Every method returns `Ok`. This impl is the evidence for the claim made at
+the top of the file, that I/O errors cannot occur in this mode.
+"""

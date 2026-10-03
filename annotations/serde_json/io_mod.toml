@@ -1,0 +1,44 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-io-mod-0001"
+file  = "src/io/mod.rs"
+lines = "1-9"
+title = "Why there is an io module at all"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["no-std"]
+body = """
+The serializer writes to an `io::Write`, and `std::io` does not exist without
+the standard library. This module is the answer: one name, `crate::io`, that
+means `std::io` when `std` is on and a small substitute when it is off.
+
+The doc comment gives the reason the traits never moved into `core`.
+`io::Error` can hold a boxed error, which needs an allocator, and may capture
+a backtrace, which needs an operating system. Neither belongs in `core`, and
+`Read` and `Write` name that error type in every signature.
+"""
+
+[[annotation]]
+id    = "json-io-mod-0002"
+file  = "src/io/mod.rs"
+lines = "10-20"
+title = "The facade — one re-export, two sources"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "modules", "no-std", "visibility"]
+body = """
+The first line of code re-exports four names from `self::imp`, and the rest of the file
+decides what `imp` is.
+
+Without `std`, `#[path = "core.rs"] mod imp;` declares a module whose source
+is the file next to this one. The `path` attribute is needed because the
+module is named `imp` and the file is not. With `std`, `use std::io as imp`
+makes `imp` an alias for the real thing. Either way the re-export resolves,
+and the rest of the crate writes `io::Write` without a `#[cfg]`.
+
+`Bytes` and `Read` are re-exported only with `std`. There is no substitute
+for them, because reading from a stream is not offered in a `no_std` build.
+That is the same line `read.rs` draws when it gates `IoRead`.
+"""

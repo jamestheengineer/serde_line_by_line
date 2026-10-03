@@ -1,0 +1,1267 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-ser-0001"
+file  = "src/ser.rs"
+lines = "1-14"
+title = "Imports — the other half of serde_core"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "modules"]
+body = """
+`serde::ser` is the serializing half of the data model. `Serialize` is the
+trait a value implements, and `ser` itself is imported so the seven compound
+traits can be named as `ser::SerializeSeq` and so on. `Impossible` is the
+uninhabited helper type from `serde_core`, used below where a serializer has
+to name a type it will never construct.
+
+`crate::io` is the facade from `io/mod.rs`, so `io::Write` means the standard
+trait in a `std` build and the substitute otherwise.
+
+`FpCategory` is how the float methods ask whether a value is finite. `hint`
+is imported for `hint::unreachable_unchecked`, which appears once, much
+further down. `ToString` is needed only with `raw_value`.
+"""
+
+[[annotation]]
+id    = "json-ser-0002"
+file  = "src/ser.rs"
+lines = "15-78"
+title = "Serializer — a writer, a formatter, and seven names for one type"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "associated-types", "traits", "where-clauses", "lifetimes"]
+body = """
+The serializer is two fields. `writer` is where bytes go. `formatter` decides
+what the punctuation between values looks like.
+
+`F = CompactFormatter` is a default type parameter. `Serializer<W>` written
+with one argument means the compact one. The constructors are split across
+three impl blocks so that inference works: `new` is defined only for the
+default formatter and `pretty` only for `PrettyFormatter`, so neither call
+needs a type annotation. `with_formatter` is the general constructor, and
+`into_inner` gives the writer back.
+
+Then the trait impl. As on the deserializing side, `serde_core`'s
+`Serializer` is implemented for `&'a mut Serializer<W, F>`, because the
+trait's methods take `self` by value and one serializer has to write many
+values.
+
+`type Ok = ()` says a finished serialization returns nothing. The output has
+already gone to the writer. The seven compound associated types are all the
+same type, `Compound`. `serde_core` lets a format use seven different types
+for sequences, tuples, maps, structs and their variants. JSON has two
+bracket styles, and one enum with a small state field covers all seven.
+"""
+
+[[annotation]]
+id    = "json-ser-0003"
+file  = "src/ser.rs"
+lines = "79-153"
+title = "bool and ten integer widths — the serializer writes nothing itself"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["inlining", "result"]
+body = """
+Eleven methods with one body. Each calls the matching `write_*` method on the
+formatter, passing the writer, and converts an I/O error into the crate's
+error type with `map_err(Error::io)`.
+
+This is the division of labour for the whole file. The `Serializer` impl
+decides *what* to write, in terms of the data model. The `Formatter` trait
+decides the bytes. A method here never calls `write_all` directly.
+
+All of them are `#[inline]` except the two 128-bit methods. Those are rare,
+and their formatting code is larger.
+"""
+
+[[annotation]]
+id    = "json-ser-0004"
+file  = "src/ser.rs"
+lines = "154-181"
+title = "f32 and f64 — NaN and infinity become null"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+JSON numbers cannot express NaN or infinity. The grammar has no spelling for
+them.
+
+`value.classify()` returns an `FpCategory`, and for the two non-finite
+categories this writes `null`. Everything else goes to the formatter as a
+number.
+
+This is a silent, lossy choice and you should know it is there. A struct with
+an `f64` field holding NaN serializes without error. Reading the output back
+into the same struct then fails, because `null` is not a number. The
+alternative would have been to return an error from serialization, and
+upstream chose output that is always valid JSON.
+"""
+
+[[annotation]]
+id    = "json-ser-0005"
+file  = "src/ser.rs"
+lines = "182-200"
+title = "char, str and bytes — a string, a string, and an array of numbers"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings", "inlining"]
+body = """
+A `char` is encoded into a four-byte stack buffer and serialized as a
+one-character string. JSON has no character type.
+
+`serialize_str` calls `format_escaped_str`, a free function further down that
+writes the quotes and escapes what must be escaped.
+
+`serialize_bytes` goes to `write_byte_array`, whose default writes the bytes
+as a JSON array of integers. `b"ab"` becomes `[97,98]`. JSON has no binary
+type, and this is the form `deserialize_bytes` accepts back alongside
+strings.
+"""
+
+[[annotation]]
+id    = "json-ser-0006"
+file  = "src/ser.rs"
+lines = "201-231"
+title = "unit, unit struct, unit variant, newtype struct"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings", "sized-bound"]
+body = """
+Four methods that settle how the "empty" and "transparent" parts of the data
+model look in JSON.
+
+`()` is `null`. A unit struct is also `null`, and its name is discarded. A
+unit variant is its name as a string, so `Color::Red` is `"Red"`. A newtype
+struct is its inner value with nothing around it, as the doc comment says.
+
+`T: ?Sized + Serialize` appears on every generic method in this impl. The
+`?Sized` allows `T` to be `str` or a slice, which are serialized through
+references and have no size of their own.
+"""
+
+[[annotation]]
+id    = "json-ser-0007"
+file  = "src/ser.rs"
+lines = "232-269"
+title = "newtype variant — the externally tagged form, spelled out in formatter calls"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["sized-bound", "result"]
+body = """
+`E::V(x)` becomes `{"V": x}`. This method writes that one piece at a time,
+and it is worth reading once slowly because every compound method below is
+some subset of the same sequence.
+
+Open an object. Begin a key, passing `true` because it is the first key.
+Write the variant name as a string. End the key. Begin the value. Serialize
+the inner value. End the value. Close the object.
+
+Eight calls, of which seven only tell the formatter where it is. The compact
+formatter writes one byte for most of them and nothing for some. The pretty
+formatter uses the same calls to place newlines and indentation.
+
+`value.serialize(&mut *self)` re-borrows the serializer for the nested
+value, so that `self` can be used again afterwards.
+"""
+
+[[annotation]]
+id    = "json-ser-0008"
+file  = "src/ser.rs"
+lines = "270-282"
+title = "none and some — null, or the value"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["option", "sized-bound"]
+body = """
+`None` is `null`. `Some(x)` is `x`, with no wrapper.
+
+This is the serializing side of what you saw in `deserialize_option`, with
+the same consequence. `Some(None)` and `None` both produce `null`, and the
+distinction does not survive a round trip.
+"""
+
+[[annotation]]
+id    = "json-ser-0009"
+file  = "src/ser.rs"
+lines = "283-319"
+title = "seq, tuple, tuple struct — and why an empty array is closed immediately"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["option", "pattern-matching"]
+body = """
+`serialize_seq` writes the opening bracket and returns a `Compound` through
+which the elements will be written.
+
+The `len == Some(0)` branch closes the array at once and returns the state
+`Empty`, which tells the eventual `end` call to do nothing. The point is the
+pretty printer. Its `end_array` writes a newline and indentation before the
+`]` if anything was written since the bracket opened. Closing immediately is
+what makes an empty array print as `[]` on one line.
+
+The variant returned is called `Compound::Map` even though this is an array.
+The name is historical. The variant means "an ordinary bracketed container".
+
+Tuples and tuple structs are arrays, and both forward with a known length.
+"""
+
+[[annotation]]
+id    = "json-ser-0010"
+file  = "src/ser.rs"
+lines = "320-347"
+title = "tuple variant — an object opened here and closed somewhere else"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["result"]
+body = """
+`E::V(a, b)` becomes `{"V": [a, b]}`. This method writes `{"V":` and then
+calls `serialize_seq` for the array.
+
+It returns with the outer object still open. Nothing in the returned
+`Compound` records that. The closing brace is written by the `end` method of
+the `SerializeTupleVariant` impl, which knows from which trait it is being
+called that an outer object is waiting.
+"""
+
+[[annotation]]
+id    = "json-ser-0011"
+file  = "src/ser.rs"
+lines = "348-370"
+title = "serialize_map — the same shape with braces"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["option"]
+body = """
+Identical to `serialize_seq` with `begin_object` and `end_object`. An empty
+map is closed immediately for the same reason an empty array is.
+
+`len` is used only for that zero test. JSON does not write lengths, so a map
+of unknown size, `None`, is handled exactly like a map of known non-zero
+size.
+"""
+
+[[annotation]]
+id    = "json-ser-0012"
+file  = "src/ser.rs"
+lines = "371-381"
+title = "serialize_struct — an object, unless the name is a secret token"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "cfg", "strings"]
+body = """
+A struct is serialized as an object, by forwarding to `serialize_map`.
+
+The two gated arms are the serializing end of a private protocol. With
+`arbitrary_precision`, a `Number` serializes itself as a struct whose name is
+a reserved string. With `raw_value`, `RawValue` does the same with a
+different one. This method recognises those names and returns a special
+`Compound` variant that will write the payload verbatim.
+
+The data model has no way to say "emit this text unquoted", so the request is
+encoded as a struct with a name no user type would choose. You saw the
+receiving end in `deserialize_newtype_struct`.
+"""
+
+[[annotation]]
+id    = "json-ser-0013"
+file  = "src/ser.rs"
+lines = "382-409"
+title = "struct variant — an object inside an object"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["result"]
+body = """
+`E::V { a, b }` becomes `{"V": {"a": ..., "b": ...}}`. The method writes the
+outer `{"V":` with the same five calls as the other variant forms and then
+calls `serialize_map` for the inner object.
+
+As with tuple variants, the outer brace is left open for the matching `end`.
+"""
+
+[[annotation]]
+id    = "json-ser-0014"
+file  = "src/ser.rs"
+lines = "410-459"
+title = "collect_str — writing a Display value without building a String"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "closures", "option", "custom-errors"]
+body = """
+`collect_str` serializes anything that implements `Display` as a JSON string.
+`serde_core`'s default does it by formatting into a temporary `String`. This
+override streams the formatted text into the output.
+
+The local `Adapter` type bridges two traits. `write!` needs a `fmt::Write`.
+The output is an `io::Write` that requires escaping. The adapter implements
+`fmt::Write::write_str` by passing each fragment through
+`format_escaped_str_contents`.
+
+There is a mismatch in the error types. `fmt::Error` is a unit struct and
+cannot carry a cause. So the adapter stores the real `io::Error` in a field,
+returns the empty `fmt::Error` to stop the formatting, and the caller picks
+the stored error up afterwards. The `expect` documents the invariant that a
+formatting failure always has one.
+
+The quotes are written outside the adapter, by `begin_string` and
+`end_string`, since a value may arrive in several fragments.
+"""
+
+[[annotation]]
+id    = "json-ser-0015"
+file  = "src/ser.rs"
+lines = "460-481"
+title = "State and Compound — public by necessity"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["visibility", "cfg", "lifetimes"]
+body = """
+Both types carry the same comment: not public API, should be `pub(crate)`.
+
+They are `pub` because of a rule about interfaces. `Compound` is named as an
+associated type in a public trait impl, and a type that appears in a public
+interface must itself be nameable as public. `#[doc(hidden)]` keeps it out of
+the documentation.
+
+`State` has three values. `First` means nothing has been written inside the
+brackets. `Rest` means something has, so the next item needs a comma.
+`Empty` means the container was closed as soon as it was opened.
+
+`Compound::Map` holds the borrowed serializer and that state. The two gated
+variants hold only the serializer. They are the special modes for a number
+or raw value being emitted as text.
+"""
+
+[[annotation]]
+id    = "json-ser-0016"
+file  = "src/ser.rs"
+lines = "482-528"
+title = "SerializeSeq for Compound — one element"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "pattern-matching", "sized-bound"]
+body = """
+`serialize_element` tells the formatter an array value is beginning and
+whether it is the first. The compact formatter writes a comma when it is
+not. The state becomes `Rest`, the element is serialized, and the formatter
+is told the value has ended.
+
+`value.serialize(&mut **ser)` has two dereferences because `self` is matched
+by reference. `ser` is a `&mut &'a mut Serializer`, and the nested call needs
+a plain `&mut Serializer`.
+
+`end` writes the closing bracket unless the state is `Empty`, in which case
+it was written already.
+
+The two gated arms are `unreachable!()`. Those variants are only created by
+`serialize_struct`, and a struct is never driven through `SerializeSeq`.
+"""
+
+[[annotation]]
+id    = "json-ser-0017"
+file  = "src/ser.rs"
+lines = "529-572"
+title = "SerializeTuple and SerializeTupleStruct — forwarding to the sequence impl"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits"]
+body = """
+Two traits, each with two methods, each forwarding to `SerializeSeq`.
+
+The calls are fully qualified, `ser::SerializeSeq::serialize_element(self,
+value)`, because `Compound` implements several traits with a method of the
+same name. A plain method call would be ambiguous.
+
+`SerializeTupleStruct` calls its method `serialize_field`. The JSON is the
+same array.
+"""
+
+[[annotation]]
+id    = "json-ser-0018"
+file  = "src/ser.rs"
+lines = "573-610"
+title = "SerializeTupleVariant — the end that closes two containers"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "pattern-matching"]
+body = """
+Elements are written as for any sequence. `end` is where this trait differs.
+
+It closes the array, unless it was empty and already closed. Then it ends
+the object value and closes the object. This is the brace that
+`serialize_tuple_variant` left open.
+
+The information that there is an outer object is not stored in the value. It
+is carried by the type system: the caller holds this `Compound` as a
+`SerializeTupleVariant` and calls that trait's `end`.
+"""
+
+[[annotation]]
+id    = "json-ser-0019"
+file  = "src/ser.rs"
+lines = "611-644"
+title = "SerializeMap::serialize_key — a key goes through its own serializer"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "pattern-matching"]
+body = """
+A key is announced to the formatter with the first-or-not flag, which is
+where the comma between entries comes from. The state moves to `Rest`.
+
+Then the key is serialized, and not with the main serializer. It is given
+`MapKeySerializer { ser: *ser }`, a separate type with its own `Serializer`
+impl. JSON keys must be strings, and a Rust map may be keyed by integers,
+booleans or enums. `MapKeySerializer` turns the permitted types into quoted
+strings and rejects the rest.
+
+`*ser` re-borrows the `&'a mut Serializer` out of the pattern binding for the
+duration of the call.
+"""
+
+[[annotation]]
+id    = "json-ser-0020"
+file  = "src/ser.rs"
+lines = "645-682"
+title = "serialize_value and end — a colon, a value, a closing brace"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "pattern-matching"]
+body = """
+`begin_object_value` is where the colon is written. The value is serialized
+with the main serializer, and `end_object_value` follows.
+
+`end` closes the object unless it was empty.
+
+`SerializeMap` in `serde_core` also has `serialize_entry`, which takes a key
+and a value together and by default calls these two methods in order. That
+default is not overridden here, and the struct impl below relies on it.
+"""
+
+[[annotation]]
+id    = "json-ser-0021"
+file  = "src/ser.rs"
+lines = "683-728"
+title = "SerializeStruct — entries, or a verbatim payload"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "cfg", "pattern-matching"]
+body = """
+For an ordinary struct, a field is a map entry whose key is the field's name.
+`serialize_field` forwards to `SerializeMap::serialize_entry`.
+
+The gated arms complete the token protocol. In `Number` mode the one
+expected field has the reserved name as its key, and its value is the
+number's text. That text is serialized with `NumberStrEmitter`, a serializer
+whose `serialize_str` writes the string without quotes or escaping. Any
+other key is an error. `RawValue` mode works the same way through
+`RawValueStrEmitter`.
+
+`end` for the special modes returns `Ok(())` and writes nothing. No bracket
+was opened.
+"""
+
+[[annotation]]
+id    = "json-ser-0022"
+file  = "src/ser.rs"
+lines = "729-772"
+title = "SerializeStructVariant — fields as for a struct, and a double close"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "pattern-matching"]
+body = """
+`serialize_field` forwards to the struct impl. `end` mirrors the tuple
+variant's: close the inner object unless it was empty, end the object value,
+close the outer object.
+
+The match in `serialize_field` is on `*self` with wildcard patterns. Nothing
+is bound, so nothing is moved out, and `self` can still be passed along.
+"""
+
+[[annotation]]
+id    = "json-ser-0023"
+file  = "src/ser.rs"
+lines = "773-786"
+title = "MapKeySerializer, and two errors for the token protocol"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["lifetimes", "cfg", "custom-errors"]
+body = """
+`MapKeySerializer` wraps the borrowed serializer. It is a distinct type so
+that it can have a distinct `Serializer` impl.
+
+The two functions build the errors for a malformed `Number` or `RawValue`
+struct. `Error::syntax` takes a line and a column, and both are 0. A
+serializer has no input position to report. The codes are borrowed from the
+parser's vocabulary, which is why a serialization failure can carry the text
+"expected value".
+"""
+
+[[annotation]]
+id    = "json-ser-0024"
+file  = "src/ser.rs"
+lines = "787-833"
+title = "Serializer for MapKeySerializer — strings pass, compounds are impossible"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types", "marker-types"]
+body = """
+Two more error constructors first, for the two things a key serializer
+refuses.
+
+Then the impl. A string key is serialized as a string. A unit variant is its
+name, so a map keyed by a field-less enum works. A newtype struct passes
+`self` to the inner value, which means the inner value is still being
+serialized as a key.
+
+The seven compound types are `Impossible<(), Error>`. `Impossible` is
+`serde_core`'s type for exactly this: it implements every compound trait and
+has no values. The methods that would return one can therefore only return
+`Err`, and the associated types are satisfied without writing seven dummy
+structs.
+"""
+
+[[annotation]]
+id    = "json-ser-0025"
+file  = "src/ser.rs"
+lines = "834-1020"
+title = "bool and integer keys — the same value, inside quotation marks"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["result"]
+body = """
+Eleven methods and 187 lines, and one sentence describes all of them. Each
+writes an opening quote with `begin_string`, writes the value with the same
+formatter method the main serializer uses, and writes a closing quote with
+`end_string`.
+
+So a map keyed by `u8` serializes key 1 as `"1"`, and a map keyed by `bool`
+writes `"true"`. This is the mirror of `deserialize_numeric_key!` in
+`de.rs`, which reads a number back out from between the quotes.
+
+No escaping is needed. A formatted integer or boolean contains only digits,
+a minus sign or letters.
+
+These are written out by hand, eleven times. The deserializer generated its
+equivalents with a macro. Both approaches are in the same crate, and
+neither file explains the difference.
+"""
+
+[[annotation]]
+id    = "json-ser-0026"
+file  = "src/ser.rs"
+lines = "1021-1062"
+title = "Float keys — finite, or an error"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["custom-errors"]
+body = """
+Float keys are quoted like integers, with one check first. A NaN or an
+infinity returns `FloatKeyMustBeFinite`.
+
+Compare this with float *values*, where the same inputs are written as
+`null`. That option does not exist here, since a key must be a string and
+`"null"` would be a different key that happens to collide for every
+non-finite float in the map. An error is the only honest answer.
+"""
+
+[[annotation]]
+id    = "json-ser-0027"
+file  = "src/ser.rs"
+lines = "1063-1066"
+title = "A char key — an ordinary string"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings"]
+body = """
+One character encoded into a four-byte buffer and passed to the main
+serializer's `serialize_str`. The buffer is a temporary created inside the
+argument expression.
+
+A `char` needs the full string path because it may be a quote or a control
+character and require escaping.
+"""
+
+[[annotation]]
+id    = "json-ser-0028"
+file  = "src/ser.rs"
+lines = "1067-1095"
+title = "Five things that cannot be a key"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["custom-errors"]
+body = """
+Bytes, unit, unit struct, newtype variant and `None` each return
+`KeyMustBeAString`.
+
+None of these has an obvious string form. A newtype variant would need both a
+name and a payload. `None` has nothing to write, and `null` unquoted is not a
+string.
+
+Because the error is created with line 0 and column 0, its message is the
+bare text "key must be a string" with no position. That is correct, since
+nothing was being read.
+"""
+
+[[annotation]]
+id    = "json-ser-0029"
+file  = "src/ser.rs"
+lines = "1096-1102"
+title = "Some as a key — transparent"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["option", "sized-bound"]
+body = """
+`Some(x)` is serialized as `x`, still in key position. A map keyed by
+`Option<u8>` therefore works as long as every key present is `Some`, and
+fails on the first `None`.
+"""
+
+[[annotation]]
+id    = "json-ser-0030"
+file  = "src/ser.rs"
+lines = "1103-1146"
+title = "Seven compound keys — every one an error"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["custom-errors", "associated-types"]
+body = """
+The seven methods that would begin a sequence, map or struct. Each returns
+`KeyMustBeAString`.
+
+Their return types are `Result<Self::SerializeSeq>` and so on, which the
+impl defined as `Impossible`. Since `Impossible` has no values, `Err` is the
+only thing these functions could return. The types and the bodies agree.
+"""
+
+[[annotation]]
+id    = "json-ser-0031"
+file  = "src/ser.rs"
+lines = "1147-1154"
+title = "collect_str for a key — delegate"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits"]
+body = """
+A `Display` value used as a key is written by the main serializer's
+`collect_str`, which already produces a quoted, escaped string. That is all a
+key needs.
+
+This closes the key serializer. It accepted strings, characters, integers,
+booleans, finite floats, unit variants, and transparent wrappers around any
+of those.
+"""
+
+[[annotation]]
+id    = "json-ser-0032"
+file  = "src/ser.rs"
+lines = "1155-1170"
+title = "NumberStrEmitter — a serializer that accepts one thing"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "associated-types", "marker-types"]
+body = """
+Compiled only with `arbitrary_precision`. This is the type `Compound::Number`
+hands the number's text to.
+
+It is a tuple struct around the borrowed serializer, and its `Serializer`
+impl is a list of refusals with one exception. The compound types are
+`Impossible`, as for the key serializer.
+"""
+
+[[annotation]]
+id    = "json-ser-0033"
+file  = "src/ser.rs"
+lines = "1171-1226"
+title = "NumberStrEmitter rejects every scalar but a string"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "custom-errors"]
+body = """
+Fourteen methods, each returning `invalid_number()`.
+
+`serde_core`'s `Serializer` has no default bodies for these methods, so a
+serializer that supports one input must still spell out its answer to every
+other. This is what that costs.
+"""
+
+[[annotation]]
+id    = "json-ser-0034"
+file  = "src/ser.rs"
+lines = "1227-1234"
+title = "NumberStrEmitter::serialize_str — the text, without quotes"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "pattern-matching"]
+body = """
+The one method that does something. It destructures `self` to get the
+serializer and calls `write_number_str`, which writes the string to the
+output as it is.
+
+That is how an arbitrary-precision number reaches the output with all its
+digits. It was stored as text, it is passed as a `&str` through the data
+model, and here it is written unquoted so that it is a JSON number again.
+
+Nothing checks that the text is a valid number. The check was made when the
+`Number` was created.
+"""
+
+[[annotation]]
+id    = "json-ser-0035"
+file  = "src/ser.rs"
+lines = "1235-1331"
+title = "NumberStrEmitter rejects everything else"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "custom-errors"]
+body = """
+The remaining methods, from bytes through struct variants, all returning
+`invalid_number()`. Ninety-seven lines to say no.
+"""
+
+[[annotation]]
+id    = "json-ser-0036"
+file  = "src/ser.rs"
+lines = "1332-1347"
+title = "RawValueStrEmitter — the same idea for RawValue"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "associated-types", "marker-types"]
+body = """
+Compiled only with `raw_value`. The structure is identical to
+`NumberStrEmitter`: a wrapper, `Impossible` for the compound types, one
+method that works.
+"""
+
+[[annotation]]
+id    = "json-ser-0037"
+file  = "src/ser.rs"
+lines = "1348-1403"
+title = "RawValueStrEmitter rejects the scalars"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "custom-errors"]
+body = """
+Fourteen refusals. Here the error is built with `ser::Error::custom("expected
+RawValue")`, the generic constructor from `serde_core`'s `Error` trait, where
+the number emitter used a dedicated `ErrorCode`. The two emitters were
+written at different times and it shows.
+"""
+
+[[annotation]]
+id    = "json-ser-0038"
+file  = "src/ser.rs"
+lines = "1404-1411"
+title = "RawValueStrEmitter::serialize_str — a fragment of JSON, copied through"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "pattern-matching"]
+body = """
+The string is written with `write_raw_fragment`. A `RawValue` holds text that
+is already JSON, so it is neither quoted nor escaped.
+
+The method is on the `Formatter` trait, which means a custom formatter sees
+the fragment and may transform it. The built-in formatters write it
+unchanged. In particular the pretty formatter does not re-indent it.
+"""
+
+[[annotation]]
+id    = "json-ser-0039"
+file  = "src/ser.rs"
+lines = "1412-1507"
+title = "RawValueStrEmitter rejects everything else"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "custom-errors"]
+body = """
+The rest of the refusals, with the same custom message.
+"""
+
+[[annotation]]
+id    = "json-ser-0040"
+file  = "src/ser.rs"
+lines = "1508-1515"
+title = "RawValueStrEmitter::collect_str — through a String"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "strings"]
+body = """
+A `Display` value is formatted into a `String` and passed to
+`serialize_str`. This is the reason `ToString` was imported under the
+`raw_value` gate at the top of the file.
+
+`NumberStrEmitter` does not override `collect_str` and gets `serde_core`'s
+default, which does the same thing.
+"""
+
+[[annotation]]
+id    = "json-ser-0041"
+file  = "src/ser.rs"
+lines = "1516-1538"
+title = "CharEscape — nine ways to escape a byte"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+A public enum naming each kind of escape JSON has. Eight are the
+two-character escapes. The ninth, `AsciiControl(u8)`, is every other control
+character, written as `\\u00XX`.
+
+The doc comment says "type-safe", and the point is the interface to
+`Formatter::write_char_escape`. A formatter receives one of these values and
+decides the bytes. It cannot be handed an arbitrary byte and asked to
+escape it.
+
+`Solidus` is in the list although the serializer never produces it. A
+forward slash may be escaped in JSON and does not have to be.
+"""
+
+[[annotation]]
+id    = "json-ser-0042"
+file  = "src/ser.rs"
+lines = "1539-1575"
+title = "Formatter — every byte of output goes through here"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "default-methods", "sized-bound", "generic-params"]
+body = """
+The trait that separates what JSON means from what it looks like. The doc
+comment gives pretty printing as the reason, and the design goes further
+than that requires: literals, numbers, string fragments and every bracket are
+each a method.
+
+Every method has a default body, and the defaults together are compact JSON.
+A formatter overrides only what it wants to change.
+
+The three methods here set the pattern. Each takes `&mut self` and a writer,
+and returns `io::Result<()>`, the writer's own error type. The conversion to
+the crate's `Error` happens in the serializer, one level up.
+
+`W: ?Sized + io::Write` permits a writer behind a trait object. Each method
+is generic over the writer, so the trait itself has no type parameter.
+
+`write_i8` shows how integers are written. `itoa::Buffer` is a small
+stack buffer from the `itoa` crate, and `format` writes the decimal digits
+into it and returns them as a `&str`. No heap allocation and no `fmt`
+machinery is involved.
+"""
+
+[[annotation]]
+id    = "json-ser-0043"
+file  = "src/ser.rs"
+lines = "1576-1674"
+title = "Nine more integer widths, each the same three lines"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "default-methods", "inlining"]
+body = """
+`write_i16` through `write_u128`. The bodies are identical, and the types are
+not, which is why they cannot be one function. `itoa::Buffer::format` is
+generic over an integer trait, and each call here is compiled for one width.
+
+They are separate trait methods so that a formatter can treat widths
+differently. One that wrote 64-bit integers as strings, to survive a
+JavaScript consumer that reads numbers as doubles, would override
+`write_u64` and `write_i64` and leave the rest.
+"""
+
+[[annotation]]
+id    = "json-ser-0044"
+file  = "src/ser.rs"
+lines = "1675-1724"
+title = "write_f32 and write_f64 — and a precondition in the doc comment"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "default-methods"]
+body = """
+Floats are formatted by `zmij`, a crate that does for floats what `itoa` does
+for integers. `format_finite` writes the shortest decimal text that reads
+back as the same float, so `f32::MAX` comes out as `3.4028235e+38` and not
+as thirty-nine digits.
+
+The doc comment is a contract with whoever calls this method. It does not
+check for NaN or infinity, and for those inputs the output is "some correctly
+formatted but unspecified numerical value". The caller must check first.
+The serializer does, in `serialize_f64`, which is where non-finite values
+become `null`.
+
+The two methods are separate because the shortest representation depends on
+the width. The `f32` nearest to 0.1 prints as `0.1` when formatted as an
+`f32`, and as a long string of digits if first widened to `f64`.
+"""
+
+[[annotation]]
+id    = "json-ser-0045"
+file  = "src/ser.rs"
+lines = "1725-1733"
+title = "write_number_str — a number that is already text"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "default-methods"]
+body = """
+Writes a string's bytes with no quotes. This is the method
+`NumberStrEmitter` calls for an arbitrary-precision number.
+
+It is part of the public trait and is not feature-gated, so a custom
+formatter always sees it, whether or not the feature that uses it is on.
+"""
+
+[[annotation]]
+id    = "json-ser-0046"
+file  = "src/ser.rs"
+lines = "1734-1763"
+title = "begin_string, end_string, write_string_fragment — a string in pieces"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "default-methods", "strings"]
+body = """
+A string is not written with one call. The formatter is told that a string is
+beginning, then receives a series of fragments and escapes, then is told it
+has ended.
+
+The fragment method's doc comment carries the guarantee: a fragment "doesn't
+need any escaping". The code that splits a string into fragments is
+`format_escaped_str_contents`, and it is responsible for that being true.
+
+The begin and end hooks both write a quotation mark by default. A formatter
+could use them to do something else, such as colouring strings in terminal
+output.
+"""
+
+[[annotation]]
+id    = "json-ser-0047"
+file  = "src/ser.rs"
+lines = "1764-1800"
+title = "write_char_escape — two bytes, or six"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "default-methods", "pattern-matching"]
+body = """
+The method that turns a `CharEscape` into bytes.
+
+The first `match` picks the letter that follows the backslash. The second
+separates the two formats. Eight escapes are a backslash and that letter. A
+control character with no short form is written as `\\u00` and two hex
+digits, looked up in a sixteen-byte table. The digits are lower case, so
+byte 1 is written `\\u0001` and byte 31 is `\\u001f`.
+
+The two leading zeros are literal. This method is only reached for bytes
+below `0x20`, so the high byte of the code unit is always zero.
+"""
+
+[[annotation]]
+id    = "json-ser-0048"
+file  = "src/ser.rs"
+lines = "1801-1818"
+title = "write_byte_array — the default, built from the other hooks"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "default-methods", "iterators"]
+body = """
+The doc comment names the choice a formatter has: an array of integers, or a
+string encoding such as hex or base64.
+
+The default is the array, and it is written by calling `begin_array`,
+`begin_array_value`, `write_u8`, `end_array_value` and `end_array` on
+`self`. Because it goes through the hooks, a formatter that overrides those
+changes how byte arrays look too. Under the pretty formatter a byte slice is
+printed one number per line.
+"""
+
+[[annotation]]
+id    = "json-ser-0049"
+file  = "src/ser.rs"
+lines = "1819-1838"
+title = "begin_array and end_array"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "default-methods"]
+body = """
+One byte each. The interesting versions are the pretty formatter's
+overrides, which use these two calls to track nesting depth.
+"""
+
+[[annotation]]
+id    = "json-ser-0050"
+file  = "src/ser.rs"
+lines = "1839-1861"
+title = "begin_array_value and end_array_value — where the comma is"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "default-methods"]
+body = """
+The comma between array elements is written before every element except the
+first. `first` is the flag the `Compound` state supplies.
+
+Writing separators *before* items is what makes this work without
+lookahead. The serializer does not know an element is the last until `end`
+is called, and by then it is too late to have written a comma after it.
+
+`end_array_value` does nothing by default. It exists as a hook, and the
+pretty formatter uses it.
+"""
+
+[[annotation]]
+id    = "json-ser-0051"
+file  = "src/ser.rs"
+lines = "1862-1881"
+title = "begin_object and end_object"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "default-methods"]
+body = """
+The brace counterparts of the array pair.
+"""
+
+[[annotation]]
+id    = "json-ser-0052"
+file  = "src/ser.rs"
+lines = "1882-1925"
+title = "The four key and value hooks — and where the colon goes"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "default-methods"]
+body = """
+`begin_object_key` writes the comma between entries, by the same rule as for
+array elements.
+
+The colon is the subject of two doc comments. It "should be written" by
+either `end_object_key` or `begin_object_value`, and the default puts it in
+the second. Both hooks exist so that a formatter can put whitespace on either
+side. The pretty formatter overrides `begin_object_value` to write a colon
+and a space.
+
+`end_object_key` and `end_object_value` do nothing by default.
+"""
+
+[[annotation]]
+id    = "json-ser-0053"
+file  = "src/ser.rs"
+lines = "1926-1936"
+title = "write_raw_fragment — JSON that is already JSON"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["traits", "default-methods"]
+body = """
+Writes text unchanged. `RawValueStrEmitter` calls this with the contents of
+a `RawValue`.
+
+Its doc comment mirrors `write_string_fragment`'s, and the difference is what
+the text is. A string fragment is the inside of a string. A raw fragment is
+a complete JSON value.
+
+This closes the trait. Its required-method count is zero.
+"""
+
+[[annotation]]
+id    = "json-ser-0054"
+file  = "src/ser.rs"
+lines = "1937-1983"
+title = "CompactFormatter and PrettyFormatter — no state, and three fields"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "lifetimes", "default-methods"]
+body = """
+`CompactFormatter` is a unit struct, and its impl is an empty pair of braces.
+Compact JSON is what the trait's defaults already write.
+
+`PrettyFormatter` has state. `current_indent` is the nesting depth.
+`indent` is the bytes of one indentation step, borrowed, which is where the
+lifetime parameter comes from. `new` uses two spaces. `has_value` records
+whether anything has been written inside the innermost open container.
+
+`begin_array` shows how the fields are used. It increases the depth, clears
+`has_value` because the new array is empty so far, and writes the bracket.
+Nothing else is written yet. Whether a newline follows depends on whether an
+element ever arrives.
+
+`Default` is implemented by hand because the derived version would use an
+empty indent.
+"""
+
+[[annotation]]
+id    = "json-ser-0055"
+file  = "src/ser.rs"
+lines = "1984-2016"
+title = "Pretty arrays — a newline before each value, and one before the bracket if needed"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "inlining"]
+body = """
+`begin_array_value` writes a newline, or a comma and a newline, and then
+the indentation for the current depth. Each element starts on its own line.
+
+`end_array_value` sets `has_value`. `end_array` decreases the depth and, if
+`has_value` is set, writes a newline and the outer indentation before the
+`]`. An array that never had an element gets no newline and prints as `[]`.
+
+One `bool` is enough for any depth of nesting. When an inner container
+closes, the next call is the *outer* container's `end_array_value` or
+`end_object_value`, which sets the flag again. So by the time the outer
+container closes, the flag describes it.
+"""
+
+[[annotation]]
+id    = "json-ser-0056"
+file  = "src/ser.rs"
+lines = "2017-2068"
+title = "Pretty objects — the same logic, and a space after the colon"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "inlining"]
+body = """
+The object methods repeat the array methods with braces.
+`begin_object_key` starts each entry on a new indented line.
+`end_object_value` sets `has_value`.
+
+The one visible difference from compact output inside a line is
+`begin_object_value`, which writes a colon followed by a space.
+
+`end_object_key` is not overridden. Nothing is written between a key and its
+colon.
+"""
+
+[[annotation]]
+id    = "json-ser-0057"
+file  = "src/ser.rs"
+lines = "2069-2078"
+title = "format_escaped_str — quotes around the contents"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["sized-bound", "generic-params"]
+body = """
+Three calls: begin the string, write its contents, end it. The contents
+function is separate because `collect_str` needs it on its own, to write a
+value that arrives in several pieces between one pair of quotes.
+
+Both type parameters are `?Sized`, so this works with trait objects for the
+writer and the formatter.
+"""
+
+[[annotation]]
+id    = "json-ser-0058"
+file  = "src/ser.rs"
+lines = "2079-2166"
+title = "format_escaped_str_contents and the escape table — runs, then one escape"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["unsafe", "strings", "pattern-matching", "zero-cost"]
+body = """
+This is the serializer's string scanner. It walks the bytes, and for each
+one looks up `ESCAPE[byte]`. Zero means the byte is written as it is. Most
+bytes are zero, and for those the loop only advances `i`.
+
+When a byte needs escaping, everything before it since the last escape is a
+run. The run is written as one fragment, the escape is written, and the scan
+restarts on the remainder. A string with no special characters is therefore
+one `write_string_fragment` call for the whole thing.
+
+The table is the specification. Read it by row and column: bytes `0x00` to
+`0x1F` are all escaped, five of them with short forms, and above that only
+`"` and `\\`. Bytes from `0x80` up are zero, so non-ASCII text is written as
+UTF-8 and never as `\\u` escapes. `0x7F` is not escaped either. The single
+letters stored in the table are the escape letters themselves, and the `__`
+constant keeps the rows aligned.
+
+There are three `unsafe` blocks. Two convert a run back to `&str` without
+checking. The comment gives the argument: the input was a `&str`, and it is
+only ever cut immediately before or after an ASCII byte, which cannot be
+inside a multi-byte character.
+
+The third is `unreachable_unchecked` in the `match`. It tells the compiler
+that the table holds no value other than the eight listed, so no code is
+generated for the impossible case. That claim is true because the table is
+right there, and it would become undefined behaviour if someone added a ninth
+letter to the table and not to the match.
+"""
+
+[[annotation]]
+id    = "json-ser-0059"
+file  = "src/ser.rs"
+lines = "2167-2185"
+title = "to_writer — a serializer, and one call"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "sized-bound", "where-clauses"]
+body = """
+The base of the six public serialization functions. It builds a compact
+`Serializer` over the writer and calls `value.serialize(&mut ser)`.
+
+That call is the handover, as `T::deserialize` was on the other side. The
+type's `Serialize` impl now drives the serializer, calling whichever
+`serialize_*` methods describe its shape.
+
+The doc comment makes a promise about the output: only valid UTF-8 is ever
+passed to the writer. The errors section names the two ways serialization
+fails, the type's own impl failing or a map key that is not a string. An I/O
+error from the writer is a third, and is not listed.
+"""
+
+[[annotation]]
+id    = "json-ser-0060"
+file  = "src/ser.rs"
+lines = "2186-2205"
+title = "to_writer_pretty — the same, with the other constructor"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "sized-bound"]
+body = """
+Identical except for `Serializer::pretty`. The formatter is a type parameter
+of the serializer, so choosing it is choosing a different monomorphization of
+the same code.
+"""
+
+[[annotation]]
+id    = "json-ser-0061"
+file  = "src/ser.rs"
+lines = "2206-2256"
+title = "to_vec, to_vec_pretty and to_string — a Vec, then a String without a check"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["unsafe", "collections", "strings"]
+body = """
+`to_vec` allocates a `Vec<u8>` with room for 128 bytes and passes `&mut
+writer` to `to_writer`. That works because `&mut W` is a writer when `W` is.
+The initial capacity is a guess that avoids the first few reallocations for
+small values.
+
+`to_string` calls `to_vec` and converts the bytes with
+`String::from_utf8_unchecked`. The comment is five words: "We do not emit
+invalid UTF-8."
+
+It is worth checking that claim against what you have read. Every byte
+written is one of four things: ASCII punctuation and literals, digits from
+`itoa` and `zmij`, escape sequences, or fragments of a `&str` that were cut at
+ASCII boundaries. All of those are valid UTF-8. The claim also depends on the
+`Formatter` being one of the built-in two, which it is here because these
+functions construct it.
+"""
+
+[[annotation]]
+id    = "json-ser-0062"
+file  = "src/ser.rs"
+lines = "2257-2275"
+title = "to_string_pretty"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["unsafe", "strings"]
+body = """
+The pretty version of `to_string`, with the same unchecked conversion and
+the same comment.
+"""
+
+[[annotation]]
+id    = "json-ser-0063"
+file  = "src/ser.rs"
+lines = "2276-2285"
+title = "indent — one write per level"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["iterators"]
+body = """
+Writes the indent bytes `n` times. It is called once per line of pretty
+output with the current depth.
+
+There is no buffering here, so a value nested ten deep makes ten small
+writes for each line's indentation. That is cheap into a `Vec` and is one
+more reason to buffer a file or socket before handing it to `to_writer_pretty`.
+"""

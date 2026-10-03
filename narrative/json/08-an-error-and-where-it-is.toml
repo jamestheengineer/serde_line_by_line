@@ -234,6 +234,7 @@ id = "s08-peek-invalid-type"
 source = "serde_json-1.0.151"
 file = "src/de.rs"
 lines = "269-317"
+annotation = "json-de-0013"
 leans_on = ["s08-syntax", "s05-parse-any-number", "s03-parse-ident", "s04-string-arm"]
 title = "peek_invalid_type — reading the wrong value to the end, so the message can quote it"
 produces = '''

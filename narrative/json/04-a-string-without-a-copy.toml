@@ -27,6 +27,7 @@ id = "s04-string-arm"
 source = "serde_json-1.0.151"
 file = "src/de.rs"
 lines = "1425-1432"
+annotation = "json-de-0052"
 title = "The \" arm — and the one place scratch is cleared"
 produces = '''    b: String("x")'''
 body = """

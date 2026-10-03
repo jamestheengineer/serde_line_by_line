@@ -1248,7 +1248,7 @@ machines in `read.rs` and `ser.rs` refuse large spans.
 |---|---|---:|---|
 | **K1 — Three coverage sources** ✅ | The role moves; `extra_files` in the pin; the front page stops saying "both"; D14 | 0 | `cargo xtask coverage` reports the first two crates unchanged and `serde_json` at 0/18,359 without error; the json walk's crossings still read 1, 0, 2, 1, 1, 2, 3, 1, 10 |
 | **K2 — Vertical slice: `read.rs`** ✅ | The byte-level state machine, 1,089 lines, and the refusal case the scope doc named | ~47 | `read.rs` at 100%; its narrative steps retargeted; the density either confirms 23 lines per annotation or moves the estimate before 650 more are written |
-| **K3 — The rest of the engines** | `de.rs`, `ser.rs`, `io/*`, `iter.rs`, `build.rs` | ~224 | the engines at 100%; every `Deserializer` and `Serializer` method leans on its `serde_core` contract by `prereqs` rather than re-explaining it |
+| **K3 — The rest of the engines** ✅ | `de.rs`, `ser.rs`, `io/*`, `iter.rs`, `build.rs` | ~224 | the engines at 100%; every `Deserializer` and `Serializer` method leans on its `serde_core` contract by `prereqs` rather than re-explaining it |
 | **K4 — The `Value` tree** | `value/*`, `map.rs`, `number.rs`, `raw.rs` | ~283 | the tree at 100%; `value/de.rs` and `value/ser.rs` read as the second implementation of a surface the reader has seen, not a second transcript |
 | **K5 — `lexical/`** | The float parser, 19 files | ~106 | `lexical/` at 100%; the five constant tables are a table each |
 | **K6 — Plumbing** | `lib.rs`, `error.rs`, `macros.rs` | ~44 | **every line of `serde_json` claimed**; all 38 files in its manifest; all 104 narrative steps name a containing annotation |
@@ -1307,3 +1307,50 @@ the string is being skipped than when it is being read, because
 does. `"\udc00"` reports a lone *leading* surrogate, which upstream's own
 `XXX` comment says is the wrong name. And a lone surrogate read as bytes comes
 out as three bytes of WTF-8. None of the three is in the json walk.
+
+### What K3 shipped
+
+The engines are complete: 7 files, 6,287 lines, 219 annotations including
+K2's. `serde_json` is at 34.2%.
+
+**The density came in under the projection, and the estimate should move.**
+The group was projected at 23.2 lines per annotation and ~271 annotations. It
+landed at **28.7 and 219**. `de.rs` took 98 over 2,714 lines and `ser.rs` took
+63 over 2,285.
+
+The compression is not the kind the scope doc expected. It predicted that
+`de.rs` and `value/de.rs` would compress against each other, which is K4's to
+find out. What compressed here is repetition *inside* `ser.rs`, where
+`serde_core`'s `Serializer` has no default method bodies. A serializer that
+accepts one kind of input still has to answer for all thirty. Eleven key
+methods that quote an integer are 187 lines and one annotation. Two emitter
+types that reject everything but a string are 360 lines and nine. The
+`Deserializer` side generated its equivalents with a macro and cost a
+`macro-def` and a `macro-use` each.
+
+Carried forward at the projected densities for the other groups, the track
+looks like **~650 rather than ~704**.
+
+**Every narrative step fits, and one was narrowed.** 61 of the walk's steps
+stand on these seven files. All 61 name their annotation. One, on
+`deserialize_struct`, had cited two lines past the function into the next
+one's doc comment, and was narrowed to the function. Three annotations are
+longer than the style guide likes — 115 lines for `ignore_value`, 88 for the
+string scanner and its table, 64 for the `Serializer` struct through its
+associated types — because each is one stop in the walk, and the walk had
+already justified each as one idea.
+
+**What running the crate found.** Each of these is stated in an annotation
+and was checked first:
+
+- Depth 127 parses and depth 128 is an error, but only for values that are
+  kept. `ignore_value` is a loop over an explicit stack, so skipped data may
+  nest to any depth.
+- A stream of `1x` yields two errors, not one. The trailing-characters check
+  does not mark the stream as failed.
+- `"New"` deserialized into an enum whose `New` variant holds a value reports
+  a type error with no line or column.
+- A bool map key that is neither `true` nor `false` is quoted in the error
+  with its first letter missing.
+- NaN serializes as `null`, and that `null` does not deserialize back into an
+  `f64`.

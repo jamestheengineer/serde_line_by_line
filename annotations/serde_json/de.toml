@@ -1,0 +1,2167 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-de-0001"
+file  = "src/de.rs"
+lines = "1-29"
+title = "Imports — what a parser borrows from serde_core, and what it re-exports"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "modules", "visibility"]
+body = """
+The two `serde` imports are the contract this file implements.
+`serde::de` holds `Deserializer`, `Visitor` and the four access traits, all of
+which you have read in `serde_core`. `forward_to_deserialize_any` is the macro
+from that crate's `macros.rs`, and it is used here more than once.
+
+`Expected` and `Unexpected` are the two halves of a type-mismatch message:
+what the visitor wanted and what the input held.
+
+Three imports are feature-gated. `lexical` and `core::iter` come in only with
+`float_roundtrip`, and `NumberDeserializer` only with `arbitrary_precision`.
+Both features change how numbers are parsed, and both will reappear as paired
+functions with the same name and opposite `#[cfg]`s.
+
+The `pub use` lines are how the readers become public. `read` is a private
+module, so `serde_json::de::SliceRead` is the only path to that type. `IoRead`
+is re-exported only with `std`, matching the gate on its definition.
+"""
+
+[[annotation]]
+id    = "json-de-0002"
+file  = "src/de.rs"
+lines = "30-40"
+title = "Deserializer — a reader, a buffer and a depth budget"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["generic-params", "cfg"]
+body = """
+Three fields in a default build.
+
+`read` is the input, of whatever type `R` is. `scratch` is the buffer that
+`Read::parse_str` copies into when a string has escapes. It lives here so that
+one allocation serves every string in the document. `remaining_depth` is a
+`u8` counting down from 128, and it is the only defence against input like ten
+thousand opening brackets.
+
+The struct has no lifetime parameter. The input lifetime belongs to `R`, and
+the struct definition places no bound on `R` at all. The bounds are on the
+impl blocks, which is the usual arrangement: the type can be named without
+proving anything, and the methods exist only when the proof is available.
+
+The two gated fields are flags that change behaviour without changing the
+type's public shape.
+"""
+
+[[annotation]]
+id    = "json-de-0003"
+file  = "src/de.rs"
+lines = "41-70"
+title = "Deserializer::new — the general constructor"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["lifetime-de", "where-clauses", "cfg"]
+body = """
+`new` accepts any reader and fills in the defaults: an empty scratch buffer,
+which allocates nothing until a string needs it, and a depth of 128.
+
+`'de` is declared on the impl and appears only in the bound `R:
+read::Read<'de>`. Nothing in the struct mentions it. It is how the impl says
+"for whichever input lifetime this reader has".
+
+The doc comment repeats the buffering warning from `IoRead::new` and then
+points at the three constructors people should use instead. `new` is public
+because the `Read` trait is, and it is what lets a caller build a
+deserializer over a borrowed reader.
+"""
+
+[[annotation]]
+id    = "json-de-0004"
+file  = "src/de.rs"
+lines = "71-100"
+title = "from_reader, from_slice, from_str — three impl blocks, three concrete types"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "lifetimes", "cfg"]
+body = """
+Each constructor lives in its own `impl` block for one concrete reader type.
+`from_str` is defined on `Deserializer<StrRead<'a>>` and nowhere else.
+
+That placement is what makes the return type work. `Self` in each block is a
+fully specified type, so a caller who writes `Deserializer::from_str(s)` gets
+`Deserializer<StrRead<'_>>` by inference, with no type annotation.
+
+The doc comment on `from_reader` states a limit worth remembering. A
+deserializer built from a stream cannot produce borrowed data such as `&str`.
+You saw why in `read.rs`: the stream reader only ever returns the `Copied`
+variant.
+
+`from_reader`'s bound is `crate::io::Read`, the facade name, which is
+`std::io::Read` because this block is gated on `std`.
+"""
+
+[[annotation]]
+id    = "json-de-0005"
+file  = "src/de.rs"
+lines = "101-108"
+title = "overflow! — would a times ten plus b exceed c?"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "macro-hygiene"]
+body = """
+A macro that answers one question without performing the multiplication that
+might overflow.
+
+The pattern is unusual. `$a:ident * 10 + $b:ident` matches the literal tokens
+`* 10 +` between two identifiers, so the call site reads as the arithmetic it
+is asking about: `overflow!(significand * 10 + digit, u64::MAX)`. The macro
+could not be used for any other expression, and that is intended.
+
+The body rewrites the comparison. `a * 10 + b > c` is true when `a` is above
+`c / 10`, or equal to it with `b` above `c % 10`. The outer `a >= c / 10`
+is a cheap first test that is false for almost every digit of almost every
+number.
+
+`match $c { c => ... }` binds the limit to a name so that the expression is
+evaluated once. It is a macro and not a function because it is called with
+both `u64` and `i32` operands.
+"""
+
+[[annotation]]
+id    = "json-de-0006"
+file  = "src/de.rs"
+lines = "109-141"
+title = "ParserNumber — the three shapes a JSON number can take"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "cfg", "trait-objects"]
+body = """
+JSON has one number type. Serde's data model has many. This enum is the
+parser's decision about which one a given run of digits is: an unsigned
+integer, a negative integer, or a float.
+
+`visit` forwards that decision to the visitor as `visit_u64`, `visit_i64` or
+`visit_f64`. The parser never produces a narrower width. Turning a `u64` into
+a `u8`, with a range check, is the job of the primitive `Deserialize` impls in
+`serde_core`.
+
+`invalid_type` builds the error for "a number arrived and the visitor wanted
+something else". It takes `&dyn Expected`, a trait object, so one function
+serves every visitor type without being generic.
+
+The fourth variant exists only with `arbitrary_precision`. There a number is
+kept as its original text and delivered through `visit_map`, the same
+one-entry-map protocol that `RawValue` uses.
+"""
+
+[[annotation]]
+id    = "json-de-0007"
+file  = "src/de.rs"
+lines = "142-152"
+title = "end — the check that nothing follows the value"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["result"]
+body = """
+Parsing a value stops at its last byte. `end` is the separate step that makes
+`1 2` an error.
+
+It skips whitespace and looks at what comes next. `None` means the input is
+exhausted, which is success. Any byte at all is `TrailingCharacters`, reported
+with `peek_error` because the byte was looked at and not consumed.
+
+The method is public and the doc comment says it "should be called". The
+`from_str` family calls it for you. A caller driving a `Deserializer` by hand
+has to remember.
+"""
+
+[[annotation]]
+id    = "json-de-0008"
+file  = "src/de.rs"
+lines = "153-168"
+title = "into_iter — an inherent method, because the caller picks T"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "marker-types", "iterators"]
+body = """
+This turns the deserializer into an iterator over consecutive JSON values,
+each deserialized as `T`.
+
+The comment explains the choice of an inherent method. The `IntoIterator`
+trait fixes the item type as an associated type of the implementor. Here the
+item type is not a property of the deserializer. It is whatever the caller
+asks for, so it must be a type parameter of the method.
+
+The starting byte offset is recorded, and two `PhantomData` fields carry `T`
+and `'de`, neither of which is otherwise stored in the struct.
+"""
+
+[[annotation]]
+id    = "json-de-0009"
+file  = "src/de.rs"
+lines = "169-218"
+title = "disable_recursion_limit — a switch with a long warning attached"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+One line of code under forty-three lines of documentation, and the ratio is
+appropriate.
+
+With the `unbounded_depth` feature, this sets a flag that turns off the depth
+counter. The parser is recursive, so deeply nested input then consumes stack
+without limit. The doc comment says what else you must do: grow the stack
+dynamically with `serde_stacker`, and be careful afterwards, because dropping
+or printing a deeply nested `Value` recurses too.
+
+The example builds ten thousand nested arrays and ends with a function that
+flattens the value iteratively before it is dropped. That function is there
+because the default `Drop` would overflow the stack the parser just avoided
+overflowing.
+"""
+
+[[annotation]]
+id    = "json-de-0010"
+file  = "src/de.rs"
+lines = "219-238"
+title = "Five one-line wrappers, and a null byte that stands for end of input"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["option", "result", "visibility"]
+body = """
+The parser's own names for the reader's operations. `peek`, `eat_char` and
+`next_char` forward to `read.peek`, `read.discard` and `read.next`.
+
+The two `_or_null` variants are the useful ones. They replace `None` with the
+byte `0x00`. A parser asking "is the next byte a digit?" can then match on a
+plain `u8`, and end of input falls into the same arm as any other non-digit.
+This is safe as a sentinel because a zero byte is never valid at any point
+where JSON syntax is being decided.
+
+`peek` is `pub(crate)` and the others are private. Other modules in the crate
+need to look at the next byte, and only this one consumes.
+"""
+
+[[annotation]]
+id    = "json-de-0011"
+file  = "src/de.rs"
+lines = "239-252"
+title = "error and peek_error — the same error at two positions"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["custom-errors", "inlining"]
+body = """
+Both build `Error::syntax` from a code and a position. They differ in which
+position method they call, and the doc comments say when to use each: `error`
+after a byte was consumed with `next_char`, `peek_error` after it was only
+looked at.
+
+Choosing the wrong one produces an error that is off by one column. There is
+no type-level protection. Every call site in this file had to get it right by
+hand.
+
+`#[cold]` on both keeps error construction out of the fast paths that call
+them.
+"""
+
+[[annotation]]
+id    = "json-de-0012"
+file  = "src/de.rs"
+lines = "253-267"
+title = "parse_whitespace — skip, then report what stopped you"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "option"]
+body = """
+JSON permits exactly four whitespace bytes: space, newline, tab and carriage
+return. The or-pattern inside `Some(...)` matches them, and anything else,
+including `None`, is returned.
+
+The return value is the reason this function is called everywhere. It gives
+back the first non-whitespace byte, still unconsumed. Almost every parsing
+decision in this file begins by calling it and matching on the result, so
+"skip whitespace" and "peek" are one operation.
+"""
+
+[[annotation]]
+id    = "json-de-0013"
+file  = "src/de.rs"
+lines = "268-317"
+title = "peek_invalid_type — parsing a value in order to complain about it"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["custom-errors", "pattern-matching", "trait-objects"]
+body = """
+This runs when a typed method finds the wrong kind of value, such as
+`deserialize_bool` meeting a string. The error should say what was found, and
+to say that precisely the function parses the value.
+
+For `null`, `true` and `false` it consumes the literal and reports a unit or
+a boolean. For a number it parses the number and asks the `ParserNumber` to
+describe itself. For a string it parses the string, so the message can quote
+it. For `[` and `{` it does not parse anything and reports "sequence" or
+"map".
+
+If parsing the offending value fails, that failure is returned instead. A
+syntax error outranks a type error.
+
+`self.peek_or_null().unwrap_or(b'\\x00')` handles an I/O error from the reader
+by treating it as the sentinel, which lands in the last arm.
+
+The error built by `de::Error::invalid_type` has no position, since
+`serde_core` knows nothing about lines. `fix_position` adds one on the way
+out.
+"""
+
+[[annotation]]
+id    = "json-de-0014"
+file  = "src/de.rs"
+lines = "318-344"
+title = "deserialize_number — the shared body of twelve methods"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "lifetimes", "result"]
+body = """
+Every integer and float method of the `Deserializer` impl funnels into this
+function through a macro you will meet further down.
+
+It skips whitespace, and a missing value is `EofWhileParsingValue`. A `-`
+is consumed and the rest parsed as a negative number. A digit starts a
+positive one. Anything else is a type mismatch, built by the function above.
+
+The visitor's lifetime parameter is named `'any`. The impl's `'de` is not
+used because this function hands the visitor only owned numbers, so it works
+for a visitor of any input lifetime.
+
+The final `match` passes an error through `fix_position`. A visitor can
+reject a number, for example a `u8` visitor given 300, and that error is
+created without a line or column.
+"""
+
+[[annotation]]
+id    = "json-de-0015"
+file  = "src/de.rs"
+lines = "345-355"
+title = "do_deserialize_f32 — a flag set around a call"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+Compiled only with `float_roundtrip`. It sets `single_precision`, calls the
+ordinary number path, and clears the flag.
+
+The flag tells the float conversion to round to the nearest `f32` directly.
+Parsing to `f64` and then narrowing rounds twice, and the two roundings can
+disagree with a single correct one. A feature that promises exact round trips
+has to avoid that.
+
+The state is carried in a field because the conversion is several calls
+below. If the number path returned early by `?` this would leave the flag
+set, which is why the result is bound to `val` and returned after the reset.
+"""
+
+[[annotation]]
+id    = "json-de-0016"
+file  = "src/de.rs"
+lines = "356-417"
+title = "i128 and u128 — digits collected into a String"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings", "result"]
+body = """
+The ordinary number path accumulates into a `u64` and falls back to `f64` on
+overflow. That would silently lose precision for a 128-bit integer, so these
+two types get their own path.
+
+It is simple. The digits are copied into a `String` and handed to the
+standard library's `str::parse`. Any failure there means the value does not
+fit and is reported as `NumberOutOfRange`.
+
+The two functions differ in their treatment of a minus sign. The signed
+version consumes it and puts it in the buffer. The unsigned version rejects
+it immediately, before scanning any digits.
+
+A fraction or an exponent is not consumed here. `1.5` scans as `1`, the
+visitor receives 1, and the caller then finds `.5` where it expected the
+value to have ended.
+"""
+
+[[annotation]]
+id    = "json-de-0017"
+file  = "src/de.rs"
+lines = "418-439"
+title = "scan_integer128 — the leading-zero rule, restated"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "strings"]
+body = """
+JSON forbids leading zeros. `0` is a number and `01` is not.
+
+The first arm handles a `0`: it is pushed, and a following digit is
+`InvalidNumber`. The second handles `1` to `9` and then loops with `while
+let c @ b'0'..=b'9'`, which binds the byte and tests its range in one
+pattern. The loop ends on the first non-digit, including the null sentinel
+for end of input.
+
+The same rule is written again in `parse_integer` below, over a `u64`
+accumulator in place of a string.
+"""
+
+[[annotation]]
+id    = "json-de-0018"
+file  = "src/de.rs"
+lines = "440-444"
+title = "fix_position — adding a line and column after the fact"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["closures", "custom-errors"]
+body = """
+Errors raised by a visitor or by a `Deserialize` impl come from
+`de::Error::custom` and its relatives. They are created by code that has no
+access to the reader, so they carry line 0.
+
+This helper passes the error to `Error::fix_position` in `error.rs`, along
+with a closure that builds a positioned error from a code. If the error
+already has a position it is returned unchanged.
+"""
+
+[[annotation]]
+id    = "json-de-0019"
+file  = "src/de.rs"
+lines = "445-461"
+title = "parse_ident — matching the rest of a literal"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["iterators", "option"]
+body = """
+`null`, `true` and `false` are recognised by their first byte. The caller
+consumes that byte and calls this with the remainder: `b"ull"`, `b"rue"` or
+`b"alse"`.
+
+Each expected byte is compared with the next input byte. Running out of input
+is `EofWhileParsingValue`, and a mismatch is `ExpectedSomeIdent`. Both use
+`error`, the consumed-byte position, since `next_char` consumed the byte in
+question.
+
+Nothing checks what follows the literal. `truex` passes this function, and
+the stray `x` is found by whatever looks for a comma or the end of input.
+"""
+
+[[annotation]]
+id    = "json-de-0020"
+file  = "src/de.rs"
+lines = "462-508"
+title = "parse_integer — digits into a u64, until they do not fit"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "macro-rules"]
+body = """
+The caller has dealt with any minus sign. This reads the integer part.
+
+A leading `0` must stand alone, and the code then moves on with a
+significand of 0. Otherwise digits are accumulated with `significand * 10 +
+digit`, and the `overflow!` test runs before each step.
+
+When the next digit would not fit in a `u64`, the function does not report
+an error. It hands what it has to `parse_long_integer` and returns the result
+as a float. A JSON integer with twenty-five digits is a legal number, and the
+closest `f64` is the best a `u64`-based parser can offer.
+
+Note that the overflowing digit is not consumed before that call. The
+`eat_char` comes after the test, so the long-integer path starts at the digit
+that did not fit.
+"""
+
+[[annotation]]
+id    = "json-de-0021"
+file  = "src/de.rs"
+lines = "509-529"
+title = "parse_number — integer, or float, or negative zero"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+After the integer digits, one byte decides the type. A `.` or an `e` makes it
+a float. Anything else ends the number as an integer.
+
+A positive integer is `U64`. A negative one is produced by casting to `i64`
+and negating with `wrapping_neg`. The result is then tested, and the test
+covers two cases at once. If the magnitude was too large for an `i64`, the
+cast wrapped and the negation is not negative. If the magnitude was zero, the
+negation is zero. Both yield a float.
+
+So `-0` becomes the `f64` value negative zero. An integer type has no
+negative zero, and returning `I64(0)` would discard the sign the input wrote.
+"""
+
+[[annotation]]
+id    = "json-de-0022"
+file  = "src/de.rs"
+lines = "530-566"
+title = "parse_decimal — fraction digits, counted as a negative exponent"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+The fraction is folded into the same integer significand. Each digit after
+the point multiplies the significand by ten and decrements an exponent, so
+`1.25` becomes 125 with exponent -2.
+
+If the significand would overflow, the remaining digits go to
+`parse_decimal_overflow`, which has to decide what to do with precision the
+`u64` cannot hold.
+
+The check after the loop enforces that at least one digit follows the point.
+`1.` is an error, and so is `1.e5`. The two error codes distinguish "something
+else was there" from "the input ended".
+
+Then an `e` continues into the exponent, and anything else finishes the
+number.
+"""
+
+[[annotation]]
+id    = "json-de-0023"
+file  = "src/de.rs"
+lines = "567-622"
+title = "parse_exponent — a sign, at least one digit, and saturation"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+The `e` is consumed, then an optional sign, then a required digit. `1e` and
+`1e+` are both errors, with a different code depending on whether input ran
+out.
+
+Further digits accumulate into an `i32` with the same `overflow!` test, this
+time against `i32::MAX`. An exponent that large cannot be represented, and
+`parse_exponent_overflow` works out the answer from first principles: zero if
+the significand is zero or the exponent negative, an error otherwise.
+
+The final exponent combines this one with the exponent carried in from the
+fraction. `saturating_add` and `saturating_sub` are used because the two
+together could exceed `i32`, and a clamped exponent leads to the same result
+as the true one: zero or out of range.
+"""
+
+[[annotation]]
+id    = "json-de-0024"
+file  = "src/de.rs"
+lines = "623-637"
+title = "f64_from_parts with float_roundtrip — delegate to lexical"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "generic-params"]
+body = """
+The first of two functions with this name. This one is compiled when the
+`float_roundtrip` feature is on.
+
+It calls `lexical::parse_concise_float` with the integer significand and the
+exponent, choosing `f32` or `f64` by the `single_precision` flag. That
+function is correct for every input, which the version below is not.
+
+An infinite result means the number was too large for the type, and JSON has
+no way to write infinity, so it is `NumberOutOfRange`. The sign is applied
+last.
+"""
+
+[[annotation]]
+id    = "json-de-0025"
+file  = "src/de.rs"
+lines = "638-673"
+title = "f64_from_parts by default — one multiplication or one division"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "option"]
+body = """
+The default conversion. It turns the significand into an `f64` and scales it
+by a power of ten from the `POW10` table.
+
+For a non-negative exponent it multiplies. For a negative one it *divides* by
+the positive power. Dividing by `1e2` is more accurate than multiplying by
+`1e-2`, because `1e2` is exactly representable and `1e-2` is not.
+
+`POW10.get(...)` returns `None` when the exponent's magnitude is past the end
+of the table. A zero stays zero. A huge positive exponent is out of range. A
+huge negative one divides by `1e308` and tries again, which lets very small
+numbers reach the subnormal range.
+
+This is fast and it is not always correctly rounded. The conversion of the
+significand and the scaling are two separate roundings. The crate's answer for
+callers who need exactness is the feature that selects the other function.
+"""
+
+[[annotation]]
+id    = "json-de-0026"
+file  = "src/de.rs"
+lines = "674-713"
+title = "parse_long_integer with float_roundtrip — keep every digit, as text"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "inlining", "collections"]
+body = """
+Reached when the integer part has more digits than a `u64` can hold. With
+`float_roundtrip` on, no digit may be dropped, so the digits are kept as bytes
+in the scratch buffer.
+
+The comment describes the plan. Integer digits and fraction digits are pushed
+into one buffer, and an index, `integer_end`, records where the first group
+stops. The float parser in `lexical/` is later given the two halves as slices.
+
+The digits already folded into the `u64` have to be recovered first.
+`itoa::Buffer::new().format(...)` writes an integer as decimal text into a
+small buffer on the stack. `itoa` is a separate crate that does this without
+going through `fmt`.
+
+Then the loop pushes further digits, and a `.`, an `e` or anything else
+selects the next stage.
+"""
+
+[[annotation]]
+id    = "json-de-0027"
+file  = "src/de.rs"
+lines = "714-739"
+title = "parse_long_integer by default — count the digits and drop them"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "inlining"]
+body = """
+The default build's answer to the same situation, and it is much shorter. The
+significand stays as it is. Each further digit is consumed and discarded, and
+`exponent` is incremented.
+
+That is arithmetic you can check. Dropping one trailing digit from an integer
+divides it by ten, so adding one to the exponent keeps the magnitude right and
+loses only the digit's own contribution. A `u64` already holds nineteen
+digits, and an `f64` has about seventeen significant digits of precision, so
+what is lost is mostly below what the result could represent anyway. Mostly:
+this is one of the places the default build can be off by one unit in the
+last place.
+
+The comment about gigabytes is accurate. `exponent` is an `i32`, and
+overflowing it would take two billion digits.
+"""
+
+[[annotation]]
+id    = "json-de-0028"
+file  = "src/de.rs"
+lines = "740-762"
+title = "parse_long_decimal — fraction digits into the same buffer"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "inlining"]
+body = """
+Compiled with `float_roundtrip`. The point has been consumed, and fraction
+digits are pushed onto scratch after the integer digits.
+
+`at_least_one_digit` starts as `integer_end < self.scratch.len()`. That is
+false when this is entered straight after a `.`, and true when it is entered
+from `parse_decimal_overflow`, which arrives with fraction digits already in
+the buffer.
+
+The rest mirrors `parse_decimal`: a missing digit is an error with one of two
+codes, and an `e` continues into the exponent.
+"""
+
+[[annotation]]
+id    = "json-de-0029"
+file  = "src/de.rs"
+lines = "763-810"
+title = "parse_long_exponent — the exponent, for the text-buffer path"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "closures", "iterators"]
+body = """
+The same logic as `parse_exponent`: consume `e`, an optional sign, a required
+digit, then more digits with an overflow test.
+
+Two things differ. To learn whether the significand is zero, it cannot
+compare a number with 0, because there is no number. It asks whether every
+byte in scratch is the character `0`. And the final exponent is a plain
+negation with no saturating arithmetic, since there is no exponent carried in
+from the fraction. In this path the fraction is still text.
+
+The duplication is real. Two functions parse an exponent with the same
+grammar, and a change to one has to be made to the other.
+"""
+
+[[annotation]]
+id    = "json-de-0030"
+file  = "src/de.rs"
+lines = "811-833"
+title = "parse_decimal_overflow with float_roundtrip — turning a number back into digits"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "inlining", "iterators", "option"]
+body = """
+The fast path was folding fraction digits into a `u64` and has run out of
+room. To switch to the text path, the digits consumed so far must be put back
+into scratch, with the split between integer and fraction in the right place.
+
+`itoa` renders the significand. `fraction_digits` is how many of those digits
+came after the point. If there are at least as many fraction digits as
+rendered digits, the number began with zeros that the `u64` never stored, as
+in `0.00012…`, and `checked_sub` reports how many to restore.
+`iter::repeat(b'0').take(n)` supplies them.
+
+Then `integer_end` is the buffer length minus the fraction digits, and
+`parse_long_decimal` continues from where the input stands.
+
+The comment above the function explains the two attributes. This code is
+rare, and the loop it was called from should stay compact.
+"""
+
+[[annotation]]
+id    = "json-de-0031"
+file  = "src/de.rs"
+lines = "834-854"
+title = "parse_decimal_overflow by default — ignore the rest"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "inlining"]
+body = """
+Without `float_roundtrip`, further fraction digits are skipped. The comment
+says so plainly.
+
+Unlike the integer case, no exponent adjustment is needed. Digits after the
+point that are never folded in do not change the scale of what was.
+
+The cost is accuracy in the last bit for numbers written with more than
+nineteen significant digits. Then the function carries on as `parse_decimal`
+would have, into an exponent or straight to the conversion.
+"""
+
+[[annotation]]
+id    = "json-de-0032"
+file  = "src/de.rs"
+lines = "855-875"
+title = "parse_exponent_overflow — when the exponent itself does not fit"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["inlining"]
+body = """
+An exponent beyond `i32::MAX` in magnitude leaves only two possible answers,
+and neither needs the digits.
+
+If the significand is non-zero and the exponent positive, the value is beyond
+any float, and the comment gives the policy: an error, not infinity. Otherwise
+the value is zero, either because the significand was zero or because the
+exponent is hugely negative. The remaining exponent digits are consumed so the
+parser ends at the end of the number, and a zero with the right sign is
+returned.
+
+This function has no `#[cfg]`. Both float paths call it.
+"""
+
+[[annotation]]
+id    = "json-de-0033"
+file  = "src/de.rs"
+lines = "876-898"
+title = "f64_long_from_parts — handing two slices to lexical"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "borrowing"]
+body = """
+The end of the text-buffer path. The scratch buffer is split at `integer_end`
+and the two halves go to `lexical::parse_truncated_float` with the exponent.
+
+"Truncated" refers to the fast representation being unable to hold all the
+digits, which is how this path was entered. The function it calls is the slow,
+exact algorithm.
+
+The shape matches the other `f64_from_parts`: choose a precision from the
+flag, reject infinity, apply the sign.
+"""
+
+[[annotation]]
+id    = "json-de-0034"
+file  = "src/de.rs"
+lines = "899-931"
+title = "parse_any_signed_number — a number that must be the whole input"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["result", "custom-errors"]
+body = """
+This is used by `Number`'s `FromStr` impl a little further down, where the
+entire string is supposed to be one number.
+
+It handles the sign, parses, and then requires that nothing follows. Any
+remaining byte is `InvalidNumber`. Leading and trailing whitespace are not
+skipped, so `" 1"` and `"1 "` both fail.
+
+The comment on the last arm is a candid one. An error created through the
+`de::Error` trait has no position, and at this point there is no way to know
+whether the consumed or the peeked position is the right one. The code picks
+one and accepts being off by a column.
+"""
+
+[[annotation]]
+id    = "json-de-0035"
+file  = "src/de.rs"
+lines = "932-936"
+title = "parse_any_number by default — the same as parse_integer"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+Without `arbitrary_precision`, "any number" is the ordinary path:
+`parse_integer`, which continues into the fraction and exponent on its own.
+
+The indirection exists for the function below. Callers write
+`parse_any_number` and the feature decides what that means.
+"""
+
+[[annotation]]
+id    = "json-de-0036"
+file  = "src/de.rs"
+lines = "937-955"
+title = "parse_any_number with arbitrary_precision — text first, integers if they fit"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "strings"]
+body = """
+With `arbitrary_precision` the number is scanned into a `String` exactly as
+written. Nothing is rounded because nothing is converted.
+
+Then the code tries to do better. If the text parses as a `u64`, or as an
+`i64` for a negative number, that integer is returned. Anything containing a
+point or an exponent fails `str::parse` for an integer type, as does anything
+too large, and those are returned as `ParserNumber::String`.
+
+So ordinary integers take the same route to the visitor as in a default
+build, and only the numbers that would have become floats are kept as text.
+"""
+
+[[annotation]]
+id    = "json-de-0037"
+file  = "src/de.rs"
+lines = "956-1000"
+title = "scan_or_eof, scan_integer, scan_number — the grammar, copying as it goes"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "strings", "pattern-matching"]
+body = """
+Three functions compiled only with `arbitrary_precision`. They walk the same
+grammar as `parse_integer` and `parse_number` and append each byte to a
+string in place of computing with it.
+
+`scan_or_eof` consumes one byte, pushes it, and treats end of input as an
+error. `scan_integer` applies the leading-zero rule and collects the integer
+digits. `scan_number` looks at the next byte and continues into a fraction or
+an exponent.
+
+`b as char` is correct here because every byte pushed has been matched
+against an ASCII pattern, or will be rejected by the caller immediately after.
+"""
+
+[[annotation]]
+id    = "json-de-0038"
+file  = "src/de.rs"
+lines = "1001-1060"
+title = "scan_decimal and scan_exponent — and one normalisation"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "strings"]
+body = """
+The fraction and exponent, scanned into the buffer.
+
+`scan_decimal` requires at least one digit after the point, as every version
+of this grammar does. `scan_exponent` requires at least one digit after the
+optional sign.
+
+There is one place the text is not copied faithfully. The exponent marker is
+pushed as a lower-case `e` whatever the input had, and if no sign was written
+a `+` is inserted. So `1E5` is stored as `1e+5`. The value is the same. The
+spelling is not, which matters if you expected `arbitrary_precision` to
+preserve a number byte for byte.
+"""
+
+[[annotation]]
+id    = "json-de-0039"
+file  = "src/de.rs"
+lines = "1061-1071"
+title = "parse_object_colon — one byte, three outcomes"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+After an object key there must be a colon. This skips whitespace and checks.
+
+The three arms are the pattern used by all the punctuation helpers in this
+file: the right byte is consumed, a wrong byte is one error code, and end of
+input is another. The end-of-input code names the structure being parsed,
+`EofWhileParsingObject`, so the message says what was left open.
+"""
+
+[[annotation]]
+id    = "json-de-0040"
+file  = "src/de.rs"
+lines = "1072-1101"
+title = "end_seq and end_map — closing brackets, and the trailing comma"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "custom-errors"]
+body = """
+These run after a visitor has finished with a sequence or map, and they
+expect the closing bracket.
+
+Finding more input there means the visitor stopped early. A tuple visitor
+that wanted two elements and found three in the input ends up here, and the
+result is `TrailingCharacters`.
+
+`end_seq` goes one step further for a comma. It consumes it and peeks again.
+If a `]` follows, the input had `[1, 2,]`, and the error is the more specific
+`TrailingComma`. `end_map` reports a comma as `TrailingComma` without looking
+further.
+"""
+
+[[annotation]]
+id    = "json-de-0041"
+file  = "src/de.rs"
+lines = "1102-1216"
+title = "ignore_value — skipping any value without recursion"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["collections", "pattern-matching", "option"]
+body = """
+This skips one complete JSON value of any shape. It is what runs for an
+unknown struct field and for `IgnoredAny`.
+
+It is a loop, not a recursive function. Nesting is tracked on an explicit
+stack, and the stack is the scratch buffer. Each open container is one byte,
+`[` or `{`. The innermost container is held in the local `enclosing` so that
+the common case, a flat list of scalars, never touches the buffer.
+
+Each pass of the outer loop skips one value. Scalars are consumed by the
+same helpers the parser uses, or by `ignore_str` and `ignore_integer`, and
+produce no frame. An opening bracket pushes the previous frame and becomes
+the current one.
+
+The inner loop then deals with what follows a value. A comma, where one is
+allowed, breaks out to read the next value. A matching closing bracket pops a
+frame, and the loop repeats, since several containers can close in a row.
+When the stack is empty the whole value has been skipped. `accept_comma` is
+false immediately after an opening bracket, which is how `[,` is rejected and
+`[]` accepted.
+
+The block at the bottom handles object keys. Inside a `{` frame every value
+is preceded by a string and a colon.
+
+Two consequences. Skipped data is checked for syntax but strings in it are
+not checked for valid UTF-8 or valid surrogate pairs. And because nothing
+recurses, `remaining_depth` is not consulted: skipped data may be nested to
+any depth.
+"""
+
+[[annotation]]
+id    = "json-de-0042"
+file  = "src/de.rs"
+lines = "1217-1283"
+title = "ignore_integer, ignore_decimal, ignore_exponent — the number grammar, third time"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+The number grammar again, with no accumulator and no buffer. These consume a
+number and check that it is well-formed.
+
+That makes three renderings of one grammar in this file: computing a value,
+copying text for `arbitrary_precision`, and skipping. They agree on what a
+number is. They differ slightly in errors. `ignore_decimal` reports
+`InvalidNumber` when the digit after the point is missing, without checking
+whether the input ended, where `parse_decimal` would say
+`EofWhileParsingValue`.
+
+No overflow can happen here, so a number with a thousand digits is skipped
+without complaint, even though parsing it would have produced a float.
+"""
+
+[[annotation]]
+id    = "json-de-0043"
+file  = "src/de.rs"
+lines = "1284-1295"
+title = "deserialize_raw_value — skip the value, keep the bytes"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "generic-params"]
+body = """
+Four lines that produce a `RawValue`. Leading whitespace is skipped first so
+that it is not part of the captured text. Then the reader is told to start
+buffering, the value is skipped with `ignore_value`, and the reader hands the
+captured bytes to the visitor.
+
+A raw value is therefore validated exactly as much as ignored data is. It is
+syntactically JSON, and nothing in it has been interpreted.
+
+The closing brace ends the large inherent `impl` block that began with `end`.
+"""
+
+[[annotation]]
+id    = "json-de-0044"
+file  = "src/de.rs"
+lines = "1296-1305"
+title = "FromStr for Number — the parser, reused for one type"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types", "result"]
+body = """
+`"12.5".parse::<Number>()` works because of this impl. It builds a
+`Deserializer` over the string and calls `parse_any_signed_number`, the
+function that insists the number is the whole input.
+
+`.map(Into::into)` converts the parser's `ParserNumber` into the public
+`Number` through a `From` impl in `number.rs`.
+
+The return type is spelled `result::Result<Self, Self::Err>` because the name
+`Result` in this file is the crate's one-parameter alias.
+"""
+
+[[annotation]]
+id    = "json-de-0045"
+file  = "src/de.rs"
+lines = "1306-1340"
+title = "POW10 — 309 powers of ten"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+The table used by the default `f64_from_parts`. It holds `1e0` through
+`1e308`, which is every power of ten an `f64` can represent as a finite
+value. `1e309` would be infinity.
+
+It is a `static`, so there is one copy in the binary and indexing it is a
+load. The `//` at the end of each row is a formatting device. It stops
+`rustfmt` from reflowing the rows, so each line keeps ten entries.
+
+The table is gated out when `float_roundtrip` is on, since that build never
+scales by a power of ten this way.
+"""
+
+[[annotation]]
+id    = "json-de-0046"
+file  = "src/de.rs"
+lines = "1341-1355"
+title = "deserialize_number! — one method per invocation"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules"]
+body = """
+A macro that writes a `Deserializer` trait method whose whole body is a call
+to an inherent method.
+
+It has two arms. The one-argument arm calls the two-argument arm with a
+default, so `deserialize_number!(deserialize_u8)` forwards to
+`self.deserialize_number(visitor)`. The two-argument form names a different
+target, which the 128-bit integers and, with `float_roundtrip`, `f32` need.
+
+Recursion between arms is the standard way to give a `macro_rules!` macro an
+optional argument. Note also that the generated method uses `'de`, which is
+not a macro parameter. The macro can only be invoked inside an impl where
+that lifetime is in scope.
+"""
+
+[[annotation]]
+id    = "json-de-0047"
+file  = "src/de.rs"
+lines = "1356-1371"
+title = "if_checking_recursion_limit! — a macro defined twice"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["macro-rules", "macro-repetition", "cfg"]
+body = """
+Two definitions with the same name under opposite `#[cfg]`s, so exactly one
+exists in any build.
+
+Without `unbounded_depth` the macro is the identity. It matches any tokens and
+emits them unchanged. With the feature, it captures the first token as an
+identifier, wraps everything in `if !$this.disable_recursion_limit { ... }`,
+and re-emits the tokens inside.
+
+The effect is that code written once, in the macro below, has a runtime check
+only in builds where the limit can be switched off. In a default build there
+is no flag to test and no branch.
+"""
+
+[[annotation]]
+id    = "json-de-0048"
+file  = "src/de.rs"
+lines = "1372-1388"
+title = "check_recursion! — spend one level of depth around a block"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "macro-hygiene", "macro-repetition"]
+body = """
+This macro wraps the code that descends into an array or object. It
+decrements `remaining_depth`, fails if that reaches zero, runs the body, and
+increments again.
+
+The budget starts at 128 and the check is for zero after the decrement, so
+127 levels of nesting parse and the 128th is `RecursionLimitExceeded`. The
+limit exists because the parser recurses through the visitor for every nested
+container, and without it a few kilobytes of `[` would overflow the stack.
+
+The pattern `$this:ident $($body:tt)*` is doing something specific. Callers
+write `check_recursion! { self.eat_char(); ... }`, and the macro peels off
+the first token, `self`, as `$this`. A macro body cannot write `self` on its
+own, because `self` written inside a macro definition is not the `self` of
+the function that invokes it. Capturing it from the call site is the
+workaround, and `$this $($body)*` then re-emits the caller's code intact.
+
+Every body used with this macro stores its result in a `let` and does not
+return early. That is what guarantees the increment runs.
+"""
+
+[[annotation]]
+id    = "json-de-0049"
+file  = "src/de.rs"
+lines = "1389-1403"
+title = "Deserializer for &mut Deserializer<R> — and the first thing every value does"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "lifetime-de", "associated-types", "inlining"]
+body = """
+The trait is implemented for a mutable reference, not for the struct. The
+methods of `serde_core`'s `Deserializer` take `self` by value. If the struct
+implemented the trait, deserializing one value would consume the parser and
+there would be nothing left to read the next element with. A `&mut` can be
+re-borrowed for each nested value.
+
+`type Error = Error` names the crate's one error type.
+
+`deserialize_any` is the method the whole format hangs on. JSON is
+self-describing, so the parser can look at the input and tell the visitor
+what is there. It begins as nearly every method in this impl does: skip
+whitespace, and treat end of input as `EofWhileParsingValue`.
+"""
+
+[[annotation]]
+id    = "json-de-0050"
+file  = "src/de.rs"
+lines = "1404-1419"
+title = "null, true, false — one byte decides, then the rest is checked"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+The first three arms of the central `match`. A single peeked byte selects the
+arm, the byte is consumed, and `parse_ident` verifies the remaining letters.
+
+Then the visitor is told what was found. `null` is `visit_unit`. It is not
+`visit_none`, because here nobody has said the value is optional. A visitor
+for `Option` is reached through `deserialize_option` instead, which handles
+`null` itself.
+"""
+
+[[annotation]]
+id    = "json-de-0051"
+file  = "src/de.rs"
+lines = "1420-1424"
+title = "The number arms — a sign, or a digit"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+A `-` is consumed and the number parsed as negative. A digit is left in place
+and the number parsed as positive.
+
+`parse_any_number` returns a `ParserNumber`, and `.visit(visitor)` forwards
+it as `visit_u64`, `visit_i64` or `visit_f64`. This is the self-describing
+path, so the parser chooses the type from the text alone.
+"""
+
+[[annotation]]
+id    = "json-de-0052"
+file  = "src/de.rs"
+lines = "1425-1432"
+title = "The string arm — Borrowed or Copied becomes two different visitor calls"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["lifetime-de", "borrowing", "pattern-matching"]
+body = """
+This is where the `Reference` enum from `read.rs` is consumed.
+
+The scratch buffer is cleared, because `parse_str` requires it to be empty.
+Then the result is matched. `Borrowed(s)` holds a `&'de str` and goes to
+`visit_borrowed_str`, which is the one visitor method allowed to keep the
+reference. `Copied(s)` holds a string in scratch that will be overwritten by
+the next string, and goes to `visit_str`, where the visitor must copy if it
+wants to keep anything.
+
+A `String` visitor accepts both. A `&'de str` visitor accepts only the
+first, and that is the mechanism behind the "expected a borrowed string"
+error for input containing an escape.
+"""
+
+[[annotation]]
+id    = "json-de-0053"
+file  = "src/de.rs"
+lines = "1433-1457"
+title = "The array and object arms — where the parser recurses"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "result"]
+body = """
+An opening bracket starts a container. Inside `check_recursion!` the bracket
+is consumed and the visitor is given an access object that borrows the
+parser. The visitor pulls elements out through that object, and each element
+is a call back into this impl. That is the recursion the depth budget
+bounds.
+
+The `match (ret, self.end_seq())` afterwards is written to do two things.
+`end_seq` runs whether or not the visitor succeeded, because it is evaluated
+as part of building the tuple. And if both failed, the or-pattern binds the
+first error it finds, which is the visitor's.
+
+Any byte that begins none of the seven kinds of value is
+`ExpectedSomeValue`.
+"""
+
+[[annotation]]
+id    = "json-de-0054"
+file  = "src/de.rs"
+lines = "1458-1468"
+title = "The tail of deserialize_any — positioning errors that arrived without one"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["custom-errors", "result"]
+body = """
+An `Ok` passes through. An `Err` goes through `fix_position`.
+
+The comment is the same one that appears on `parse_any_signed_number`, word
+for word. A visitor's error has no line or column, the parser cannot tell
+which of its two position methods applies, and it picks the consumed-byte one.
+"""
+
+[[annotation]]
+id    = "json-de-0055"
+file  = "src/de.rs"
+lines = "1469-1499"
+title = "deserialize_bool — the shape of every typed method"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "result"]
+body = """
+This is the first method where the caller has said what it expects. Compare
+it with `deserialize_any` and the difference is one arm.
+
+The arms for `true` and `false` are identical to the general ones. Everything
+else goes to `peek_invalid_type`, which parses the offending value to describe
+it. In `deserialize_any` an unexpected kind of value cannot occur, since
+whatever is there is reported to the visitor.
+
+The frame around the match is the same four steps you will see repeated
+through this impl: skip whitespace, fail on end of input, match on the byte,
+fix the position of any error.
+"""
+
+[[annotation]]
+id    = "json-de-0056"
+file  = "src/de.rs"
+lines = "1500-1516"
+title = "Twelve numeric methods from one macro"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-rules", "cfg"]
+macro_def = "json-de-0046"
+body = """
+Thirteen invocations, of which twelve compile in any one build. Those with
+one argument forward to `deserialize_number`. The 128-bit integers name
+their own string-collecting functions as a second argument.
+
+`deserialize_f32` appears twice under opposite `#[cfg]`s. Without
+`float_roundtrip` it is a number like any other. With it, the method goes
+through `do_deserialize_f32`, which sets the single-precision flag first.
+
+None of these methods uses the width in its name. `deserialize_u8` and
+`deserialize_i64` run the same code and may both call `visit_u64`. The range
+check happens in the visitor.
+"""
+
+[[annotation]]
+id    = "json-de-0057"
+file  = "src/de.rs"
+lines = "1517-1559"
+title = "char, str and string — one method and two forwards"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings", "lifetime-de"]
+body = """
+`deserialize_char` and `deserialize_string` both call `deserialize_str`. JSON
+has one kind of string, and what distinguishes a `char` from a `String` is
+what the visitor does with the text.
+
+`deserialize_str` is the string arm of `deserialize_any` with a type error
+for everything else. The same `Borrowed` and `Copied` split decides between
+`visit_borrowed_str` and `visit_str`.
+
+`serde_core`'s contract describes `deserialize_string` as a hint that the
+visitor would like ownership. This format ignores the hint. It always offers a
+reference, and a `String` visitor copies it.
+"""
+
+[[annotation]]
+id    = "json-de-0058"
+file  = "src/de.rs"
+lines = "1560-1632"
+title = "deserialize_bytes — what the documentation commits to"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["strings"]
+body = """
+Seventy lines of documentation for one method, because the behaviour is a
+deliberate departure and upstream wants it on record.
+
+The quoted passage from RFC 7159 is the justification. The JSON grammar
+permits escapes such as `\\uDEAD` that are not Unicode characters, and says
+software receiving them behaves unpredictably. `serde_json` chooses to be
+predictable in two different ways depending on the target type. Into a Rust
+string type, such input is an error. Through this method, it succeeds and
+yields WTF-8 bytes.
+
+The two examples pin that down. The first passes raw non-UTF-8 bytes through
+a JSON string unchanged. The second shows a lone surrogate escape becoming the
+three bytes `ED A0 81`.
+
+What is still enforced is stated twice: escapes are processed, and a `\\u`
+escape must still be four hex digits. You have read the code that implements
+this, in `parse_unicode_escape` with `validate` set to false.
+"""
+
+[[annotation]]
+id    = "json-de-0059"
+file  = "src/de.rs"
+lines = "1633-1670"
+title = "deserialize_bytes and deserialize_byte_buf — a string, or an array"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "lifetime-de"]
+body = """
+For a string, this calls `parse_str_raw` where the string methods call
+`parse_str`. That is the non-validating scan, and its result goes to
+`visit_borrowed_bytes` or `visit_bytes` by the same rule as for text.
+
+There is a second accepted form. If the value starts with `[`, the method
+hands over to `deserialize_seq`, so a byte buffer may also be written as a
+JSON array of numbers. That is the form `serde_json` itself produces when it
+serializes bytes, so the two directions agree.
+
+`deserialize_byte_buf` forwards, for the same reason `deserialize_string`
+does.
+"""
+
+[[annotation]]
+id    = "json-de-0060"
+file  = "src/de.rs"
+lines = "1671-1686"
+title = "deserialize_option — null is None, anything else is Some"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["option", "pattern-matching"]
+body = """
+The whole policy is in the doc comment. A `null` is consumed and reported as
+`visit_none`. Anything else is `visit_some(self)`, which gives the visitor the
+deserializer back so it can read the inner value from the same position.
+
+Nothing has been consumed in the `Some` case. Whitespace was skipped and one
+byte was peeked.
+
+One consequence follows from JSON having a single `null`. `Option<Option<T>>`
+cannot distinguish `None` from `Some(None)`. Both would be written as `null`,
+and reading `null` gives the outer `None`.
+"""
+
+[[annotation]]
+id    = "json-de-0061"
+file  = "src/de.rs"
+lines = "1687-1719"
+title = "unit and unit_struct — both are null"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+`()` is represented as `null`, and so is a unit struct. The struct's name is
+ignored, as the leading underscore on `_name` says.
+
+`deserialize_unit` accepts exactly `null` and reports a type error otherwise.
+It has the standard frame.
+"""
+
+[[annotation]]
+id    = "json-de-0062"
+file  = "src/de.rs"
+lines = "1720-1736"
+title = "deserialize_newtype_struct — transparent, with one reserved name"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg", "strings"]
+body = """
+A newtype struct is deserialized as its inner value. `struct Meters(f64)`
+reads from `1.5`, with no wrapping in the JSON.
+
+The gated block is the hook for `RawValue`. That type's `Deserialize` impl
+asks for a newtype struct with a private, reserved name. When the name
+matches `crate::raw::TOKEN`, the method captures raw text instead. The data
+model has no notion of "give me the unparsed input", so the request is
+smuggled through a name no user type would have.
+
+`let _ = name;` marks the parameter as used in builds where the block is
+compiled out.
+"""
+
+[[annotation]]
+id    = "json-de-0063"
+file  = "src/de.rs"
+lines = "1737-1787"
+title = "seq, tuple and tuple_struct — all arrays, and nobody checks the length here"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+`deserialize_seq` accepts `[` and does what the array arm of `deserialize_any`
+does. `deserialize_tuple` and `deserialize_tuple_struct` forward to it and
+ignore `_len`.
+
+The length is enforced from two other places. If the array is too short, the
+visitor asks for an element that is not there and raises `invalid_length`. If
+it is too long, the visitor stops after the elements it wanted, and
+`end_seq` finds a comma where it expected `]`. That is reported as "trailing
+characters".
+"""
+
+[[annotation]]
+id    = "json-de-0064"
+file  = "src/de.rs"
+lines = "1788-1819"
+title = "deserialize_map — an object, through MapAccess"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+The object counterpart of `deserialize_seq`. A `{` is consumed inside the
+depth check, the visitor is given a `MapAccess`, and `end_map` verifies the
+closing brace.
+
+Anything other than `{` is a type error. A map cannot be read from an array
+of pairs.
+"""
+
+[[annotation]]
+id    = "json-de-0065"
+file  = "src/de.rs"
+lines = "1820-1867"
+title = "deserialize_struct — an object, or an array in field order"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+A struct is normally read from an object, with `visit_map`. This method also
+accepts an array and calls `visit_seq`.
+
+Derived `Deserialize` impls implement both visitor methods, so
+`{"a":1,"b":"x"}` and `[1,"x"]` deserialize to the same struct, the second by
+position. `serde_json` never writes the array form. Accepting it costs one
+match arm and makes the format compatible with data produced by more compact
+encoders of the same types.
+
+The `_fields` list is not consulted. Which keys are known is decided by the
+generated visitor, one key at a time.
+"""
+
+[[annotation]]
+id    = "json-de-0066"
+file  = "src/de.rs"
+lines = "1868-1902"
+title = "deserialize_enum — an object with one key, or a bare string"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+The doc comment gives the externally tagged representation: `{"Variant":
+value}`. A bare string, `"Variant"`, is also accepted and means a unit
+variant.
+
+For the object form, `visit_enum` receives a `VariantAccess`. When it
+returns, the next thing must be the closing brace. A second key is an error,
+since an enum value is exactly one variant.
+
+For the string form the visitor receives a `UnitVariantAccess`, a different
+type whose non-unit methods all fail. A newtype variant written as a bare
+string is rejected there.
+
+`deserialize_any` never produces an enum. A `Value` built from `{"A":1}` is
+an object, because nothing in the text marks it as a variant.
+"""
+
+[[annotation]]
+id    = "json-de-0067"
+file  = "src/de.rs"
+lines = "1903-1918"
+title = "identifier and ignored_any — the last two methods"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+`deserialize_identifier` is what a derived impl calls to read a field name or
+variant name. In JSON those are strings, so it forwards to `deserialize_str`.
+
+`deserialize_ignored_any` is the caller saying it does not want the value. It
+runs `ignore_value`, the non-recursive skipper, and then calls `visit_unit` so
+the visitor has something to return.
+
+This closes the `Deserializer` impl. Every one of the trait's methods was
+written out, including the ones that only forward.
+"""
+
+[[annotation]]
+id    = "json-de-0068"
+file  = "src/de.rs"
+lines = "1919-1929"
+title = "SeqAccess — a borrowed parser and one bool"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["lifetimes", "generic-params"]
+body = """
+The object a visitor uses to pull elements out of an array. It holds a
+mutable borrow of the deserializer and a flag saying whether the next element
+would be the first.
+
+The flag is all the state a comma-separated list needs. Before the first
+element no comma is allowed, and before every later one a comma is required.
+
+`R: 'a` on the struct says the reader outlives the borrow. Current compilers
+infer that bound, and it is written out here for older ones.
+"""
+
+[[annotation]]
+id    = "json-de-0069"
+file  = "src/de.rs"
+lines = "1930-1971"
+title = "next_element_seed — commas, and a helper that is not generic over T"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "generic-params", "monomorphization"]
+body = """
+`serde_core`'s `SeqAccess` has one required method and this is it. It returns
+`Some(element)` or `None` when the array ends.
+
+The comma logic sits in a nested function, `has_next_element`. A `]` ends the
+sequence. On the first call any other byte starts an element. Later, a comma
+must come first, and a `]` directly after that comma is `TrailingComma`.
+
+The nested function takes no `T`. The outer method is generic over the seed
+type and is compiled once for every element type in the program. Code inside
+it would be duplicated each time. Moving the punctuation handling into a
+function that is generic only over the reader means it is compiled once per
+reader type.
+
+`seed.deserialize(&mut *self.de)` re-borrows the parser for one element. The
+explicit `&mut *` creates a shorter borrow and leaves `self.de` usable for
+the next call.
+"""
+
+[[annotation]]
+id    = "json-de-0070"
+file  = "src/de.rs"
+lines = "1972-1982"
+title = "MapAccess — the same two fields"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["lifetimes", "generic-params"]
+body = """
+Identical in shape to `SeqAccess`: a borrowed parser and a `first` flag.
+Objects are comma-separated in the same way arrays are. The difference is in
+the impl, which has to deal with keys and colons.
+"""
+
+[[annotation]]
+id    = "json-de-0071"
+file  = "src/de.rs"
+lines = "1983-2026"
+title = "next_key_seed — a key must be a string, and is read by a different deserializer"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "monomorphization", "pattern-matching"]
+body = """
+The same structure as for sequences, with one more rule. Wherever a key is
+expected, the next byte must be `"`. Anything else is `KeyMustBeAString`.
+JSON has no other kind of key.
+
+The helper is again a nested function without the seed's type parameter.
+
+The last lines differ from the sequence case in a way that matters. The key
+is deserialized with `MapKey { de: &mut *self.de }`, a separate type with its
+own `Deserializer` impl. A key is always text in the input, but the Rust
+type being built may want an integer or a boolean. `MapKey` is what lets
+`{"1": true}` deserialize into a map keyed by `u8`.
+"""
+
+[[annotation]]
+id    = "json-de-0072"
+file  = "src/de.rs"
+lines = "2027-2036"
+title = "next_value_seed — a colon, then an ordinary value"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits"]
+body = """
+After a key comes a colon and then a value. The colon is checked and
+consumed, and the value is read with the main deserializer.
+
+`serde_core` also offers `next_entry_seed`, with a default that calls these
+two in turn. This impl leaves the default alone.
+"""
+
+[[annotation]]
+id    = "json-de-0073"
+file  = "src/de.rs"
+lines = "2037-2046"
+title = "VariantAccess — a borrowed parser, for the object form of an enum"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["lifetimes", "generic-params"]
+body = """
+The access object for `{"Variant": value}`. It holds the borrowed parser and
+no other state. An enum has one key and one value, so there is nothing to
+count.
+"""
+
+[[annotation]]
+id    = "json-de-0074"
+file  = "src/de.rs"
+lines = "2047-2070"
+title = "EnumAccess for VariantAccess — read the key, then the colon"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types"]
+body = """
+`serde_core` splits enum deserialization in two. `EnumAccess` identifies the
+variant, and `VariantAccess` reads its content. `type Variant = Self` says
+the same object does both jobs here, which is why `variant_seed` returns
+`self` in the tuple.
+
+The opening brace has been consumed. The next byte must be `"`. The three
+failure arms give three different messages for `{}`, for a non-string key,
+and for end of input.
+
+The variant name is read through `MapKey`, as an object key is, because that
+is what it is. An error from the seed is positioned by hand, since the
+`tri!` pattern used elsewhere would return it without a line. Then the colon
+is consumed, leaving the parser at the variant's content.
+"""
+
+[[annotation]]
+id    = "json-de-0075"
+file  = "src/de.rs"
+lines = "2071-2099"
+title = "VariantAccess — four kinds of content, four forwards"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "generic-params"]
+body = """
+The visitor has identified the variant and now says what shape it expects.
+Each method reads that shape from the current position using the main
+deserializer.
+
+A newtype variant is whatever its inner type deserializes from. A tuple
+variant is an array. A struct variant goes through `deserialize_struct`, so
+it may be an object or, as for any struct, an array.
+
+`unit_variant` deserializes `()`. That requires `null`, so in the object form
+a unit variant is written `{"Variant": null}`. The bare string form is
+handled by the other access type below.
+
+The calls are written as `de::Deserializer::deserialize_seq(self.de,
+visitor)` to name the trait method explicitly. `Deserializer<R>` also has
+inherent methods, and the fully qualified form leaves no doubt which is
+meant.
+"""
+
+[[annotation]]
+id    = "json-de-0076"
+file  = "src/de.rs"
+lines = "2100-2122"
+title = "UnitVariantAccess — an enum written as a bare string"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types"]
+body = """
+The second enum form. When the input is `"Variant"` with no braces,
+`deserialize_enum` constructs this type.
+
+`variant_seed` deserializes the string with the main deserializer, which
+identifies the variant, and returns `self` for the content step. There is no
+colon to consume and no content to read.
+"""
+
+[[annotation]]
+id    = "json-de-0077"
+file  = "src/de.rs"
+lines = "2123-2160"
+title = "UnitVariantAccess — unit succeeds, everything else is a type error"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "custom-errors", "trait-objects"]
+body = """
+A bare string can only be a unit variant. `unit_variant` returns `Ok(())`
+with nothing to check.
+
+The other three methods fail with `invalid_type`. The "unexpected" half is
+`Unexpected::UnitVariant` and the "expected" half is a string literal,
+`&"newtype variant"`. That works because `serde_core` implements `Expected`
+for `&str`, so a literal can be passed where a `&dyn Expected` is wanted.
+
+These errors reach the caller without a line or column. They are created
+here, returned through `visit_enum`, and the string arm of `deserialize_enum`
+returns that result directly, without `fix_position`. Deserializing
+`"New"` into an enum whose `New` variant holds a value reports "invalid type:
+unit variant, expected newtype variant" and nothing more.
+"""
+
+[[annotation]]
+id    = "json-de-0078"
+file  = "src/de.rs"
+lines = "2161-2166"
+title = "MapKey — a deserializer with a precondition"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["lifetimes"]
+body = """
+A wrapper around the borrowed parser, used only for object keys and variant
+names.
+
+The doc comment is a warning to the people who maintain this file. A `MapKey`
+assumes the next byte is an opening quote. Its methods consume one byte
+without looking at it. Constructed at any other position it would skip
+whatever was there and could accept input that is not JSON. Both places that
+build one check for the quote first.
+"""
+
+[[annotation]]
+id    = "json-de-0079"
+file  = "src/de.rs"
+lines = "2167-2200"
+title = "deserialize_numeric_key! — a number inside quotation marks"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "pattern-matching"]
+body = """
+JSON object keys are strings. A Rust map may be keyed by integers. This macro
+generates the methods that read a number from inside a quoted key, so that
+`{"1": true}` can become a map from `u8`.
+
+The two-argument arm does the work. It consumes the opening quote, requires
+the next byte to be a digit or a minus sign, calls `$delegate` on the inner
+deserializer to parse the number, and then requires and consumes a closing
+quote. `ExpectedNumericKey` and `ExpectedDoubleQuote` are the two errors.
+
+The digit check up front is necessary. The number parser skips leading
+whitespace, and without the check `" 1"` would be accepted as the key 1.
+
+The one-argument arm generates a method that calls
+`self.deserialize_number(visitor)`. That is an inherent method on `MapKey`,
+and the next block is where it comes from.
+"""
+
+[[annotation]]
+id    = "json-de-0080"
+file  = "src/de.rs"
+lines = "2201-2207"
+title = "MapKey::deserialize_number — the macro, instantiating its own helper"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-rules", "where-clauses"]
+macro_def = "json-de-0079"
+body = """
+One invocation inside an inherent impl. It uses the two-argument arm to
+define `MapKey::deserialize_number`, delegating to the parser's
+`deserialize_number`.
+
+So the macro's short arm calls a function that the macro's long arm
+generated. The quote handling is written once, and every one-argument
+invocation below reaches it through this function.
+"""
+
+[[annotation]]
+id    = "json-de-0081"
+file  = "src/de.rs"
+lines = "2208-2226"
+title = "Deserializer for MapKey — a key is a string unless asked otherwise"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "lifetime-de", "borrowing"]
+body = """
+A second implementation of `serde_core`'s `Deserializer`, for the position
+where only a string can appear.
+
+Its `deserialize_any` consumes the opening quote, on trust, and parses the
+string. The `Borrowed` and `Copied` cases go to `visit_borrowed_str` and
+`visit_str` as usual. Keys can be borrowed from the input in the same way
+values can.
+
+Note that `MapKey` is implemented by value. It is a small struct holding a
+`&mut`, made fresh for each key, so there is no need for the
+reference-to-self arrangement the main deserializer uses.
+"""
+
+[[annotation]]
+id    = "json-de-0082"
+file  = "src/de.rs"
+lines = "2227-2242"
+title = "Numeric keys — thirteen invocations"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-rules", "cfg"]
+macro_def = "json-de-0079"
+body = """
+The integer and float methods of the key deserializer. The one-argument
+invocations go through `MapKey::deserialize_number`. The 128-bit integers
+name the main deserializer's trait methods as delegates, since those have
+their own parsing path.
+
+`deserialize_f32` is again doubled under opposite `#[cfg]`s, so that with
+`float_roundtrip` a quoted `f32` key gets single-precision rounding.
+
+A float as a map key is unusual, and `f64` does not implement `Ord` or
+`Hash`. The methods exist because the trait has them and a wrapper type
+could ask.
+"""
+
+[[annotation]]
+id    = "json-de-0083"
+file  = "src/de.rs"
+lines = "2243-2277"
+title = "A bool key — and a closing quote folded into the literal"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "strings"]
+body = """
+A map keyed by `bool` is read from `"true"` and `"false"`.
+
+The method consumes the opening quote and the first letter, then calls
+`parse_ident` with `b"rue\\""` or `b"alse\\""`. The closing quotation mark is
+part of the expected bytes, so one call checks the rest of the word and the
+end of the key.
+
+If the first letter is neither `t` nor `f`, the key is an ordinary string of
+the wrong kind. The code parses it as a string so the error can quote it. The
+first letter has already been consumed at that point, so the quoted text in
+the message is missing its first character.
+"""
+
+[[annotation]]
+id    = "json-de-0084"
+file  = "src/de.rs"
+lines = "2278-2302"
+title = "Option and newtype keys — both transparent"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["option", "cfg"]
+body = """
+`deserialize_option` always calls `visit_some`. The comment gives the reason:
+a key cannot be `null`, because a key is a string and `null` is not.
+
+`deserialize_newtype_struct` passes itself through, so a newtype around a
+string or an integer works as a key. It carries the same `RawValue` hook as
+the main deserializer.
+"""
+
+[[annotation]]
+id    = "json-de-0085"
+file  = "src/de.rs"
+lines = "2303-2331"
+title = "Enum and bytes keys — handed to the main deserializer"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits"]
+body = """
+These three do not consume the opening quote. They forward to the main
+deserializer, which is positioned at the quote and will read a complete JSON
+string.
+
+For an enum that means the bare-string form, so a map can be keyed by a
+unit-only enum. For bytes it means the key's text, with escapes processed
+and no UTF-8 requirement.
+"""
+
+[[annotation]]
+id    = "json-de-0086"
+file  = "src/de.rs"
+lines = "2332-2339"
+title = "Everything else forwards to deserialize_any"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["macro-rules"]
+body = """
+`forward_to_deserialize_any!` is `serde_core`'s macro. It generates each
+listed method with a body that calls `self.deserialize_any(visitor)`.
+
+For a key that means "read a string and call `visit_str`". A visitor that
+wanted a sequence or a map does not implement `visit_str`, so its default
+produces an `invalid_type` error. That is the right outcome and it costs no
+code here.
+
+`identifier` is in the list, which is how struct field names are read:
+as strings, borrowed when possible.
+"""
+
+[[annotation]]
+id    = "json-de-0087"
+file  = "src/de.rs"
+lines = "2340-2367"
+title = "StreamDeserializer — several values in one input"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["marker-types", "lifetimes", "generic-params"]
+body = """
+An iterator that deserializes one `T` after another from the same input.
+Line-delimited JSON is the usual use.
+
+The doc comment states a rule about boundaries. A value must either be
+self-delineating, meaning an array, object or string, or be followed by
+whitespace or by a value that is. The example input shows it:
+`{"k": 3}1"cool""stuff" 3{}` is six values. `12` is one value, and there is
+no way to write two adjacent numbers without a separator.
+
+The struct owns the `Deserializer`. `offset` and `failed` are bookkeeping.
+The two `PhantomData` fields exist because `T` and `'de` are parameters of the
+type and appear in no real field. `PhantomData<&'de ()>` is the conventional
+way to mention a lifetime without storing a reference.
+"""
+
+[[annotation]]
+id    = "json-de-0088"
+file  = "src/de.rs"
+lines = "2368-2392"
+title = "StreamDeserializer::new — the direct constructor"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["where-clauses"]
+body = """
+The same construction `into_iter` performs, starting from a reader. The doc
+comment recommends `into_iter`, which lets the element type be written with a
+turbofish at the call site.
+
+The bounds on this impl are what the struct definition left off:
+`R: Read<'de>` and `T: Deserialize<'de>`.
+"""
+
+[[annotation]]
+id    = "json-de-0089"
+file  = "src/de.rs"
+lines = "2393-2427"
+title = "byte_offset — how far the last good value reached"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["iterators"]
+body = """
+One line returning a field, and a doc comment that explains what the field is
+for.
+
+The offset is the number of bytes consumed by successful values. After an
+end-of-input error the caller can take `data[offset..]`, append more data,
+and parse again. The example walks through `[0] [1] [` and shows the offset
+after each call.
+
+The note at the end reserves the right to change the definition, with a link
+to the issue. Upstream is saying that the exact value after a type error is
+not yet a promise.
+"""
+
+[[annotation]]
+id    = "json-de-0090"
+file  = "src/de.rs"
+lines = "2428-2443"
+title = "peek_end_of_value — what may follow a number"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+Called after a value that has no closing delimiter: a number, `true`,
+`false` or `null`.
+
+The next byte must be whitespace, end of input, or one of the structural
+characters. Anything else means two tokens were run together, as in `1x` or
+`truefalse`, and the result is `TrailingCharacters`.
+
+The error is built directly with `Error::syntax` here. The helper methods
+that do this live on `Deserializer`, and this is a method of the stream type.
+"""
+
+[[annotation]]
+id    = "json-de-0091"
+file  = "src/de.rs"
+lines = "2444-2497"
+title = "Iterator for StreamDeserializer — one value per call, and a way to stay stopped"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["iterators", "associated-types", "zero-cost"]
+body = """
+`next` returns `None` at end of input, `Some(Ok(value))` for each value, and
+`Some(Err(e))` once.
+
+The first line is the check discussed in `read.rs`. For a stream reader it
+tests the `failed` flag. For slice and string readers the constant is
+`false` and the line compiles to nothing.
+
+Then whitespace is skipped. End of input here is a clean finish. Otherwise
+the first byte says whether the coming value is self-delineating, the offset
+is recorded, and `T` is deserialized.
+
+On success the offset advances, and a value without a delimiter is checked
+with `peek_end_of_value`. On failure `set_failed` is called. For a slice
+reader that truncates the input, so the next call sees end of input and
+returns `None`.
+
+There is one path that does not stop the stream. A failed
+`peek_end_of_value` returns its error without calling `set_failed`. For the
+input `1x` the iterator yields "trailing characters", and the next call
+starts again at `x` and yields a second error.
+"""
+
+[[annotation]]
+id    = "json-de-0092"
+file  = "src/de.rs"
+lines = "2498-2506"
+title = "FusedIterator, only for readers that stay finished"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "marker-types", "where-clauses"]
+body = """
+An empty impl with a bound. `FusedIterator` promises that after the first
+`None`, every later call is `None`.
+
+The bound `R: Fused` restricts the promise to slice and string readers. Their
+input is fixed, so end of input is permanent. A stream reader over a socket
+could return `None` and later find more bytes, so the promise is withheld.
+"""
+
+[[annotation]]
+id    = "json-de-0093"
+file  = "src/de.rs"
+lines = "2507-2519"
+title = "from_trait — the three public functions, in four lines"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "lifetime-de"]
+body = """
+The private function behind `from_str`, `from_slice` and `from_reader`.
+
+Build a deserializer over the reader. Call `T::deserialize` with a mutable
+reference to it. Call `end` to confirm that only whitespace remains. Return
+the value.
+
+The second step is the handover. `Deserialize::deserialize` is code that
+belongs to `T`, often generated by `serde_derive`, and from that call until
+it returns, the type drives the parser.
+"""
+
+[[annotation]]
+id    = "json-de-0094"
+file  = "src/de.rs"
+lines = "2520-2540"
+title = "from_reader — three warnings before the example"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["traits"]
+body = """
+The first paragraphs of this doc comment are each a caveat.
+
+The input is not buffered, so wrap files in a `BufReader`. The function
+expects the stream to end after the value, because `from_trait` calls `end`,
+and `end` reads until it finds a non-whitespace byte or end of input. On a
+socket that stays open, that read blocks and the function does not return.
+And reading from a stream is usually slower than reading the whole input
+into memory first and calling `from_str`, with a link to the issue where
+that was measured.
+
+The third point follows from what you saw in `read.rs`. The stream reader
+copies every string and tracks position on every byte. The slice reader does
+neither.
+"""
+
+[[annotation]]
+id    = "json-de-0095"
+file  = "src/de.rs"
+lines = "2541-2621"
+title = "from_reader — two examples and an errors section"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["traits"]
+body = """
+The first example is the common case: open a file, wrap it in a
+`BufReader`, deserialize a struct.
+
+The second is the workaround for the socket problem. It builds a
+`Deserializer` by hand with `from_reader` and calls `User::deserialize(&mut
+de)` directly. Nothing calls `end`, so nothing waits for the connection to
+close.
+
+The hidden lines beginning with `#` split `main` in two. The visible program
+has a `main` that opens a file or a port. The compiled doctest has an empty
+`main` and an uncalled `fake_main`, so the example is type-checked and never
+touches the filesystem or the network.
+
+The errors section separates two kinds of failure: the input has the wrong
+structure, or the structure is right and the type's own `Deserialize` impl
+rejects the data.
+"""
+
+[[annotation]]
+id    = "json-de-0096"
+file  = "src/de.rs"
+lines = "2622-2631"
+title = "from_reader — and why its bound is DeserializeOwned"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg", "where-clauses", "lifetime-de"]
+body = """
+The body is one line. The signature is the lesson.
+
+`T: de::DeserializeOwned` means `T` can be deserialized for *every* input
+lifetime, which is another way of saying it borrows nothing from the input.
+A type containing `&'a str` does not satisfy the bound, so trying to
+deserialize borrowed data from a reader is a compile error at the call site.
+
+Without the bound, the same attempt would compile and then fail at run time
+with "expected a borrowed string", since the stream reader never produces a
+borrowed one. The bound moves that failure to the compiler.
+"""
+
+[[annotation]]
+id    = "json-de-0097"
+file  = "src/de.rs"
+lines = "2632-2673"
+title = "from_slice — the input's lifetime becomes the type's"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["lifetime-de", "where-clauses"]
+body = """
+Here the bound is `T: de::Deserialize<'a>`, with `'a` the lifetime of the
+slice. `T` may hold references into `v`, and the borrow checker will keep `v`
+alive as long as the result.
+
+The doc comment's errors section is the same text as on `from_reader`. The
+example parses a byte-string literal, which is why the quotation marks
+inside it are escaped.
+"""
+
+[[annotation]]
+id    = "json-de-0098"
+file  = "src/de.rs"
+lines = "2674-2714"
+title = "from_str — the entry point most programs use"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["lifetime-de", "where-clauses", "strings"]
+body = """
+The same signature shape as `from_slice`, over `&'a str`.
+
+The difference is in the reader it constructs. `StrRead` knows its input is
+already valid UTF-8, so strings in the document are not re-validated. If you
+have a `String`, this is faster than passing its bytes to `from_slice`.
+
+Follow the body down and you have the whole path: `from_str` makes a
+`StrRead`, `from_trait` makes a `Deserializer` and calls
+`T::deserialize`, and the type calls back into the `Deserializer` impl in
+the middle of this file.
+"""
