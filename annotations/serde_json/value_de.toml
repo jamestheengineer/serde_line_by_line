@@ -1039,6 +1039,7 @@ content.
 
 `UnitOnly` is a unit struct whose `unit_variant` succeeds and whose other
 three methods return the same `invalid_type` errors as the parser's
-`UnitVariantAccess`. It is the third place in the crate where those three
-refusals are written out.
+`UnitVariantAccess`. It is the fourth place in the crate where those three
+refusals are written out, after that type and the two variant deserializers
+above.
 """

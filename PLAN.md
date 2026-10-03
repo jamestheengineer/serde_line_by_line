@@ -1470,7 +1470,7 @@ against 26.1. It is under the scope doc's stated lower bound of 600.
 
 Every group came in under, and for one reason stated four ways. `serde_json`
 repeats itself more than either crate before it. It implements `Serializer`
-five times and `Deserializer` eight, and `serde_core` gives those traits few
+eight times and `Deserializer` thirteen, and `serde_core` gives those traits few
 default methods, so each implementation spells out thirty answers of which
 two or three are interesting. It wraps a map in a second map and every
 iterator in a second iterator. It writes its number grammar three times and
