@@ -443,11 +443,20 @@ measurements behind each:
     the front page, or in a badge. The front page says why, in the place a
     reader would go looking for the missing number.
 
-**Still open: D13**, and it is §13's to settle — how a walk through a crate
-that *runs* proves what it claims the crate produces, where the derive walk had
-an expansion to check against. §9's eight phases, §11's five and §12's seven
-have all shipped; the gates listed in §9 are what keep their promises checkable
-rather than stated.
+**Resolved in §13:**
+
+13. **D13 — a claim about what a crate produces is checked against a real
+    run.** The question was how a walk through a crate that *runs* proves what
+    it claims the crate produces, where the derive walk had an expansion to
+    check against. A `produces` field holds a locator, as `emits` does, and it
+    is located in an `examples/*` transcript that `cargo test` asserts against
+    a native run and `cargo xtask wasm` against the browser's. No second
+    harness was built; the mechanism is a way of citing one that has existed
+    since phase 0.
+
+**Still open: nothing.** §9's eight phases, §11's five, §12's seven and §13's
+four have all shipped; the gates listed in §9 are what keep their promises
+checkable rather than stated.
 
 **Measured, and decided — the smaller way.** `serde_json` is the next crate and
 it is **walked, not claimed**: §8 of the scope doc rather than §6, which is
