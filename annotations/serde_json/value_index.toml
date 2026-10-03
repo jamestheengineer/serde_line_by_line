@@ -1,0 +1,208 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-value-index-0001"
+file  = "src/value/index.rs"
+lines = "1-7"
+title = "Imports — ops, for the bracket operators"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["modules"]
+body = """
+`core::ops` supplies `Index` and `IndexMut`, the traits behind `v[i]` and
+`v[i] = x`. This file also defines its own trait called `Index`, so the
+standard ones are always written with the `ops::` prefix.
+"""
+
+[[annotation]]
+id    = "json-value-index-0002"
+file  = "src/value/index.rs"
+lines = "8-36"
+title = "Index — what may go inside the brackets"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["sealed-traits", "traits"]
+body = """
+The crate's own `Index` trait describes a type that can be used to index a
+`Value`. The doc comment names the implementors: strings, for objects, and
+`usize`, for arrays.
+
+It is sealed, and the comment says so. The methods are hidden and their
+contracts are internal, so outside code can use the trait as a bound and
+cannot implement it.
+
+The example makes a small point about types. `&data["inner"]` is a
+`&Value`, and `assert_eq!(first, 1)` compares a `&Value` with an integer.
+That comparison compiles because of the impls in `partial_eq.rs`.
+"""
+
+[[annotation]]
+id    = "json-value-index-0003"
+file  = "src/value/index.rs"
+lines = "37-53"
+title = "Three methods — look, look mutably, or create"
+kind  = "trait-item"
+tracks = ["reference"]
+rust_features = ["sealed-traits", "lifetimes", "option"]
+body = """
+`index_into` and `index_into_mut` return an `Option` and never modify the
+structure. `index_or_insert` returns a reference unconditionally, and its
+doc comment lists what that costs: it inserts a missing key, treats null as
+an empty object, and panics when neither is possible.
+
+The lifetime `'v` is on the value and the result, not on `&self`. The index
+may be a temporary, and the returned reference borrows only from the
+`Value`.
+"""
+
+[[annotation]]
+id    = "json-value-index-0004"
+file  = "src/value/index.rs"
+lines = "54-82"
+title = "Index for usize — arrays only"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "closures"]
+body = """
+A `usize` indexes an array. Against any other kind of value the two
+optional methods return `None`.
+
+`index_or_insert` does not insert. An array is not extended to reach an
+index, so an out-of-bounds position panics with the index and the array's
+length. A value that is not an array panics with a message naming its kind,
+formatted by the `Type` helper below.
+
+`len` is read before `get_mut` because the closure that builds the panic
+message cannot borrow `vec` while `get_mut`'s mutable borrow is alive.
+"""
+
+[[annotation]]
+id    = "json-value-index-0005"
+file  = "src/value/index.rs"
+lines = "83-106"
+title = "Index for str — objects, and null promoted to an object"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "collections"]
+body = """
+A string indexes an object.
+
+`index_or_insert` is where assignment through brackets gets its behaviour.
+If the value is `Null`, it is first replaced with an empty object. Then the
+key is looked up with the map's `entry` API and inserted with `Null` if
+absent. That is why `data["a"]["b"]["c"] = x` works on a fresh `Null`: each
+level is created on the way down.
+
+Any other kind of value panics. A number cannot be given a key.
+
+`self.to_owned()` allocates a `String` for the key on every call, including
+when the key is already present.
+"""
+
+[[annotation]]
+id    = "json-value-index-0006"
+file  = "src/value/index.rs"
+lines = "107-118"
+title = "Index for String"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings"]
+body = """
+Forwards to the `str` impl through `self[..]`.
+"""
+
+[[annotation]]
+id    = "json-value-index-0007"
+file  = "src/value/index.rs"
+lines = "119-133"
+title = "Index for &T — so that &str works"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["blanket-impls", "sized-bound"]
+body = """
+A blanket impl over references. The impl above is for `str`, an unsized
+type, and what callers write is `v["key"]`, where the index is a `&str`.
+This impl is what connects them.
+
+`T: ?Sized` is required for `T = str`. `(**self)` dereferences twice: once
+from `&self` to `&T` and once more to `T`.
+"""
+
+[[annotation]]
+id    = "json-value-index-0008"
+file  = "src/value/index.rs"
+lines = "134-142"
+title = "The seal"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["sealed-traits", "modules", "blanket-impls"]
+body = """
+A private module with a public trait, implemented for exactly the four
+families of types that implement `Index`.
+
+The comment states the purpose. Compare with `read.rs`, where `Sealed` was
+implemented next to each reader. Here the impls are collected in the
+private module.
+"""
+
+[[annotation]]
+id    = "json-value-index-0009"
+file  = "src/value/index.rs"
+lines = "143-158"
+title = "Type — the name of a value's kind, for panic messages"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "pattern-matching"]
+body = """
+A wrapper that prints `null`, `boolean`, `number`, `string`, `array` or
+`object`. It exists so that the panics above can say "cannot access key
+"a" in JSON number" without formatting the value itself, which might be
+enormous.
+"""
+
+[[annotation]]
+id    = "json-value-index-0010"
+file  = "src/value/index.rs"
+lines = "159-216"
+title = "ops::Index for Value — and an argument for not panicking"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types", "where-clauses"]
+body = """
+The comment above this impl is a design argument, and it is unusually
+direct. Indexing in Rust normally panics on a bad index. Here it returns
+`Null`.
+
+The reasoning is about who uses `Value`. Someone holding a `Vec` knows its
+length. Someone holding JSON from a network endpoint wants to reach into it
+and see what is there. The careful approaches already exist: `get`,
+`as_array`, or a `match`. This impl is for the other mode, which the
+comment calls "concise and careless".
+
+The implementation is two lines. `static NULL: Value = Value::Null` gives a
+`Value` with a `'static` address, and a failed lookup returns a reference
+to it. `ops::Index::index` must return a reference, so there has to be a
+`Null` somewhere to point at.
+
+`type Output = Value` and the bound `I: Index` make this one impl cover
+every index type.
+"""
+
+[[annotation]]
+id    = "json-value-index-0011"
+file  = "src/value/index.rs"
+lines = "217-258"
+title = "ops::IndexMut for Value — the half that does panic"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "where-clauses"]
+body = """
+Writing through brackets goes to `index_or_insert`, with the behaviour its
+doc comment lists. A string index creates the key, and a `Null` becomes an
+object. A numeric index must already be in bounds.
+
+So the two operators are asymmetric. Reading a missing path gives `Null`
+quietly. Writing to one creates objects as needed and panics where it
+cannot, since there is no shared `NULL` that could be handed out mutably.
+"""

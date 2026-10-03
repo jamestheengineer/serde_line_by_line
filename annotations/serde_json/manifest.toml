@@ -18,4 +18,13 @@ complete = [
     "src/io/core.rs",
     "build.rs",
     "src/ser.rs",
+    "src/value/mod.rs",
+    "src/value/de.rs",
+    "src/value/ser.rs",
+    "src/value/from.rs",
+    "src/value/index.rs",
+    "src/value/partial_eq.rs",
+    "src/number.rs",
+    "src/map.rs",
+    "src/raw.rs",
 ]

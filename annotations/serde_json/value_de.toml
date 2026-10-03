@@ -1,0 +1,1044 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-value-de-0001"
+file  = "src/value/de.rs"
+lines = "1-21"
+title = "Imports — both sides of the Deserialize contract in one file"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "modules"]
+body = """
+This file implements two different traits from `serde_core`, and the import
+list shows both.
+
+`Deserialize` and `Visitor` are needed because `Value` can be *built* from
+any format. `Deserializer`, `SeqAccess`, `MapAccess`, `EnumAccess` and
+`VariantAccess` are needed because a `Value` can also be the *source*, with
+some other type being built from it.
+
+`Deserializer as _` imports the trait for its methods without binding the
+name, since this file refers to it as `serde::Deserializer` where it needs
+to. `Cow` appears because map keys are handled both owned and borrowed
+through one type. `IntoDeserializer` is the conversion trait from
+`serde_core`'s `de/value.rs`.
+"""
+
+[[annotation]]
+id    = "json-value-de-0002"
+file  = "src/value/de.rs"
+lines = "22-35"
+title = "Deserialize for Value — a visitor that accepts anything"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "lifetime-de", "associated-types"]
+body = """
+`Value` implements `Deserialize` the way every type does: define a visitor
+and hand it to the deserializer.
+
+`ValueVisitor` is a unit struct declared inside the function, visible
+nowhere else. Its `Value` associated type is the enum being built, and its
+`expecting` message is "any valid JSON value".
+
+That message is almost never shown. `expecting` is used when the input holds
+a kind of data the visitor has no method for, and this visitor has a method
+for nearly every kind.
+"""
+
+[[annotation]]
+id    = "json-value-de-0003"
+file  = "src/value/de.rs"
+lines = "36-67"
+title = "The scalar arms — a bool, and four integer widths"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "generic-params"]
+body = """
+Each method receives a value from the format and wraps it in a variant.
+
+`visit_i64` and `visit_u64` use `value.into()`, the `From` impls on
+`Number`. They are generic over the error type `E` with no bound on it,
+because they cannot fail.
+
+The 128-bit methods can fail, so they require `E: de::Error`. A `Number`
+holds at most 64 bits of integer. These methods wrap the value in
+`serde_core`'s `I128Deserializer` and ask `Number` to deserialize itself
+from it. That routes the decision about whether the value fits to `Number`'s
+own `Deserialize` impl, in one place.
+
+There is no `visit_i8` or `visit_u32`. `serde_core`'s defaults forward the
+narrower widths to the 64-bit methods.
+"""
+
+[[annotation]]
+id    = "json-value-de-0004"
+file  = "src/value/de.rs"
+lines = "68-72"
+title = "visit_f64 — a float that cannot be a Number becomes Null"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["option"]
+body = """
+`Number::from_f64` returns `None` for NaN and infinity, since a JSON number
+cannot hold them. `map_or(Value::Null, Value::Number)` turns that `None`
+into `Value::Null`.
+
+`serde_json`'s own parser never produces a non-finite float. This matters
+when a `Value` is deserialized from some other format that can.
+"""
+
+[[annotation]]
+id    = "json-value-de-0005"
+file  = "src/value/de.rs"
+lines = "73-105"
+title = "Strings, options and unit"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings", "option", "cfg"]
+body = """
+`visit_str` copies into a `String` and forwards to `visit_string`, which
+takes ownership without copying. A format that already has an owned string
+can avoid the allocation by calling the second one.
+
+There is no `visit_borrowed_str`. A `Value` owns its strings and has no
+lifetime parameter, so borrowing from the input is not available to it. A
+document parsed into `Value` copies every string, including the ones the
+parser could have lent.
+
+`visit_none` and `visit_unit` both give `Null`. `visit_some` deserializes
+the inner value as a `Value`.
+
+The `cfg` attributes on the string methods ask for `std` or `alloc`. The
+crate does not build without one of them, so they are always on.
+"""
+
+[[annotation]]
+id    = "json-value-de-0006"
+file  = "src/value/de.rs"
+lines = "106-119"
+title = "visit_seq — elements until there are none"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["collections", "generic-params"]
+body = """
+An array is built by pulling elements from the `SeqAccess` until it returns
+`None`.
+
+`next_element` is generic over the element type, and the type is inferred
+from `vec.push(elem)` to be `Value`. So each element is deserialized by
+this same impl, and the recursion that builds a nested document goes
+through the format's deserializer and back.
+
+The vector starts empty with no reserved capacity. The access object's
+`size_hint` is not consulted.
+"""
+
+[[annotation]]
+id    = "json-value-de-0007"
+file  = "src/value/de.rs"
+lines = "120-148"
+title = "visit_map — the first key decides what kind of map this is"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg", "collections", "pattern-matching"]
+body = """
+An object is built by reading entries. The first key is read differently
+from the rest.
+
+`next_key_seed(KeyClassifier)` deserializes the first key with a custom
+seed, defined at the bottom of this file. In a default build it always
+answers `KeyClass::Map(first_key)`, and the method inserts that key's value
+and then loops over `next_entry` for the remainder.
+
+The gated arms are the receiving end of the token protocol. With
+`arbitrary_precision`, a number arrives as a one-entry map whose key is the
+reserved token. With `raw_value`, a raw value does the same. The classifier
+recognises those keys, and the value is then read as a number or re-parsed
+from text.
+
+`None` for the first key means the map is empty.
+"""
+
+[[annotation]]
+id    = "json-value-de-0008"
+file  = "src/value/de.rs"
+lines = "149-154"
+title = "deserialize_any — the one request Value makes"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits"]
+body = """
+The visitor impl closes, and the function's only statement follows:
+`deserializer.deserialize_any(ValueVisitor)`.
+
+`Value` gives the format no hint. It asks to be told what is there. This
+works only with self-describing formats, and it is why `Value` cannot be
+deserialized from a format that needs to be told the type it is reading.
+"""
+
+[[annotation]]
+id    = "json-value-de-0009"
+file  = "src/value/de.rs"
+lines = "155-168"
+title = "FromStr for Value and for Map"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types"]
+body = """
+`"[1,2]".parse::<Value>()` works through these. Both impls call
+`crate::from_str`.
+
+The `Map` impl is separate because `Map<String, Value>` is a type in its own
+right with its own `Deserialize` impl, and parsing into it fails for input
+that is not an object.
+"""
+
+[[annotation]]
+id    = "json-value-de-0010"
+file  = "src/value/de.rs"
+lines = "169-194"
+title = "deserialize_number! — one method, two bodies"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "cfg"]
+body = """
+The same name as the macro in `de.rs` and a different definition. This one
+generates a numeric method for the `Deserializer` impl on `Value`.
+
+Each expansion contains two functions with the same name under opposite
+`#[cfg]`s. Without `arbitrary_precision`, a number forwards to
+`Number::deserialize_any`, which calls `visit_u64`, `visit_i64` or
+`visit_f64` according to what it holds. Anything else is a type error.
+
+With `arbitrary_precision` the number's own method of the same name is
+called, since a number stored as text has to be parsed for the requested
+width. And a non-number falls through to `deserialize_any` and lets the
+visitor reject it.
+"""
+
+[[annotation]]
+id    = "json-value-de-0011"
+file  = "src/value/de.rs"
+lines = "195-212"
+title = "visit_array — and the check that every element was taken"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["iterators", "custom-errors"]
+body = """
+The helper that drives a visitor from a `Vec<Value>`.
+
+It wraps the vector in a `SeqDeserializer`, passes a mutable reference to
+`visit_seq`, and afterwards asks how many elements are left. A visitor for a
+two-element tuple, given a three-element array, leaves one behind. That is
+an `invalid_length` error.
+
+The parser makes the same check a different way. It finds a comma where the
+closing bracket should be and reports "trailing characters". Here there are
+no brackets, so the leftover count is the evidence. The two paths reject
+the same input with different messages.
+"""
+
+[[annotation]]
+id    = "json-value-de-0012"
+file  = "src/value/de.rs"
+lines = "213-233"
+title = "Deserializer for Map — an object as a source"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types"]
+body = """
+`Map<String, Value>` implements `Deserializer` by value. This lets an object
+be deserialized into a struct without first wrapping it back in a `Value`.
+
+`deserialize_any` builds a `MapDeserializer`, calls `visit_map`, and
+performs the same leftover check as `visit_array`. An object with entries
+the visitor did not read is an error.
+
+A struct visitor generated by `serde_derive` reads every key, including
+unknown ones it then ignores, so that check does not fire for ordinary
+structs.
+"""
+
+[[annotation]]
+id    = "json-value-de-0013"
+file  = "src/value/de.rs"
+lines = "234-266"
+title = "Map::deserialize_enum — exactly one entry"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["iterators", "custom-errors"]
+body = """
+An externally tagged enum is an object with a single key. This method takes
+the first entry from the map and then checks there is no second.
+
+Zero entries and two or more entries produce the same error, with the
+expectation "map with a single key".
+
+The entry becomes an `EnumDeserializer` holding the variant name and
+`Some(value)`.
+"""
+
+[[annotation]]
+id    = "json-value-de-0014"
+file  = "src/value/de.rs"
+lines = "267-281"
+title = "ignored_any, and everything else forwards"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["macro-rules", "ownership"]
+body = """
+`deserialize_ignored_any` drops the map and calls `visit_unit`. The explicit
+`drop(self)` documents the intent. The map would be dropped at the end of
+the function anyway.
+
+`forward_to_deserialize_any!` sends the other twenty-eight methods to
+`deserialize_any`. For a map that is reasonable. Whatever was asked for, the
+honest answer is "this is a map", and the visitor decides whether it can use
+one.
+"""
+
+[[annotation]]
+id    = "json-value-de-0015"
+file  = "src/value/de.rs"
+lines = "282-302"
+title = "Deserializer for Value — the tree describes itself"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "pattern-matching", "cfg"]
+body = """
+The second full implementation of `serde_core`'s `Deserializer` in this
+crate. The parser's version reads bytes. This one reads an enum.
+
+`deserialize_any` is a match on the six variants. Null is `visit_unit`. A
+bool is `visit_bool`. A number delegates to `Number`. A string is
+`visit_string`, handing over the owned `String` with no copy. Arrays and
+objects go to the helpers above.
+
+The trait is implemented for `Value` by value, so deserializing consumes
+the tree. That is what permits giving strings away. The impl for `&'de
+Value` further down is the non-consuming version.
+
+Compare it with `deserialize_any` in `de.rs`. The seven byte patterns there
+and the six variants here feed the same visitor methods.
+"""
+
+[[annotation]]
+id    = "json-value-de-0016"
+file  = "src/value/de.rs"
+lines = "303-315"
+title = "Twelve numeric methods"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-rules"]
+macro_def = "json-value-de-0010"
+body = """
+Twelve invocations of the macro defined above, one per integer and float
+width. In a default build all twelve have the same body, and the width in
+the method name is not used. The visitor does the range check.
+"""
+
+[[annotation]]
+id    = "json-value-de-0017"
+file  = "src/value/de.rs"
+lines = "316-326"
+title = "deserialize_option — Null is None"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["option", "pattern-matching"]
+body = """
+`Null` is `visit_none`. Any other value is `visit_some(self)`, passing the
+whole value on as the deserializer for the inner type.
+
+The same rule as the parser's, with a variant test in place of a peeked
+byte.
+"""
+
+[[annotation]]
+id    = "json-value-de-0018"
+file  = "src/value/de.rs"
+lines = "327-349"
+title = "deserialize_enum — an object or a string"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "custom-errors"]
+body = """
+An object is forwarded to the map's `deserialize_enum`. A string is a unit
+variant: an `EnumDeserializer` with the name and `value: None`.
+
+Any other kind of value is a type error. `other.unexpected()` converts the
+value into `serde_core`'s `Unexpected` so the message can describe it, and
+the expectation is the literal "string or map".
+"""
+
+[[annotation]]
+id    = "json-value-de-0019"
+file  = "src/value/de.rs"
+lines = "350-371"
+title = "deserialize_newtype_struct — and a RawValue made by printing"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg", "strings"]
+body = """
+Normally transparent: the visitor receives the value itself as the inner
+deserializer.
+
+The gated block handles a request for `RawValue`. A parser can supply the
+original text of a value. A tree cannot, because the text was discarded
+when the tree was built. So this serializes the value back to a string with
+`self.to_string()` and supplies that.
+
+The consequence is that a `RawValue` obtained through a `Value` is not the
+original bytes. Whitespace is gone, and in a default build the keys are
+sorted.
+"""
+
+[[annotation]]
+id    = "json-value-de-0020"
+file  = "src/value/de.rs"
+lines = "372-406"
+title = "bool, char, str, string — typed requests against a tree"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "strings"]
+body = """
+The typed methods follow one pattern. Match the variant that satisfies the
+request, call the visitor, and otherwise return `self.invalid_type(&visitor)`.
+
+`deserialize_char` and `deserialize_str` forward to `deserialize_string`,
+which calls `visit_string` with the owned `String`. A visitor for `String`
+takes it without allocating.
+
+A visitor for `&'de str` cannot be satisfied here, and the consuming impl
+never calls `visit_borrowed_str`.
+"""
+
+[[annotation]]
+id    = "json-value-de-0021"
+file  = "src/value/de.rs"
+lines = "407-425"
+title = "bytes and byte_buf — a string or an array"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+Both accept a string or an array of numbers, matching what the parser's
+`deserialize_bytes` accepts.
+
+For a string the visitor gets `visit_string`, not `visit_byte_buf`. A
+bytes visitor that implements only the byte methods will reject it through
+the defaults in `serde_core`, which forward strings to bytes in one
+direction only: `visit_string` falls back to `visit_str`, and `visit_str`
+has no fallback to bytes.
+"""
+
+[[annotation]]
+id    = "json-value-de-0022"
+file  = "src/value/de.rs"
+lines = "426-442"
+title = "unit and unit_struct"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+`Null` is the unit value. A unit struct is the same, ignoring the name.
+"""
+
+[[annotation]]
+id    = "json-value-de-0023"
+file  = "src/value/de.rs"
+lines = "443-471"
+title = "seq, tuple, tuple_struct"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+An array satisfies all three. The length arguments are ignored here, and
+`visit_array` enforces that the visitor consumed every element.
+"""
+
+[[annotation]]
+id    = "json-value-de-0024"
+file  = "src/value/de.rs"
+lines = "472-497"
+title = "map and struct"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+`deserialize_map` requires an object. `deserialize_struct` accepts an object
+or an array, the same latitude the parser gives.
+"""
+
+[[annotation]]
+id    = "json-value-de-0025"
+file  = "src/value/de.rs"
+lines = "498-513"
+title = "identifier and ignored_any"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["ownership"]
+body = """
+An identifier is a string. `deserialize_ignored_any` drops the value, which
+frees the whole subtree, and calls `visit_unit`.
+"""
+
+[[annotation]]
+id    = "json-value-de-0026"
+file  = "src/value/de.rs"
+lines = "514-532"
+title = "EnumDeserializer — a variant name and maybe a value"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types"]
+body = """
+The enum access type for the tree. It holds the variant name as a `String`
+and the content as `Option<Value>`, where `None` means the enum was written
+as a bare string.
+
+`variant_seed` needs a deserializer for the name.
+`self.variant.into_deserializer()` supplies `serde_core`'s
+`StringDeserializer`, one of the small single-value deserializers from that
+crate's `de/value.rs`. The content goes into a `VariantDeserializer` and is
+returned alongside.
+
+Unlike the parser, the two forms share one type here. The `Option`
+distinguishes them.
+"""
+
+[[annotation]]
+id    = "json-value-de-0027"
+file  = "src/value/de.rs"
+lines = "533-548"
+title = "IntoDeserializer for Value and &Value — already a deserializer"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types", "lifetime-de"]
+body = """
+`IntoDeserializer` converts a value into something that implements
+`Deserializer`. For `Value` the conversion is the identity, because `Value`
+implements the trait itself.
+
+The second impl does the same for `&'de Value`. The lifetime on the
+reference is the `'de` of the trait, which is what allows data to be
+borrowed out of the tree.
+
+These impls are what let a `Value` be used with the generic helpers in
+`serde_core` that accept `IntoDeserializer`.
+"""
+
+[[annotation]]
+id    = "json-value-de-0028"
+file  = "src/value/de.rs"
+lines = "549-562"
+title = "VariantDeserializer::unit_variant"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "option"]
+body = """
+The content half of enum access. For a unit variant with `value: None`,
+the bare string form, there is nothing to check.
+
+With `Some(value)` it deserializes the value as `()`, which succeeds only
+for `Null`. So `{"Unit": null}` is accepted and `{"Unit": 1}` is not, the
+same as in the parser.
+"""
+
+[[annotation]]
+id    = "json-value-de-0029"
+file  = "src/value/de.rs"
+lines = "563-575"
+title = "newtype_variant_seed"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "custom-errors"]
+body = """
+With content, the seed deserializes from it. Without, the input was a bare
+string naming a variant that needs a payload, and the error is the same
+`invalid_type` the parser's `UnitVariantAccess` produces.
+"""
+
+[[annotation]]
+id    = "json-value-de-0030"
+file  = "src/value/de.rs"
+lines = "576-620"
+title = "tuple_variant and struct_variant — and an empty array that visits unit"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "custom-errors"]
+body = """
+A tuple variant needs an array and a struct variant needs an object. Any
+other content, or no content, is a type error naming what was expected.
+
+The tuple case has a special branch. An *empty* array calls
+`visitor.visit_unit()` instead of `visit_seq`. A derived tuple-variant
+visitor does not implement `visit_unit`, so for it the result is an error
+either way. The branch changes the outcome only for a hand-written visitor
+that does.
+
+`struct_variant` forwards an object to the map's `deserialize_any`, which
+means a struct variant in a tree must be an object. The array form that
+`deserialize_struct` accepts is not accepted here.
+"""
+
+[[annotation]]
+id    = "json-value-de-0031"
+file  = "src/value/de.rs"
+lines = "621-653"
+title = "SeqDeserializer — a Vec's iterator behind SeqAccess"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["iterators", "traits", "option"]
+body = """
+A wrapper around `vec::IntoIter<Value>`. Each call to `next_element_seed`
+takes the next value and uses it as the deserializer for the element.
+
+`size_hint` reports a length only when the iterator's lower and upper bounds
+agree. For a `Vec` iterator they always do, so collections built from a
+tree can reserve the right capacity up front.
+
+The `iter` field is read directly by `visit_array` for its leftover check.
+"""
+
+[[annotation]]
+id    = "json-value-de-0032"
+file  = "src/value/de.rs"
+lines = "654-704"
+title = "MapDeserializer — a key now, its value on the next call"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["iterators", "traits", "option"]
+body = """
+`MapAccess` hands out keys and values in separate calls. The underlying
+iterator yields them as pairs. So `next_key_seed` takes a pair, stores the
+value in `self.value`, and deserializes the key. `next_value_seed` takes the
+stored value back out.
+
+A call to `next_value_seed` without a preceding key finds `None` and returns
+"value is missing". That would be a bug in the visitor, and it is reported
+and not panicked on.
+
+The key is deserialized through `MapKeyDeserializer` with a `Cow::Owned`
+string. That type is the tree's counterpart of `MapKey` in `de.rs`, and it
+is what lets a string key become an integer.
+
+The iterator's type is written as `<Map<String, Value> as
+IntoIterator>::IntoIter`, which is whatever the map's backing store provides.
+"""
+
+[[annotation]]
+id    = "json-value-de-0033"
+file  = "src/value/de.rs"
+lines = "705-730"
+title = "deserialize_value_ref_number! — the same macro, for the borrowed impl"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "cfg"]
+body = """
+From here to the key deserializer, the file repeats itself. Everything
+above consumed a `Value`. Everything below borrows one.
+
+This macro is the borrowed counterpart of `deserialize_number!`, and its
+body is the same text. `match self { Value::Number(n) => ... }` works
+whether `self` is a `Value` or a `&Value`, because matching a reference
+against a non-reference pattern binds through it. The two macros could be
+one, and the impl below shows as much by using both.
+"""
+
+[[annotation]]
+id    = "json-value-de-0034"
+file  = "src/value/de.rs"
+lines = "731-748"
+title = "visit_array_ref — a slice in place of a Vec"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["lifetime-de", "iterators"]
+body = """
+The borrowed version of `visit_array`. It takes `&'de [Value]`, iterates
+without consuming, and applies the same leftover check.
+
+The `'de` on the slice is the lifetime a visitor may borrow for. Elements
+handed out through this path are `&'de Value`, each of which is a
+deserializer in its own right.
+"""
+
+[[annotation]]
+id    = "json-value-de-0035"
+file  = "src/value/de.rs"
+lines = "749-816"
+title = "Deserializer for &Map — the borrowed object"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "lifetime-de", "macro-rules"]
+body = """
+The same three methods and the same forwarding list as the consuming impl,
+over `&'de Map<String, Value>`.
+
+`deserialize_any` uses `MapRefDeserializer`. `deserialize_enum` checks for a
+single entry and builds an `EnumRefDeserializer` from borrowed parts.
+
+`deserialize_ignored_any` has no `drop`. There is nothing owned to release.
+"""
+
+[[annotation]]
+id    = "json-value-de-0036"
+file  = "src/value/de.rs"
+lines = "817-833"
+title = "Deserializer for &Value — where a tree can lend its strings"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "lifetime-de", "borrowing"]
+body = """
+Implementing `Deserializer<'de>` for `&'de Value` ties the trait's lifetime
+to the borrow of the tree. That one line of the header is what makes the
+next six lines different from the consuming impl.
+
+A string is delivered with `visit_borrowed_str(v)`. The reference lives as
+long as the tree does, so a struct with `&'de str` fields can be
+deserialized from a `&Value` and point into it.
+
+This is the path `T::deserialize(&value)` takes, and it leaves the value
+intact for further use. The consuming impl cannot lend, and this one cannot
+give away an owned `String`. Each is the better choice for one kind of
+target type.
+"""
+
+[[annotation]]
+id    = "json-value-de-0037"
+file  = "src/value/de.rs"
+lines = "834-846"
+title = "Twelve numeric methods, from two macros"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-rules"]
+macro_def = "json-value-de-0033"
+body = """
+Ten of these use the borrowed macro. The lines for `i128` and `u128` use
+`deserialize_number!`, the one written for the consuming impl.
+
+Both compile and behave the same, since the macro bodies are identical. The
+mix is harmless, and it is the evidence that the second macro did not need
+to exist.
+"""
+
+[[annotation]]
+id    = "json-value-de-0038"
+file  = "src/value/de.rs"
+lines = "847-878"
+title = "option and enum, borrowed"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["option", "pattern-matching"]
+body = """
+`deserialize_option` matches on `*self` to test for `Null` without binding
+anything, then passes `self` on.
+
+`deserialize_enum` has the same three arms as the consuming version. The
+variant name is a `&'de str` here, borrowed from the `String` inside the
+value.
+"""
+
+[[annotation]]
+id    = "json-value-de-0039"
+file  = "src/value/de.rs"
+lines = "879-900"
+title = "newtype_struct, borrowed — still printing for RawValue"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg", "strings"]
+body = """
+The same body as in the consuming impl, including
+`self.to_string()` for a `RawValue` request. Borrowing does not help. There
+is no original text to borrow.
+"""
+
+[[annotation]]
+id    = "json-value-de-0040"
+file  = "src/value/de.rs"
+lines = "901-952"
+title = "bool, strings and bytes, borrowed"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "strings", "lifetime-de"]
+body = """
+The forwarding runs the other way round from the consuming impl. There,
+`str` and `char` forwarded to `deserialize_string`. Here, `string` and
+`char` forward to `deserialize_str`, which calls `visit_borrowed_str`.
+
+The direction follows what each impl can offer. A consumed value offers an
+owned string, and a borrowed value offers a long-lived reference.
+
+`deserialize_bytes` accepts a string or an array, as before.
+"""
+
+[[annotation]]
+id    = "json-value-de-0041"
+file  = "src/value/de.rs"
+lines = "953-1038"
+title = "The remaining methods, borrowed"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+Unit, sequences, tuples, maps, structs, identifiers and ignored values. Each
+is the consuming version with `visit_array_ref` in place of `visit_array`
+and a dereference where a variant is tested.
+
+`deserialize_ignored_any` does nothing but call `visit_unit`.
+"""
+
+[[annotation]]
+id    = "json-value-de-0042"
+file  = "src/value/de.rs"
+lines = "1039-1058"
+title = "EnumRefDeserializer"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types", "lifetimes"]
+body = """
+The borrowed enum access: a `&'de str` and an `Option<&'de Value>`.
+
+`self.variant.into_deserializer()` on a `&str` gives `serde_core`'s
+`StrDeserializer`. That type calls `visit_str`, not `visit_borrowed_str`,
+because its lifetime parameter is not tied to `'de`. A variant identifier
+visitor does not need to keep the string, so nothing is lost.
+"""
+
+[[annotation]]
+id    = "json-value-de-0043"
+file  = "src/value/de.rs"
+lines = "1059-1130"
+title = "VariantRefDeserializer — four methods, repeated"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "pattern-matching", "custom-errors"]
+body = """
+`unit_variant`, `newtype_variant_seed`, `tuple_variant` and
+`struct_variant`, each matching the consuming version line for line. The
+empty-array branch that calls `visit_unit` is here too.
+"""
+
+[[annotation]]
+id    = "json-value-de-0044"
+file  = "src/value/de.rs"
+lines = "1131-1161"
+title = "SeqRefDeserializer"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["iterators", "traits"]
+body = """
+`slice::Iter<'de, Value>` in place of `vec::IntoIter<Value>`. Each element
+is a `&'de Value` passed to the seed as its deserializer.
+"""
+
+[[annotation]]
+id    = "json-value-de-0045"
+file  = "src/value/de.rs"
+lines = "1162-1212"
+title = "MapRefDeserializer — a borrowed key in a Cow"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["iterators", "traits", "smart-pointers"]
+body = """
+The borrowed map access. The one line that differs in substance is the key:
+`Cow::Borrowed(&**key)`.
+
+`key` is a `&String`. One `*` gives `String`, a second gives `str` through
+`Deref`, and `&` makes a `&'de str`. Wrapping it in `Cow::Borrowed` lets it
+flow into the same `MapKeyDeserializer` that the consuming impl feeds with
+`Cow::Owned`.
+
+That is the reason for `Cow` in this file. One key deserializer serves both
+impls, and it remembers which kind of key it was given.
+"""
+
+[[annotation]]
+id    = "json-value-de-0046"
+file  = "src/value/de.rs"
+lines = "1213-1216"
+title = "MapKeyDeserializer — one field"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["smart-pointers", "lifetimes"]
+body = """
+A key, owned or borrowed. Compare it with `MapKey` in `de.rs`, which holds
+the whole parser. In a tree the key has already been extracted as a string,
+so the string is all this needs.
+"""
+
+[[annotation]]
+id    = "json-value-de-0047"
+file  = "src/value/de.rs"
+lines = "1217-1244"
+title = "deserialize_numeric_key! — parsing a key's text as a number"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "pattern-matching"]
+body = """
+The tree's version of the macro of the same name in `de.rs`, and it takes a
+shortcut the parser could not. It builds a real `Deserializer` over the key
+string and runs the number parser on it.
+
+The three checks are the same in spirit. The first byte must be a digit or a
+minus sign. The number is parsed by `$using`, one of the parser's own
+`pub(crate)` methods. Then nothing may remain. A key such as `"1x"` or
+`" 1"` fails with `ExpectedNumericKey`.
+
+The errors are built with line 0 and column 0. The key is not a position in
+any input.
+
+The first arm supplies `deserialize_number` as the default for `$using`, the
+optional-argument idiom again.
+"""
+
+[[annotation]]
+id    = "json-value-de-0048"
+file  = "src/value/de.rs"
+lines = "1245-1254"
+title = "Deserializer for MapKeyDeserializer — a string by default"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "lifetime-de"]
+body = """
+`deserialize_any` wraps the key in `BorrowedCowStrDeserializer`, defined at
+the bottom of the file, and forwards. That type calls `visit_borrowed_str`
+or `visit_string` depending on which kind of `Cow` it holds.
+"""
+
+[[annotation]]
+id    = "json-value-de-0049"
+file  = "src/value/de.rs"
+lines = "1255-1271"
+title = "Numeric keys from a tree"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-rules", "cfg"]
+macro_def = "json-value-de-0047"
+body = """
+Thirteen invocations, twelve of which compile in any one build. The
+structure matches the list in `de.rs`: plain widths use the default, the
+128-bit integers and the round-trip `f32` name their own parser entry points.
+"""
+
+[[annotation]]
+id    = "json-value-de-0050"
+file  = "src/value/de.rs"
+lines = "1272-1287"
+title = "A bool key — two string comparisons"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings", "custom-errors"]
+body = """
+With the key already a string, a boolean key is `"true"` or `"false"` by
+direct comparison. Anything else is a type error quoting the key.
+
+The parser's version of this consumed a letter before deciding and quoted
+the key without it. This one quotes the whole key.
+"""
+
+[[annotation]]
+id    = "json-value-de-0051"
+file  = "src/value/de.rs"
+lines = "1288-1328"
+title = "option, newtype, enum, and the forwarding list"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["option", "macro-rules"]
+body = """
+A key is never null, so `deserialize_option` is `visit_some`. A newtype is
+transparent. Neither has the `RawValue` hook that the parser's key
+deserializer carries.
+
+`deserialize_enum` converts the key with `into_deserializer`, which for a
+`Cow<str>` is `serde_core`'s `CowStrDeserializer`, and lets that type handle
+the unit-variant case.
+
+The rest forward to `deserialize_any` and are read as a string.
+"""
+
+[[annotation]]
+id    = "json-value-de-0052"
+file  = "src/value/de.rs"
+lines = "1329-1384"
+title = "KeyClassifier — a seed and a visitor in one type"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "cfg", "strings", "pattern-matching"]
+body = """
+This is the seed `visit_map` used for the first key of every object.
+
+`KeyClassifier` implements `DeserializeSeed`, so it can be passed to
+`next_key_seed`, and `Visitor`, so it can be passed to `deserialize_str`. Its
+`deserialize` method does exactly that: it hands itself over as the
+visitor.
+
+The visitor's job is to look at the key text. In a default build there is
+one outcome, `KeyClass::Map` holding the key as a `String`. With
+`arbitrary_precision` or `raw_value`, a key equal to the reserved token
+means the map is not a real map, and the classifier says which special
+value it stands for.
+
+`visit_str` copies the key. `visit_string` takes an owned key without
+copying, and a format that has one avoids an allocation per object.
+"""
+
+[[annotation]]
+id    = "json-value-de-0053"
+file  = "src/value/de.rs"
+lines = "1385-1406"
+title = "invalid_type and unexpected — describing a value for an error"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["custom-errors", "trait-objects", "inlining"]
+body = """
+The helper every typed method above used in its fallback arm.
+
+`unexpected` converts a `Value` into `serde_core`'s `Unexpected`, the
+"what was found" half of a type error. Scalars carry their value. Arrays and
+objects are reported as `Seq` and `Map` with no contents.
+
+`invalid_type` is generic over the error type `E` and takes the expectation
+as `&dyn Expected`, so it is compiled once per error type and not once per
+visitor. Both are `#[cold]`.
+"""
+
+[[annotation]]
+id    = "json-value-de-0054"
+file  = "src/value/de.rs"
+lines = "1407-1451"
+title = "BorrowedCowStrDeserializer — why serde_core's version was not enough"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "smart-pointers", "lifetime-de"]
+body = """
+`serde_core` already has a `CowStrDeserializer`. For a borrowed string it
+calls `visit_str`, because its lifetime parameter is unrelated to `'de` and
+it cannot promise the borrow lasts.
+
+This type exists to make that promise. Its `Cow<'de, str>` is tied to the
+deserializer lifetime, so the borrowed arm can call `visit_borrowed_str`.
+That is what allows a map deserialized from `&Value` to have `&'de str`
+keys.
+
+The owned arm gives the `String` away. Everything but enums forwards to
+`deserialize_any`.
+"""
+
+[[annotation]]
+id    = "json-value-de-0055"
+file  = "src/value/de.rs"
+lines = "1452-1507"
+title = "EnumAccess and UnitOnly — a string can only be a unit variant"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types", "custom-errors"]
+body = """
+The string deserializer also serves as its own enum access. `variant_seed`
+deserializes the variant name from the string and returns `UnitOnly` for the
+content.
+
+`UnitOnly` is a unit struct whose `unit_variant` succeeds and whose other
+three methods return the same `invalid_type` errors as the parser's
+`UnitVariantAccess`. It is the third place in the crate where those three
+refusals are written out.
+"""

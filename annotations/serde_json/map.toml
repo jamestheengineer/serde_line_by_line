@@ -1,0 +1,562 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-map-0001"
+file  = "src/map.rs"
+lines = "1-8"
+title = "A map with two possible implementations"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["feature-unification"]
+body = """
+The module comment states the arrangement in two sentences. `Map` is a
+`BTreeMap` by default and an `IndexMap` with the `preserve_order` feature.
+
+The practical difference is iteration order. A `BTreeMap` iterates in sorted
+key order. An `IndexMap` iterates in insertion order. For JSON that decides
+whether a document read into a `Value` and written back keeps its keys in
+the order the author wrote them.
+
+Everything else in this file exists to make that choice invisible in the
+type's API.
+"""
+
+[[annotation]]
+id    = "json-map-0002"
+file  = "src/map.rs"
+lines = "9-27"
+title = "Imports — one backing map or the other"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "modules"]
+body = """
+The last four lines are the switch. Without the feature, `BTreeMap` and its
+`btree_map` module are imported. With it, `IndexMap`.
+
+`Vec` and `mem` are needed only by the `IndexMap` code paths, so they carry
+the same gate. `Borrow`, `Hash` and `Hasher` are imported unconditionally,
+and the reason for that is in the bounds on `get`.
+"""
+
+[[annotation]]
+id    = "json-map-0003"
+file  = "src/map.rs"
+lines = "28-37"
+title = "Map and MapImpl — a wrapper so the backing type is not public"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "visibility", "generic-params"]
+body = """
+`Map` is a struct with one private field of type `MapImpl<K, V>`, and
+`MapImpl` is a type alias chosen by `#[cfg]`.
+
+The wrapper is the point. If `Map` were itself an alias for `BTreeMap`,
+every method of `BTreeMap` would be part of this crate's API, and code using
+one would stop compiling when some other crate in the build enabled
+`preserve_order`. Cargo features are unified across a dependency graph, so
+that can happen without the code's author choosing it. A wrapper exposes
+only the methods written below, and those are written to work with either
+map.
+
+The struct is generic over `K` and `V`. Every impl in the file is for
+`Map<String, Value>` and nothing else.
+"""
+
+[[annotation]]
+id    = "json-map-0004"
+file  = "src/map.rs"
+lines = "38-67"
+title = "new, with_capacity, clear"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg", "inlining"]
+body = """
+`new` constructs the backing map. `clear` forwards.
+
+`with_capacity` shows the wrapper absorbing a difference. `IndexMap` can
+reserve space. `BTreeMap` has no such method, as the comment notes, so the
+argument is discarded with `let _ = capacity`. The public method exists in
+both builds and is a hint in one of them.
+"""
+
+[[annotation]]
+id    = "json-map-0005"
+file  = "src/map.rs"
+lines = "68-119"
+title = "get, contains_key, get_mut, get_key_value — bounds for both maps at once"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["where-clauses", "sized-bound", "generic-params", "feature-unification"]
+body = """
+Four lookups with the same signature shape. `key: &Q` where `String:
+Borrow<Q>` is the standard way to let a map with `String` keys be searched
+with a `&str`.
+
+The second bound is the one specific to this crate: `Q: ?Sized + Ord + Eq +
+Hash`. A `BTreeMap` lookup needs `Ord`. An `IndexMap` lookup needs `Hash`
+and `Eq`. This method demands all three, in both builds.
+
+That is the cost of hiding the implementation. A caller's key type must
+satisfy the requirements of whichever map might be underneath, or the call
+would compile in one configuration and fail in the other. For `str` it makes
+no difference.
+
+Each doc comment repeats a warning from the standard library: the borrowed
+form must order the same way the owned key does.
+"""
+
+[[annotation]]
+id    = "json-map-0006"
+file  = "src/map.rs"
+lines = "120-143"
+title = "insert, and shift_insert"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+`insert` returns the previous value if the key was already present.
+
+`shift_insert` exists only with `preserve_order`. Inserting at a position
+has no meaning for a sorted map, so the method is absent from the default
+build. This is one of a handful of places where the two builds do not offer
+the same API, and each is marked for the documentation with `doc(cfg)`.
+"""
+
+[[annotation]]
+id    = "json-map-0007"
+file  = "src/map.rs"
+lines = "144-189"
+title = "remove and remove_entry — the same name, different effect on order"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+Both have two `return` statements under opposite `#[cfg]`s.
+
+With the default map, removing a key leaves the others sorted. With
+`preserve_order`, `remove` is `swap_remove`: the last entry is moved into
+the removed entry's position. That is fast and it changes the order of the
+remaining keys.
+
+The doc comment says so and points to `shift_remove`. It is easy to miss. A
+program that enables `preserve_order` to keep keys in order and then calls
+`remove` has reordered them.
+"""
+
+[[annotation]]
+id    = "json-map-0008"
+file  = "src/map.rs"
+lines = "190-261"
+title = "swap_remove and shift_remove — the two removals an ordered map offers"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+Four methods available only with `preserve_order`, each forwarding to
+`IndexMap`.
+
+The doc comments compare them to `Vec::swap_remove` and `Vec::remove`.
+Swapping is constant time and disturbs one entry. Shifting keeps relative
+order and moves every entry after the removed one.
+"""
+
+[[annotation]]
+id    = "json-map-0009"
+file  = "src/map.rs"
+lines = "262-271"
+title = "append"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg", "ownership"]
+body = """
+Moves every entry of `other` into `self`. `BTreeMap` has an `append`
+method. `IndexMap` does not, so that branch takes the other map's contents
+with `mem::replace` and extends with them.
+"""
+
+[[annotation]]
+id    = "json-map-0010"
+file  = "src/map.rs"
+lines = "272-288"
+title = "entry — wrapping the backing map's Entry"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg", "generic-params"]
+body = """
+The entry API, for inserting or updating with a single lookup. The key
+parameter is `S: Into<String>`, so a `&str` can be passed.
+
+The two `use` lines inside the function give the backing map's own `Entry`
+type a common name. The match then rewraps its variants in this crate's
+`Entry`, `VacantEntry` and `OccupiedEntry`. A wrapper type needs wrapper
+types for everything it hands out.
+
+The return type is written `Entry` with no lifetime. It is `Entry<'_>`,
+borrowing from `&mut self`.
+"""
+
+[[annotation]]
+id    = "json-map-0011"
+file  = "src/map.rs"
+lines = "289-348"
+title = "len, is_empty, and six iterators"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["iterators", "inlining"]
+body = """
+Each iterator method wraps the backing map's iterator in a struct defined
+at the bottom of this file: `Iter`, `IterMut`, `Keys`, `Values`,
+`ValuesMut`, `IntoValues`.
+
+The wrapping is for the same reason as everything else. A method returning
+`btree_map::Iter` would put the backing type in a public signature.
+"""
+
+[[annotation]]
+id    = "json-map-0012"
+file  = "src/map.rs"
+lines = "349-360"
+title = "retain"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["closures"]
+body = """
+Keeps the entries for which the closure returns `true`. The closure
+receives the value mutably, so it can edit entries it keeps.
+"""
+
+[[annotation]]
+id    = "json-map-0013"
+file  = "src/map.rs"
+lines = "361-384"
+title = "sort_keys — does nothing unless order is preserved"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+The body is one gated statement. In a default build the method is empty,
+because a `BTreeMap` is always sorted.
+
+The doc comment notes that nested maps are not sorted and gives the
+expression that sorts everything, which is what `Value::sort_all_objects`
+does.
+"""
+
+[[annotation]]
+id    = "json-map-0014"
+file  = "src/map.rs"
+lines = "385-417"
+title = "Default, Clone, PartialEq, Eq — written out, not derived"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits"]
+body = """
+Four trait impls that forward to the backing map.
+
+They are written by hand because a derive on `Map<K, V>` would produce
+generic impls with bounds on `K` and `V`, and this crate wants impls for
+`Map<String, Value>` only. The `allow` on `Default` silences a lint that
+suggests deriving, with a link to the lint's bug report.
+
+`Clone` overrides `clone_from`, which can reuse the destination's
+allocations.
+
+`PartialEq` on an `IndexMap` ignores order. Two maps with the same entries
+in different orders are equal in both builds.
+"""
+
+[[annotation]]
+id    = "json-map-0015"
+file  = "src/map.rs"
+lines = "418-433"
+title = "Hash — sorted first, so that it agrees with equality"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "cfg", "closures", "collections"]
+body = """
+`Hash` and `Eq` must agree: equal values must hash equally.
+
+With a `BTreeMap` that is automatic, since iteration order is determined by
+the contents. With an `IndexMap`, two equal maps can iterate in different
+orders, and hashing the entries as they come would give different results.
+
+So the `preserve_order` branch collects references to the entries into a
+`Vec`, sorts them by key, and hashes that. It costs an allocation and a sort
+per hash. It is what `Value` deriving `Hash` depends on.
+"""
+
+[[annotation]]
+id    = "json-map-0016"
+file  = "src/map.rs"
+lines = "434-482"
+title = "Index and IndexMut for Map — these do panic"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "where-clauses", "associated-types"]
+body = """
+`map["key"]` on a `Map` panics if the key is absent. Both doc comments say
+so.
+
+That is the opposite of indexing a `Value`, which returns `Null`. The
+difference is deliberate. A `Map` is a collection with the standard
+library's conventions. A `Value` is the loosely typed thing.
+
+The doc example shows the two together: `map["type"].as_str()` inside a
+match arm that has already established the value is an object.
+
+`IndexMut` cannot forward to `BTreeMap`, which does not implement it, so it
+uses `get_mut` and `expect`.
+"""
+
+[[annotation]]
+id    = "json-map-0017"
+file  = "src/map.rs"
+lines = "483-505"
+title = "Debug and Serialize"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits"]
+body = """
+`Debug` forwards to the backing map, so a `Map` prints like a `BTreeMap` or
+`IndexMap`.
+
+`Serialize` writes a map with a known length and one `serialize_entry` per
+pair, in iteration order. This is the code `Value`'s `Object` arm repeats
+inline.
+"""
+
+[[annotation]]
+id    = "json-map-0018"
+file  = "src/map.rs"
+lines = "506-548"
+title = "Deserialize for Map — an object, or unit"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "lifetime-de"]
+body = """
+A visitor with two methods, passed to `deserialize_map`.
+
+`visit_map` reads entries with `next_entry` and inserts them. With a
+`BTreeMap` the entries end up sorted regardless of input order. With an
+`IndexMap` they stay in input order. This loop is where `preserve_order`
+takes effect during parsing.
+
+`visit_unit` returns an empty map. `serde_json`'s own `deserialize_map`
+rejects `null` before the visitor is consulted, so this method is reached
+only from a deserializer that offers a unit where a map was asked for.
+
+A repeated key is not an error. The later value replaces the earlier one.
+"""
+
+[[annotation]]
+id    = "json-map-0019"
+file  = "src/map.rs"
+lines = "549-568"
+title = "FromIterator and Extend"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "iterators"]
+body = """
+Collecting an iterator of `(String, Value)` pairs builds a `Map`. `Extend`
+adds pairs to an existing one. Both forward.
+"""
+
+[[annotation]]
+id    = "json-map-0020"
+file  = "src/map.rs"
+lines = "569-600"
+title = "delegate_iterator! — four iterator traits for a wrapper"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "macro-repetition", "iterators"]
+body = """
+Each iterator wrapper at the bottom of the file needs the same four impls,
+all forwarding to `self.iter`. This macro writes them.
+
+The pattern `($name:ident $($generics:tt)*) => $item:ty` takes a type name,
+whatever follows it inside the parentheses, and an item type. The trailing
+tokens are the generics, such as `<'a>`, captured as raw token trees so that
+they can be emitted twice: once after `impl` and once after the type name.
+
+Besides `Iterator`, the macro implements `DoubleEndedIterator`,
+`ExactSizeIterator` and `FusedIterator`. Both backing maps' iterators
+support all three, so the wrapper can promise them in either build.
+"""
+
+[[annotation]]
+id    = "json-map-0021"
+file  = "src/map.rs"
+lines = "601-618"
+title = "IntoDeserializer for Map and &Map"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types", "lifetime-de"]
+body = """
+The identity conversion, as for `Value`. A `Map` is its own deserializer
+through the impl in `value/de.rs`.
+"""
+
+[[annotation]]
+id    = "json-map-0022"
+file  = "src/map.rs"
+lines = "619-649"
+title = "Entry, VacantEntry, OccupiedEntry — wrappers again"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "lifetimes", "visibility"]
+body = """
+The public entry types. `Entry` is an enum over the two cases, and each
+case is a struct with one private field holding the backing map's entry.
+
+Four type aliases under `#[cfg]` select the backing types. This is the same
+technique as `MapImpl`, applied to every type the map API mentions.
+"""
+
+[[annotation]]
+id    = "json-map-0023"
+file  = "src/map.rs"
+lines = "650-744"
+title = "Entry — key, or_insert, or_insert_with, and_modify"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["closures", "pattern-matching", "lifetimes"]
+body = """
+The four methods people use on an entry, each a match over the two cases.
+
+`or_insert` and `or_insert_with` return `&'a mut Value`, a reference with
+the lifetime of the borrow of the map. That lets the result outlive the
+`Entry` value itself, which was consumed by the call.
+
+`and_modify` runs a closure on an occupied entry and returns the entry, so
+it can be followed by `or_insert`. The doc example runs the same chain
+twice. The first time the key is absent and the default is inserted. The
+second time the closure runs.
+"""
+
+[[annotation]]
+id    = "json-map-0024"
+file  = "src/map.rs"
+lines = "745-792"
+title = "VacantEntry"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["lifetimes"]
+body = """
+`key` and `insert`, forwarding. `insert` consumes the entry and returns a
+mutable reference to the new value.
+"""
+
+[[annotation]]
+id    = "json-map-0025"
+file  = "src/map.rs"
+lines = "793-893"
+title = "OccupiedEntry — four ways to reach the value"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["lifetimes", "borrowing"]
+body = """
+`key`, `get`, `get_mut` and `into_mut`.
+
+The last two look alike and differ in lifetime. `get_mut` borrows the entry
+and returns a reference that lives as long as that borrow. `into_mut`
+consumes the entry and returns a reference that lives as long as the map
+borrow, `'a`. The second is what you need to return the reference from a
+function.
+"""
+
+[[annotation]]
+id    = "json-map-0026"
+file  = "src/map.rs"
+lines = "894-952"
+title = "OccupiedEntry insert and remove"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+`insert` replaces the value and returns the old one. `remove` takes the
+entry out.
+
+`remove` has the same two-`return` structure as `Map::remove`, and the same
+consequence under `preserve_order`: it is a swap removal.
+"""
+
+[[annotation]]
+id    = "json-map-0027"
+file  = "src/map.rs"
+lines = "953-1044"
+title = "OccupiedEntry's ordered removals"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg"]
+body = """
+`swap_remove` and `shift_remove` for an entry, gated on `preserve_order`,
+followed by `remove_entry` and its two gated variants, which return the key
+as well as the value.
+"""
+
+[[annotation]]
+id    = "json-map-0028"
+file  = "src/map.rs"
+lines = "1045-1070"
+title = "Iterating a &Map — IntoIterator, Iter, and its backing type"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "iterators", "associated-types", "cfg"]
+body = """
+Three pieces that recur for each kind of iteration.
+
+`IntoIterator for &Map` is what makes `for (k, v) in &map` work. `Iter` is
+the wrapper struct. `IterImpl` is the gated alias for the backing iterator.
+Then one `delegate_iterator!` line supplies the four trait impls.
+
+`Iter` derives `Clone`, which the backing iterators over shared references
+allow.
+"""
+
+[[annotation]]
+id    = "json-map-0029"
+file  = "src/map.rs"
+lines = "1071-1096"
+title = "Iterating a &mut Map"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "iterators", "cfg"]
+body = """
+The mutable counterpart. Items are `(&String, &mut Value)`. Keys are never
+handed out mutably, since changing a key in place would break either map's
+internal ordering.
+
+`IterMut` derives `Debug` and not `Clone`. A mutable iterator cannot be
+duplicated.
+"""
+
+[[annotation]]
+id    = "json-map-0030"
+file  = "src/map.rs"
+lines = "1097-1122"
+title = "Iterating a Map by value"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "iterators", "ownership", "cfg"]
+body = """
+`IntoIterator for Map` consumes the map and yields owned pairs. This is the
+iterator `MapDeserializer` in `value/de.rs` is built on.
+"""
+
+[[annotation]]
+id    = "json-map-0031"
+file  = "src/map.rs"
+lines = "1123-1181"
+title = "Keys, Values, ValuesMut, IntoValues"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["iterators", "cfg"]
+body = """
+Four more wrappers in the same three-part form: a struct, a gated alias,
+and a `delegate_iterator!` line.
+
+Seven iterator types in all, and for each one the crate writes a wrapper
+whose only job is to keep the name of the backing map out of the public
+API.
+"""

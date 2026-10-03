@@ -1,0 +1,527 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-value-mod-0001"
+file  = "src/value/mod.rs"
+lines = "1-27"
+title = "The value module — JSON you can hold without a type"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["modules"]
+body = """
+The engines turn bytes into calls on a visitor and never store a document.
+This module is the place a document can live: `Value`, an enum with one
+variant per kind of JSON value.
+
+The module documentation opens with the `json!` macro, which builds a
+`Value` from text that looks like JSON. The example then indexes it with
+square brackets, `john["phones"][0]`, and prints it. Each of those three
+abilities is implemented in a different file under `value/`, and this page
+is where they are advertised together.
+
+"Loosely typed" in the first line is the trade. A `Value` accepts any
+document. In exchange, every access has to check at run time what is there.
+"""
+
+[[annotation]]
+id    = "json-value-mod-0002"
+file  = "src/value/mod.rs"
+lines = "28-53"
+title = "Interpolation — expressions inside json!"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["macro-rules"]
+body = """
+The second example puts Rust expressions where JSON values would go:
+`"name": full_name` and `"age": age_last_year + 1`.
+
+The sentence to hold on to is that the check is at compile time. The macro
+turns each interpolated expression into a call that requires `Serialize`. A
+value that cannot be represented as JSON is a type error, not a run-time
+failure.
+
+The lines starting with `#` are hidden from the rendered documentation and
+still compiled. They define `random_phone` so the example builds.
+"""
+
+[[annotation]]
+id    = "json-value-mod-0003"
+file  = "src/value/mod.rs"
+lines = "54-92"
+title = "Parsing into a Value — the untyped path"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["result"]
+body = """
+The third example parses a string with `from_str` and asks for a `Value`.
+The same function, given a struct type, would produce the struct. `Value`
+is just another type that implements `Deserialize`, and the choice is made by
+the type annotation on `v`.
+
+The last four lines are link definitions. `[macro]: crate::json` and its
+neighbours give the reference-style links above their targets, written as
+paths so that rustdoc resolves them.
+"""
+
+[[annotation]]
+id    = "json-value-mod-0004"
+file  = "src/value/mod.rs"
+lines = "93-111"
+title = "Imports and re-exports — what serde_json::value contains"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["modules", "visibility", "cfg"]
+body = """
+The `pub use` lines define this module's public face. `Index` and
+`Serializer` come from child modules. `Map` and `Number` come from sibling
+modules at the crate root and are re-exported here so that
+`serde_json::value::Map` is a valid path.
+
+`RawValue` and `to_raw_value` are re-exported only with the `raw_value`
+feature, with the `cfg_attr` that labels them in the documentation.
+
+Among the imports, `DeserializeOwned` and `Serialize` are for the two
+conversion functions at the bottom of the file. `mem` is for `take`.
+"""
+
+[[annotation]]
+id    = "json-value-mod-0005"
+file  = "src/value/mod.rs"
+lines = "112-177"
+title = "Value — six variants for six kinds of JSON"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "collections", "strings"]
+body = """
+The whole type. `Null`, `Bool`, `Number`, `String`, `Array` and `Object`
+correspond one to one with the six kinds of value the JSON grammar defines.
+
+`Number` is its own type and not `f64`. A JSON number may be an integer too
+large for a float to hold exactly, and `Number` keeps integers as integers.
+`Array` is a `Vec<Value>` and `Object` is a `Map<String, Value>`, so the type
+is recursive through two standard-library-shaped containers.
+
+The doc comment on `Object` records a decision with visible consequences.
+The map is a `BTreeMap` by default, so keys come out sorted and the order
+they had in the input is lost. The `preserve_order` feature swaps in
+`IndexMap`, which remembers insertion order.
+
+`Clone`, `Eq`, `PartialEq` and `Hash` are derived. `Eq` and `Hash` are
+unusual for something that can contain a float, and they are possible because
+`Number` never holds NaN. `Debug` is not derived. It is written by hand
+below.
+"""
+
+[[annotation]]
+id    = "json-value-mod-0006"
+file  = "src/value/mod.rs"
+lines = "178-196"
+title = "Debug for Value — written by hand to be shorter"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "pattern-matching"]
+body = """
+A derived `Debug` would print `Number(Number(1))` and
+`Object(Map({...}))`, wrapping each inner type's own output.
+
+This version flattens that. `Null` prints as the word. A number delegates to
+`Number`'s `Debug`, which already includes the word `Number`. An array
+prints `Array ` followed by the vector's own debug output, and an object
+`Object ` followed by the map's.
+
+`Debug::fmt(vec, formatter)` passes the formatter through, so `{:#?}` pretty
+printing still reaches the nested values.
+"""
+
+[[annotation]]
+id    = "json-value-mod-0007"
+file  = "src/value/mod.rs"
+lines = "197-221"
+title = "Display for Value — the documented behaviour"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["traits"]
+body = """
+`Display` prints a `Value` as JSON text. This is where the `to_string`
+method in the module example comes from: every `Display` type gets one.
+
+The example documents the alternate flag. `{}` gives compact output and
+`{:#}` gives the pretty-printed form with two-space indentation. Both
+assertions compare against exact strings, so the format is pinned by a
+doctest.
+"""
+
+[[annotation]]
+id    = "json-value-mod-0008"
+file  = "src/value/mod.rs"
+lines = "222-258"
+title = "Display::fmt — an io::Write built on a fmt::Formatter"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["unsafe", "traits", "closures"]
+body = """
+The serializer writes bytes to an `io::Write`. `Display` provides a
+`fmt::Formatter`, which accepts `&str`. The local `WriterFormatter` type
+adapts one to the other.
+
+Its `write` converts the bytes to `&str` without checking and forwards them.
+The safety comment gives the reason: the serializer only emits valid UTF-8
+with a built-in formatter. This is the same claim `to_string` rests on, used
+from a second place.
+
+The error types do not line up in either direction. A `fmt::Error` from the
+formatter has to become an `io::Error` to pass through the serializer, and
+then the serializer's error has to become a `fmt::Error` again. Both
+conversions throw information away, and the comment in `io_error` says that
+is fine, because the value is discarded on the way back.
+
+`f.alternate()` is read before `f` is moved into the adapter.
+"""
+
+[[annotation]]
+id    = "json-value-mod-0009"
+file  = "src/value/mod.rs"
+lines = "259-265"
+title = "parse_index — a stricter usize parser"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["strings", "option"]
+body = """
+JSON Pointer has rules for array indices that `str::parse::<usize>` does not
+enforce. An index may not have a leading `+`, and may not have a leading
+zero unless it is exactly `0`.
+
+This helper rejects those two cases and then parses. It is used only by the
+two `pointer` methods further down.
+"""
+
+[[annotation]]
+id    = "json-value-mod-0010"
+file  = "src/value/mod.rs"
+lines = "266-308"
+title = "Value::get — indexing that returns an Option"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "option", "traits"]
+body = """
+`get` takes anything that implements this crate's `Index` trait, which is a
+string type or a `usize`, and returns `None` when the lookup cannot succeed.
+
+The doc comment lists the ways it can fail: the value is not the kind the
+index applies to, the key is absent, or the position is out of bounds. All
+three give `None`.
+
+The second half of the comment contrasts this with square brackets, which
+return `Value::Null` in the same situations. The example
+`object[0]["x"]["y"]["z"]` evaluates to null without panicking. That
+permissiveness is convenient for reading, and it means a typo in a key
+produces `null` and not an error.
+
+The body is one call. The logic lives in the `Index` impls in `index.rs`.
+"""
+
+[[annotation]]
+id    = "json-value-mod-0011"
+file  = "src/value/mod.rs"
+lines = "309-330"
+title = "Value::get_mut"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "option"]
+body = """
+The mutable counterpart, with the same failure conditions. The example
+assigns through the returned reference with `*object.get_mut("A").unwrap() =
+json!(69)`.
+"""
+
+[[annotation]]
+id    = "json-value-mod-0012"
+file  = "src/value/mod.rs"
+lines = "331-390"
+title = "is_object, as_object, as_object_mut — the accessor pattern"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["option", "pattern-matching"]
+body = """
+Each kind of value gets a group of accessors shaped like this one.
+
+`as_object` returns `Some(&Map)` for an object and `None` for anything else.
+`as_object_mut` does the same with a mutable reference. `is_object` is
+defined as `self.as_object().is_some()`, so the test and the accessor cannot
+disagree, which is what the doc comment's "guaranteed" refers to.
+
+These are the checked alternative to matching on the enum yourself. They are
+useful in chains, as in `v["a"].as_object().unwrap().len()`.
+"""
+
+[[annotation]]
+id    = "json-value-mod-0013"
+file  = "src/value/mod.rs"
+lines = "391-449"
+title = "is_array, as_array, as_array_mut"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["option", "pattern-matching", "collections"]
+body = """
+The same three for arrays. The return type is `&Vec<Value>` where a slice
+might have been expected. Returning the `Vec` lets `as_array_mut` callers
+push and remove elements.
+"""
+
+[[annotation]]
+id    = "json-value-mod-0014"
+file  = "src/value/mod.rs"
+lines = "450-498"
+title = "is_string and as_str"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["option", "strings"]
+body = """
+`as_str` returns `Option<&str>`, borrowing from the `String` inside the
+value. There is no `as_str_mut`.
+
+The example draws attention to a common surprise. Printing a string
+`Value` with `{}` includes the quotation marks, because `Display` writes
+JSON. Printing `as_str().unwrap()` gives the text alone.
+"""
+
+[[annotation]]
+id    = "json-value-mod-0015"
+file  = "src/value/mod.rs"
+lines = "499-539"
+title = "is_number and as_number"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["option", "pattern-matching"]
+body = """
+`is_number` is written as a direct match and does not go through
+`as_number` the way its siblings do. The result is the same.
+
+`as_number` returns the `Number`, which keeps the distinction between
+integer and float that the next accessors discard.
+"""
+
+[[annotation]]
+id    = "json-value-mod-0016"
+file  = "src/value/mod.rs"
+lines = "540-617"
+title = "is_i64, is_u64, is_f64 — three questions about one number"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching"]
+body = """
+Each forwards to the method of the same name on `Number` and returns `false`
+for a value that is not a number.
+
+The examples mark the boundaries. A number above `i64::MAX` is not an `i64`.
+A negative number is not a `u64`. A number written with a decimal point,
+such as `256.0`, is neither, even though its value is an integer.
+
+`is_f64`'s doc comment contains a careful sentence. Today it is true exactly
+when the other two are false, and upstream declines to promise that. With
+`arbitrary_precision` a number is stored as text, and the three questions
+are no longer mutually exclusive.
+"""
+
+[[annotation]]
+id    = "json-value-mod-0017"
+file  = "src/value/mod.rs"
+lines = "618-675"
+title = "as_i64, as_u64, as_f64 — and the one that converts"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["option", "pattern-matching"]
+body = """
+`as_i64` and `as_u64` return the integer if the number is an integer in
+range, and `None` otherwise.
+
+`as_f64` is different, and the example shows it. It returns `Some(64.0)` for
+the integer 64. Any number can be approximated by a float, so this accessor
+converts. That means `as_f64` succeeds on values for which `is_f64` is
+false.
+"""
+
+[[annotation]]
+id    = "json-value-mod-0018"
+file  = "src/value/mod.rs"
+lines = "676-752"
+title = "Booleans and null"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["option", "pattern-matching"]
+body = """
+`as_bool` copies the `bool` out. `as_null` returns `Option<()>`, which
+carries no information beyond `is_some`, and exists so that null has the same
+pair of methods as every other kind.
+"""
+
+[[annotation]]
+id    = "json-value-mod-0019"
+file  = "src/value/mod.rs"
+lines = "753-796"
+title = "pointer — a path through the tree, as a fold"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["iterators", "closures", "option", "strings"]
+body = """
+JSON Pointer, from RFC 6901, addresses a value with a string such as
+`/x/y/1`. The empty string addresses the whole document. Any other pointer
+must begin with `/`.
+
+The body is an iterator chain. Split on `/`, skip the empty piece before the
+first slash, unescape each token, and fold. `try_fold` starts with `self`
+and steps one level down per token, stopping with `None` as soon as a step
+fails.
+
+The unescaping order matters. `~1` is replaced before `~0`. Done the other
+way, the token `~01`, which means the literal text `~1`, would first become
+`~1` and then `/`.
+
+An array step uses `parse_index`, so `/y/01` does not address element 1.
+"""
+
+[[annotation]]
+id    = "json-value-mod-0020"
+file  = "src/value/mod.rs"
+lines = "797-851"
+title = "pointer_mut — the same fold, with a move"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["iterators", "closures", "borrowing"]
+body = """
+The mutable version has the same structure. The difference worth noticing is
+`and_then(move |x| list.get_mut(x))`.
+
+In the immutable version the closure captures `list` by shared reference,
+which can be copied freely. Here `list` is a `&mut Vec`, and the reference
+returned by `get_mut` must live as long as `list` itself. A closure that
+only borrowed `list` could not return something that outlives the closure.
+`move` transfers the `&mut` into the closure, and the result can then carry
+the full lifetime.
+
+The doc example shows `map(Value::take)` on the result, a way to remove a
+value from the tree and leave `null` behind.
+"""
+
+[[annotation]]
+id    = "json-value-mod-0021"
+file  = "src/value/mod.rs"
+lines = "852-864"
+title = "take — replace with Null"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["ownership"]
+body = """
+`mem::replace(self, Value::Null)` moves the current value out through a
+mutable reference and puts `Null` in its place.
+
+You cannot move out of `&mut self` without leaving something behind.
+`Null` is free to construct, which makes it the natural thing to leave.
+"""
+
+[[annotation]]
+id    = "json-value-mod-0022"
+file  = "src/value/mod.rs"
+lines = "865-891"
+title = "sort_all_objects — a method whose body is one cfg block"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "closures", "iterators"]
+body = """
+The signature always exists. The body is entirely inside
+`#[cfg(feature = "preserve_order")]`, so in a default build this is an empty
+function.
+
+The doc comment explains why that is correct. With the default `BTreeMap`,
+objects are always sorted and there is nothing to do. With `preserve_order`
+the method sorts each object's keys and recurses into every nested value.
+
+Keeping the method in both builds means code that calls it compiles
+regardless of which features some other crate in the dependency graph
+turned on.
+"""
+
+[[annotation]]
+id    = "json-value-mod-0023"
+file  = "src/value/mod.rs"
+lines = "892-933"
+title = "Default for Value, and for &Value"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "lifetimes"]
+body = """
+`Value::default()` is `Null`. The doc example shows the use: a struct field
+of type `Value` marked `#[serde(default)]` becomes `Null` when the key is
+absent.
+
+The second impl is rarer. `Default for &Value` returns a reference to a
+`const`. A reference to a constant expression with no interior mutability or
+destructor is promoted to a `'static` reference, so `&DEFAULT` outlives the
+function. This is what lets `Option<&Value>::unwrap_or_default()` work.
+"""
+
+[[annotation]]
+id    = "json-value-mod-0024"
+file  = "src/value/mod.rs"
+lines = "934-939"
+title = "Five private child modules"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["modules", "visibility"]
+body = """
+The rest of `Value`'s behaviour is in these files. `de` and `ser` hold the
+`Deserialize`, `Serialize`, `Deserializer` and `Serializer` impls. `from`
+holds the `From` conversions, `index` the square-bracket indexing, and
+`partial_eq` the comparisons with primitive types.
+
+All five are private. Their contents are trait impls on a public type, which
+are visible wherever the type is, plus the two items re-exported at the top
+of this file.
+"""
+
+[[annotation]]
+id    = "json-value-mod-0025"
+file  = "src/value/mod.rs"
+lines = "940-1001"
+title = "to_value — serializing into a tree"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "where-clauses", "traits"]
+body = """
+`to_value` converts any `Serialize` type into a `Value`. The body is one
+line: `value.serialize(Serializer)`.
+
+That `Serializer` is not the one in `ser.rs`. It is
+`serde_json::value::Serializer`, a unit struct whose `Ok` type is `Value`.
+The same `Serialize` impl that writes bytes when given one serializer builds
+a tree when given the other. This is the associated type `Ok` from
+`serde_core` earning its place.
+
+The comment above the function explains the by-value parameter, with a link
+to the pull request. Since `&T` implements `Serialize` whenever `T` does, a
+caller with a reference can still pass it.
+
+The errors section is the same as for `to_string`, and the example triggers
+the map-key case.
+"""
+
+[[annotation]]
+id    = "json-value-mod-0026"
+file  = "src/value/mod.rs"
+lines = "1002-1042"
+title = "from_value — a Value is its own Deserializer"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "where-clauses", "lifetime-de"]
+body = """
+The reverse conversion, and again one line: `T::deserialize(value)`.
+
+For that to compile, `Value` must implement `serde_core`'s `Deserializer`
+trait. It does, in `value/de.rs`. A tree in memory can drive a visitor just
+as a parser can, by looking at its own variant and calling the matching
+`visit_*` method.
+
+The bound is `DeserializeOwned`. The value is consumed by the call, so
+nothing could be borrowed from it afterwards.
+"""

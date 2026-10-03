@@ -1,0 +1,476 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-number-0001"
+file  = "src/number.rs"
+lines = "1-19"
+title = "Imports, and the reserved token"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "modules", "visibility"]
+body = """
+Count the `#[cfg(feature = "arbitrary_precision")]` attributes in this
+import list. There are five, plus one `cfg(not(...))`. This file contains
+two implementations of `Number` that share a public API, and the feature
+picks one.
+
+`ParserNumber` is the parser's three-way classification from `de.rs`. This
+file converts it into the public type.
+
+`TOKEN` is the reserved name you have seen checked in `ser.rs`, `de.rs` and
+`value/`. Here is its definition: a string that begins with `$`, which is
+not a legal start for a Rust identifier, so no derived struct can have it as
+a name. It exists only with `arbitrary_precision`.
+"""
+
+[[annotation]]
+id    = "json-number-0002"
+file  = "src/number.rs"
+lines = "20-71"
+title = "Number and N — three variants with one representation per value"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["pattern-matching", "traits", "cfg", "visibility"]
+body = """
+`Number` is a public struct with one private field. Nothing outside this
+file can see how a number is stored, which is what allows two storage
+strategies.
+
+The default strategy is the enum `N`. The doc comments on its variants are
+invariants. `NegInt` is always less than zero. `Float` is always finite. So
+a non-negative integer is always `PosInt`, and every number has exactly one
+representation.
+
+That is why the hand-written `PartialEq` is sound. It compares like with
+like and returns `false` across variants. The integer 1 is `PosInt(1)` and
+the float 1.0 is `Float(1.0)`, and they are not equal as `Number`s.
+
+`Eq` is implemented with a one-line justification: floats here are never
+NaN, so equality is reflexive. `Hash` must then agree with equality, and
+there is one case to handle. `0.0` and `-0.0` compare equal and have
+different bits, so both are hashed as positive zero.
+
+`Number` itself derives the three traits, which delegates to these impls.
+"""
+
+[[annotation]]
+id    = "json-number-0003"
+file  = "src/number.rs"
+lines = "72-74"
+title = "N with arbitrary_precision — a String"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "strings"]
+body = """
+With the feature on, `N` is a type alias for `String`, and a number is its
+decimal text.
+
+The derives on `Number` still compile, since `String` implements all three
+traits. But their meaning changes. Equality becomes equality of text, so
+`1.0` and `1.00` are different numbers.
+"""
+
+[[annotation]]
+id    = "json-number-0004"
+file  = "src/number.rs"
+lines = "75-129"
+title = "is_i64, is_u64, is_f64 — two bodies each"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg", "pattern-matching"]
+body = """
+Every method in this block has the same layout: a `match` on the enum for
+the default build, and one expression over the string for the other. Each
+is preceded by a `#[cfg]`, so the compiler sees one statement as the
+function's body.
+
+In the default build the answers come straight from the variant. A
+`PosInt` is a `u64` always and an `i64` if it is small enough. A `Float` is
+neither kind of integer.
+
+With `arbitrary_precision`, the integer tests are "does the text parse as
+that type". `is_f64` scans the text for a `.`, `e` or `E` and then checks
+that it parses to something finite.
+"""
+
+[[annotation]]
+id    = "json-number-0005"
+file  = "src/number.rs"
+lines = "130-172"
+title = "as_i64, as_u64, as_f64"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg", "option", "pattern-matching"]
+body = """
+`as_i64` and `as_u64` return the integer when the stored value is an integer
+in range.
+
+`as_f64` converts. `PosInt` and `NegInt` are cast with `as f64`, which
+rounds to the nearest representable float for magnitudes above 2^53. The
+default-build version never returns `None`.
+"""
+
+[[annotation]]
+id    = "json-number-0006"
+file  = "src/number.rs"
+lines = "173-200"
+title = "from_f64 — the gate that keeps NaN out"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["option", "cfg"]
+body = """
+The constructor for a float, returning `None` for NaN and infinity.
+
+This is the only public way to put a float into a `Number`, and its check
+is what makes the `Float` variant's "always finite" invariant true. `Eq`
+and `Hash` above depend on it.
+
+With `arbitrary_precision` the float is formatted to text with `zmij`.
+"""
+
+[[annotation]]
+id    = "json-number-0007"
+file  = "src/number.rs"
+lines = "201-225"
+title = "as_i128 and as_u128"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg", "option"]
+body = """
+Widening accessors. In the default build they cast the stored 64-bit
+integer, so they succeed on exactly the same numbers as their 64-bit
+counterparts.
+
+They are useful with `arbitrary_precision`, where the text may hold an
+integer larger than 64 bits.
+"""
+
+[[annotation]]
+id    = "json-number-0008"
+file  = "src/number.rs"
+lines = "226-281"
+title = "from_i128 and from_u128 — fits, or None"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg", "option", "result"]
+body = """
+The doc comments state the limit. In a default build, a 128-bit integer
+converts only if it fits in a `u64` or an `i64`.
+
+The order of the two attempts in `from_i128` maintains the invariant. A
+non-negative value is tried as `u64` first and becomes `PosInt`. Only a
+negative value reaches the `i64` attempt and becomes `NegInt`.
+"""
+
+[[annotation]]
+id    = "json-number-0009"
+file  = "src/number.rs"
+lines = "282-311"
+title = "as_str — the original text, with one caveat"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "strings"]
+body = """
+Available only with `arbitrary_precision`, where it returns the stored
+string.
+
+The doc comment admits the normalisation you saw in `scan_exponent`. An
+exponent with no sign gains an explicit `+`, so `1e140` reads back as
+`1e+140`. The example's test values avoid that case: the one exponent in the
+list is negative.
+"""
+
+[[annotation]]
+id    = "json-number-0010"
+file  = "src/number.rs"
+lines = "312-349"
+title = "as_f32, from_f32, and a test-only constructor"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg", "visibility"]
+body = """
+Two crate-private helpers. `as_f32` narrows with `as f32`. `from_f32`
+widens to `f64` before storing, which is why a `Value` built from the `f32`
+nearest 0.1 prints with seventeen digits.
+
+`from_string_unchecked` is public, hidden and gated. Its doc comment says
+only tests use it. It builds a `Number` from any string with no validation,
+which would let a caller create a `Number` that serializes as invalid JSON.
+"""
+
+[[annotation]]
+id    = "json-number-0011"
+file  = "src/number.rs"
+lines = "350-371"
+title = "Display and Debug"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "cfg"]
+body = """
+`Display` writes the number as JSON would: integers through `itoa`, floats
+through `zmij`, or the stored text.
+
+`Debug` wraps that in `Number(...)`. This is the output `Value`'s
+hand-written `Debug` relies on to avoid printing `Number(Number(1))`.
+"""
+
+[[annotation]]
+id    = "json-number-0012"
+file  = "src/number.rs"
+lines = "372-397"
+title = "Serialize for Number — and where the token protocol starts"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "cfg"]
+body = """
+In the default build a number serializes as the `u64`, `i64` or `f64` it
+holds.
+
+With `arbitrary_precision` it cannot do that, since the text may not fit
+any of them. So it serializes as a struct named `TOKEN` with one field,
+also named `TOKEN`, whose value is the text.
+
+This is the origin of the protocol. Every `match name` on the token in
+`ser.rs` and `value/ser.rs` is the other end of these three lines. A
+serializer from another crate, which does not know the token, will write
+an object with one strange key.
+"""
+
+[[annotation]]
+id    = "json-number-0013"
+file  = "src/number.rs"
+lines = "398-461"
+title = "Deserialize for Number"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "lifetime-de", "custom-errors", "cfg"]
+body = """
+The same shape as `Value`'s impl, restricted to numbers. A visitor with
+methods for the integer and float kinds, passed to `deserialize_any`.
+
+The 128-bit methods use `from_i128` and `from_u128` and report "JSON number
+out of range" when the value does not fit. `visit_f64` reports "not a JSON
+number" for NaN or infinity, where `Value`'s visitor would have substituted
+`Null`.
+
+The gated `visit_map` receives the token protocol from the other side: a
+one-entry map whose key must be the token, and whose value is the text.
+"""
+
+[[annotation]]
+id    = "json-number-0014"
+file  = "src/number.rs"
+lines = "462-496"
+title = "NumberKey — a key that must be the token"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "traits"]
+body = """
+A type whose `Deserialize` impl succeeds only if the string it reads is
+`TOKEN`. It carries no data. Deserializing it is a way to assert what the
+key was.
+
+It asks for an identifier, which is the same request a derived struct makes
+for a field name.
+"""
+
+[[annotation]]
+id    = "json-number-0015"
+file  = "src/number.rs"
+lines = "497-534"
+title = "NumberFromString — text, parsed"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "traits", "strings"]
+body = """
+The value half of the protocol. It deserializes a string and parses it with
+`Number`'s `FromStr` impl, so the text is validated as a JSON number on the
+way in.
+
+It is `pub` with a `pub` field, because `value/de.rs` uses it.
+"""
+
+[[annotation]]
+id    = "json-number-0016"
+file  = "src/number.rs"
+lines = "535-581"
+title = "deserialize_any! — one method, for owned and borrowed"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "cfg"]
+body = """
+This macro generates `deserialize_any` for both `Number` and `&Number`. The
+two differ in one expression, and the macro's structure is built around
+that.
+
+The `@expand` arm is an internal rule. The `@` prefix is a convention for
+"not meant to be called from outside". It takes a bracketed token list and
+splices it in at `self.$($num_string)*`. The `owned` arm passes `n`, giving
+`self.n`. The `ref` arm passes `n.clone()`.
+
+In a default build that expression is never used. The method is a
+three-arm match calling `visit_u64`, `visit_i64` or `visit_f64`.
+
+With `arbitrary_precision` it tries each integer type in turn, then a
+float, and falls back to delivering the text through `visit_map`. The float
+branch checks that formatting the parsed float gives back the stored text.
+If it does not, precision would be lost, and the text is sent instead.
+"""
+
+[[annotation]]
+id    = "json-number-0017"
+file  = "src/number.rs"
+lines = "582-601"
+title = "deserialize_number! — a third macro with this name"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "cfg"]
+body = """
+The pattern is `$deserialize:ident => $visit:ident`, pairing a deserializer
+method with the visitor method it should call.
+
+In a default build the pairing is ignored and the method forwards to
+`deserialize_any`. The stored value decides which visitor method runs.
+
+With `arbitrary_precision` the stored text is parsed as whatever type
+`$visit` takes, by inference, and that visitor method is called. Asking for
+a `u8` parses the text as a `u8`.
+
+This is the third macro named `deserialize_number!` in the crate. Each is
+local to its file and they share nothing but the name.
+"""
+
+[[annotation]]
+id    = "json-number-0018"
+file  = "src/number.rs"
+lines = "602-626"
+title = "Deserializer for Number"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "macro-rules"]
+body = """
+A `Number` is a deserializer for a single numeric value. This is what
+`Value`'s impl delegates to for its `Number` variant.
+
+One `deserialize_any!` invocation, twelve `deserialize_number!`
+invocations, and a forward of everything else to `deserialize_any`. Asked
+for a string or a map, a number answers with the number it has, and the
+visitor rejects it.
+"""
+
+[[annotation]]
+id    = "json-number-0019"
+file  = "src/number.rs"
+lines = "627-651"
+title = "Deserializer for &Number"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "macro-rules", "lifetimes"]
+body = """
+The same list with `deserialize_any!(ref)`.
+
+The impl header is `impl<'de> Deserializer<'de> for &Number`, with no
+connection between `'de` and the reference. Nothing is borrowed out of a
+number, so none is needed.
+"""
+
+[[annotation]]
+id    = "json-number-0020"
+file  = "src/number.rs"
+lines = "652-678"
+title = "NumberDeserializer — a map with one entry"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "traits", "option"]
+body = """
+The sending side of the protocol on the deserializing path. It is a
+`MapAccess` over an `Option<String>`.
+
+While the option is `Some`, `next_key_seed` yields a key. `next_value_seed`
+takes the string, leaving `None`, so the next request for a key ends the
+map. The `unwrap` relies on a key having been requested first.
+"""
+
+[[annotation]]
+id    = "json-number-0021"
+file  = "src/number.rs"
+lines = "679-699"
+title = "NumberFieldDeserializer — a deserializer that only says the token"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "traits", "macro-rules"]
+body = """
+A unit struct whose every method calls `visit_borrowed_str(TOKEN)`. It is
+the key of the one-entry map. `TOKEN` is a `'static` string, so it can be
+lent for any `'de`.
+"""
+
+[[annotation]]
+id    = "json-number-0022"
+file  = "src/number.rs"
+lines = "700-739"
+title = "From ParserNumber — the parser's result becomes a Number"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "cfg", "pattern-matching"]
+body = """
+The bridge from `de.rs`. Each of the parser's variants maps to the matching
+variant of `N`, or to formatted text under `arbitrary_precision`.
+
+The invariants hold because of what the parser produces. `ParserNumber::I64`
+is only created for a strictly negative value, and `F64` is never
+non-finite, since the parser reports an error for a number that overflows.
+"""
+
+[[annotation]]
+id    = "json-number-0023"
+file  = "src/number.rs"
+lines = "740-792"
+title = "impl_from_unsigned! and impl_from_signed! — From for ten integer types"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "macro-repetition", "cfg"]
+body = """
+Two macros that each take a comma-separated list of types and write
+`impl From<T> for Number` for every one.
+
+They are two macros because the bodies differ. An unsigned value is always
+`PosInt`. A signed value is tested: negative goes to `NegInt`, anything else
+to `PosInt` with a cast to `u64`. That test is how the "always less than
+zero" invariant is maintained for values that arrive through `From`.
+
+The two invocations at the bottom cover every integer type up to 64 bits.
+"""
+
+[[annotation]]
+id    = "json-number-0024"
+file  = "src/number.rs"
+lines = "793-797"
+title = "128-bit conversions, only with arbitrary_precision"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-rules", "cfg"]
+macro_def = "json-number-0023"
+body = """
+The same macros applied to `u128` and `i128`, gated on the feature. In a
+default build these `From` impls do not exist, and the fallible
+`from_u128` and `from_i128` are the only route.
+"""
+
+[[annotation]]
+id    = "json-number-0025"
+file  = "src/number.rs"
+lines = "798-814"
+title = "unexpected — describing a number for an error message"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["custom-errors", "cfg", "inlining"]
+body = """
+Converts the number into `serde_core`'s `Unexpected` for a type-mismatch
+error. The default build reports the kind and the value.
+
+With `arbitrary_precision` it reports `Unexpected::Other("number")`. The
+text is available, but `Unexpected` has no variant for a number held as a
+string.
+"""

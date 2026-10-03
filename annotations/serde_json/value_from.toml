@@ -1,0 +1,215 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-value-from-0001"
+file  = "src/value/from.rs"
+lines = "1-7"
+title = "Imports for a file of conversions"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["modules"]
+body = """
+Everything in this file is a `From` or `FromIterator` impl producing a
+`Value`. These are what make `"text".into()` and `vec![1, 2].into()` work,
+and they are also what the `json!` macro leans on when it meets a plain
+expression.
+
+`Cow` is imported because one of the conversions accepts it.
+"""
+
+[[annotation]]
+id    = "json-value-from-0002"
+file  = "src/value/from.rs"
+lines = "8-19"
+title = "from_integer! — one impl per type in a list"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "macro-repetition"]
+body = """
+A macro that takes a list of type names and writes `impl From<T> for
+Value` for each.
+
+`$($ty:ident)*` matches any number of identifiers separated by whitespace,
+and the `$( ... )*` in the body repeats the impl once per match. Each impl
+forwards to `Number`'s own `From` for that type with `n.into()`.
+
+This is the repetition form you met throughout `serde_core`'s `impls.rs`,
+at its smallest.
+"""
+
+[[annotation]]
+id    = "json-value-from-0003"
+file  = "src/value/from.rs"
+lines = "20-29"
+title = "Ten integer types, and two more behind a feature"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-rules", "cfg"]
+macro_def = "json-value-from-0002"
+body = """
+The first invocation covers every integer type up to 64 bits, including
+`isize` and `usize`.
+
+The second covers `i128` and `u128` and is compiled only with
+`arbitrary_precision`. In a default build there is no `From<u128> for
+Value`, and `Value::from(1u128)` is a compile error. That is consistent
+with `to_value`, which has to return a run-time error for 128-bit values
+that do not fit, because it cannot refuse at compile time.
+"""
+
+[[annotation]]
+id    = "json-value-from-0004"
+file  = "src/value/from.rs"
+lines = "30-63"
+title = "From f32 and f64 — the two conversions that can lose the value"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "option"]
+body = """
+A float becomes a `Number` if it is finite and `Value::Null` if it is not.
+Both doc comments say so.
+
+`From` is supposed to be a lossless, infallible conversion. This one is
+infallible and, for NaN and infinity, not lossless. The alternative would
+have been `TryFrom`, which would make `json!` unable to accept a float
+expression directly. Upstream chose convenience and documented the edge.
+
+The `f32` impl goes through `Number::from_f32`, which widens to `f64`.
+"""
+
+[[annotation]]
+id    = "json-value-from-0005"
+file  = "src/value/from.rs"
+lines = "64-79"
+title = "From bool"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits"]
+body = """
+A boolean becomes `Value::Bool`. The parameter is named `f` here and in
+most of the impls below, whatever its type, which is a sign the impls were
+written by copying the first one.
+"""
+
+[[annotation]]
+id    = "json-value-from-0006"
+file  = "src/value/from.rs"
+lines = "80-111"
+title = "From String and &str"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "strings", "ownership"]
+body = """
+`From<String>` moves the string into the value. `From<&str>` allocates a
+copy. If you have a `String` you no longer need, pass it by value and avoid
+the copy.
+"""
+
+[[annotation]]
+id    = "json-value-from-0007"
+file  = "src/value/from.rs"
+lines = "112-136"
+title = "From Cow<str>"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "smart-pointers", "lifetimes"]
+body = """
+`into_owned` returns the `String` if the `Cow` already owns one and
+allocates only if it was borrowed. The two examples show both cases.
+"""
+
+[[annotation]]
+id    = "json-value-from-0008"
+file  = "src/value/from.rs"
+lines = "137-169"
+title = "From Number and from Map"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits"]
+body = """
+Two conversions that wrap an existing part in its variant. Neither
+allocates.
+"""
+
+[[annotation]]
+id    = "json-value-from-0009"
+file  = "src/value/from.rs"
+lines = "170-207"
+title = "From Vec, arrays and slices — anything whose elements convert"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "generic-params", "iterators"]
+body = """
+Three impls generic over the element type, with the bound `T: Into<Value>`.
+Each maps `Into::into` over the elements and collects into a `Vec<Value>`.
+
+The array impl uses a const generic, `const N: usize`, so it covers arrays
+of every length with one impl. It is the only place in the crate where
+const generics appear.
+
+The slice impl needs `T: Clone` as well. It is given `&[T]` and has to
+produce owned values, so each element is cloned before it is converted.
+
+These impls are recursive through the bound. A `Vec<Vec<&str>>` converts
+because `Vec<&str>` is itself `Into<Value>`.
+"""
+
+[[annotation]]
+id    = "json-value-from-0010"
+file  = "src/value/from.rs"
+lines = "208-237"
+title = "FromIterator for arrays"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "iterators", "generic-params"]
+body = """
+Implementing `FromIterator<T>` is what lets `.collect()` produce a `Value`.
+Any iterator whose items convert to `Value` collects into
+`Value::Array`.
+"""
+
+[[annotation]]
+id    = "json-value-from-0011"
+file  = "src/value/from.rs"
+lines = "238-257"
+title = "FromIterator for objects"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "iterators", "closures"]
+body = """
+A second `FromIterator` impl, for iterators of pairs. The key must be
+`Into<String>` and the value `Into<Value>`, and the result is
+`Value::Object`.
+
+The two impls would overlap if some pair type `(K, V)` converted to
+`Value`, since such an iterator would match both. The compiler accepts them
+because it can see that none does. There is no `From<(K, V)> for Value` in
+this crate, and the orphan rules stop any other crate from writing one.
+"""
+
+[[annotation]]
+id    = "json-value-from-0012"
+file  = "src/value/from.rs"
+lines = "258-272"
+title = "From unit"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "pattern-matching"]
+body = """
+`()` becomes `Null`. The parameter is written as the pattern `(): ()`,
+which destructures the unit value and binds nothing.
+"""
+
+[[annotation]]
+id    = "json-value-from-0013"
+file  = "src/value/from.rs"
+lines = "273-284"
+title = "From Option"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "option", "where-clauses"]
+body = """
+`None` is `Null` and `Some(v)` is whatever `v` converts to. Like the
+serializers, this cannot distinguish `Some(None)` from `None`.
+"""

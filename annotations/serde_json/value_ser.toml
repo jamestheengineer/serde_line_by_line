@@ -1,0 +1,547 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-value-ser-0001"
+file  = "src/value/ser.rs"
+lines = "1-10"
+title = "Imports — to_value, used recursively"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["modules"]
+body = """
+`to_value` is imported from the parent module, and it is called throughout
+this file. That is the first thing to know about how a tree is built: each
+nested value is produced by a fresh call to `to_value`, which returns a
+finished `Value` to be placed in its parent.
+
+`Impossible` is here for the same purpose as in `ser.rs`, the compound
+types of serializers that accept no compounds.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0002"
+file  = "src/value/ser.rs"
+lines = "11-37"
+title = "Serialize for Value — six variants, six calls"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "pattern-matching", "cfg"]
+body = """
+The tree describes itself to any serializer. Null is a unit. A bool and a
+string are themselves. A number delegates to `Number`'s own impl, and an
+array to `Vec`'s.
+
+An object is written out by hand: open a map with a known length, call
+`serialize_entry` for each pair, and end it. `Map` has a `Serialize` impl
+too, and this arm does the same work inline.
+
+Given the JSON text serializer, this writes the document back out. Given
+any other format's serializer, it writes that format. `Value` is not tied to
+JSON on the way out, only to a data model that JSON happens to fit.
+
+The second `Object` arm is `unreachable!()` under a `cfg` that is never true
+in a build that compiles this crate.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0003"
+file  = "src/value/ser.rs"
+lines = "38-71"
+title = "value::Serializer — the same trait, with Ok = Value"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types"]
+body = """
+A second implementation of `serde_core`'s `Serializer`. The doc comment
+shows `to_value` written in terms of it.
+
+Two things differ from the serializer in `ser.rs`, and both are in these
+lines. `type Ok = Value`, where the text serializer has `()`. Here the
+result of serializing *is* the output, returned up the call stack. And the
+struct is a unit struct, implemented by value. There is no writer to share
+and no state to carry between values, so there is no reason for a `&mut`.
+
+The compound types are four distinct types, not one enum. A tree builder has
+to remember different things for each: a vector, a vector and a variant
+name, a map and a pending key, a map and a variant name.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0004"
+file  = "src/value/ser.rs"
+lines = "72-95"
+title = "bool and the small signed integers — widen to i64"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["inlining"]
+body = """
+A bool becomes `Value::Bool`. The three narrow signed integers are cast to
+`i64` and forwarded, and `serialize_i64` makes a `Number` with `into()`.
+
+The cast is lossless and it discards the original width. A `Value` does not
+remember that a number was an `i8`.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0005"
+file  = "src/value/ser.rs"
+lines = "96-113"
+title = "i128 — fits in 64 bits, or an error"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "result"]
+body = """
+Two bodies under opposite `#[cfg]`s. With `arbitrary_precision`, any 128-bit
+integer converts.
+
+Without it, the value is tried as a `u64` and then as an `i64`. If neither
+fits, the result is `NumberOutOfRange`.
+
+This is stricter than the text serializer. `to_string(&u128::MAX)` writes
+all thirty-nine digits, because text has no width. `to_value(u128::MAX)`
+fails, because the `Number` it would have to build cannot hold the value.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0006"
+file  = "src/value/ser.rs"
+lines = "114-149"
+title = "The unsigned integers, and u128"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["cfg", "inlining"]
+body = """
+The same arrangement for unsigned types: widen to `u64`, and for `u128`
+either convert, with `arbitrary_precision`, or require that it fit.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0007"
+file  = "src/value/ser.rs"
+lines = "150-159"
+title = "Floats — through From"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["inlining"]
+body = """
+Both call `Value::from(float)`. The `From` impls are in `value/from.rs`, and
+they produce `Null` for a NaN or an infinity, matching what the text
+serializer writes.
+
+For `f32` there is a detail in that conversion worth knowing here. The value
+is stored as an `f64`. The `f32` nearest 0.1 therefore becomes a `Number`
+that prints as `0.10000000149011612`, where the text serializer, formatting
+the `f32` directly, prints `0.1`.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0008"
+file  = "src/value/ser.rs"
+lines = "160-176"
+title = "char, str and bytes"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings", "iterators", "closures"]
+body = """
+A `char` becomes a one-character `String`. A `&str` is copied. Every string
+in a tree is owned.
+
+Bytes become an array of numbers, built with `map` and `collect`. This is
+the tree form of what `write_byte_array` writes as text.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0009"
+file  = "src/value/ser.rs"
+lines = "177-204"
+title = "unit, unit struct, unit variant, newtype struct"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["sized-bound"]
+body = """
+`Null`, `Null`, the variant name as a string, and the inner value. The same
+four decisions as the text serializer, expressed as values.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0010"
+file  = "src/value/ser.rs"
+lines = "205-219"
+title = "newtype variant — a one-entry object"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["collections"]
+body = """
+`E::V(x)` becomes an object with the single key `"V"`. The inner value is
+converted with `to_value` and inserted.
+
+Compare this with the eight formatter calls the text serializer needed for
+the same shape. Building a data structure is shorter than narrating its
+punctuation.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0011"
+file  = "src/value/ser.rs"
+lines = "220-232"
+title = "none and some"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["option"]
+body = """
+`None` is `Null` and `Some(x)` is `x`.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0012"
+file  = "src/value/ser.rs"
+lines = "233-263"
+title = "Sequences and tuple variants — a Vec to fill"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["collections", "option"]
+body = """
+`serialize_seq` returns a `SerializeVec` holding an empty vector with the
+hinted capacity. Tuples and tuple structs forward to it.
+
+A tuple variant gets its own type, because when it ends it must wrap the
+vector in an object under the variant's name, and so it has to remember the
+name.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0013"
+file  = "src/value/ser.rs"
+lines = "264-293"
+title = "Maps, structs and struct variants"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["collections", "cfg", "pattern-matching"]
+body = """
+`serialize_map` returns the `Map` variant of `SerializeMap` with an empty
+map and no pending key.
+
+`serialize_struct` checks the name against the reserved tokens, as the text
+serializer does, and returns a special variant for a `Number` or `RawValue`
+passing through. Otherwise a struct is a map.
+
+`serialize_struct_variant` ignores the length hint and starts with
+`Map::new()`.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0014"
+file  = "src/value/ser.rs"
+lines = "294-301"
+title = "collect_str — format, then wrap"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings"]
+body = """
+A `Display` value becomes `Value::String(value.to_string())`. There is no
+streaming to do. The destination is a `String`.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0015"
+file  = "src/value/ser.rs"
+lines = "302-326"
+title = "Four builder types"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["visibility", "cfg", "collections"]
+body = """
+The state each compound serializer carries.
+
+`SerializeVec` is a vector. `SerializeTupleVariant` adds the variant name.
+`SerializeStructVariant` is a name and a map.
+
+`SerializeMap` is an enum. Its `Map` variant holds the map under
+construction and `next_key`, the key that has been serialized and is waiting
+for its value. The two gated variants hold an `Option<Value>` that will
+receive a number or raw value arriving through the token protocol.
+
+All four are `pub`, for the same reason `Compound` is. They are named in a
+public trait impl.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0016"
+file  = "src/value/ser.rs"
+lines = "327-343"
+title = "SerializeSeq for SerializeVec — push, and wrap at the end"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits"]
+body = """
+An element is converted with `to_value` and pushed. `end` moves the vector
+into `Value::Array`.
+
+`end` takes `self` by value and returns the `Value`. This is where the `Ok`
+type is finally produced for a compound.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0017"
+file  = "src/value/ser.rs"
+lines = "344-375"
+title = "SerializeTuple and SerializeTupleStruct"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits"]
+body = """
+Both forward to the `SerializeSeq` impl with fully qualified calls.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0018"
+file  = "src/value/ser.rs"
+lines = "376-396"
+title = "SerializeTupleVariant — an array inside a one-entry object"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "collections"]
+body = """
+Fields are pushed as for a sequence. `end` builds `{name: [fields]}`.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0019"
+file  = "src/value/ser.rs"
+lines = "397-447"
+title = "SerializeMap — a key held until its value arrives"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "option", "pattern-matching"]
+body = """
+`serialize_key` serializes the key with `MapKeySerializer`, whose output is
+a `String`, and stores it in `next_key`.
+
+`serialize_value` takes the stored key and inserts the pair. If there is no
+stored key it panics, and the comment defends the choice: calling
+`serialize_value` first is a bug in the `Serialize` impl, not a property of
+the data, so it is not reported as an ordinary error.
+
+`end` wraps the map. A duplicate key is not detected. The later insert
+replaces the earlier one.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0020"
+file  = "src/value/ser.rs"
+lines = "448-469"
+title = "MapKeySerializer — a serializer whose output is a String"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "associated-types", "marker-types"]
+body = """
+The tree's key serializer. `type Ok = String`: serializing a key produces
+the key.
+
+It is a unit struct. The text serializer's counterpart had to hold a
+reference to the writer. This one has nowhere to write and returns its
+result.
+
+The compound types are `Impossible<String, Error>`.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0021"
+file  = "src/value/ser.rs"
+lines = "470-487"
+title = "Unit variants and newtype structs as keys"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings"]
+body = """
+A unit variant is its name. A newtype struct passes the key serializer on
+to its inner value.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0022"
+file  = "src/value/ser.rs"
+lines = "488-531"
+title = "bool and integer keys — formatted into a String"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings"]
+body = """
+A bool is the word. Each integer is formatted with `itoa` and copied into an
+owned `String`.
+
+There are no quotation marks to add. A key in a `Map` is a `String`, and
+the quotes appear only if the tree is later written as text.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0023"
+file  = "src/value/ser.rs"
+lines = "532-561"
+title = "Float, char and str keys"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings", "custom-errors"]
+body = """
+A finite float is formatted with `zmij`. A non-finite one is
+`FloatKeyMustBeFinite`. A char and a string are copied.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0024"
+file  = "src/value/ser.rs"
+lines = "562-648"
+title = "What cannot be a key — and one difference from the text serializer"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["custom-errors"]
+body = """
+Bytes, unit, compounds and the rest return `KeyMustBeAString`, and
+`collect_str` formats to a string.
+
+`serialize_some` is in the list of refusals. In `ser.rs` the key serializer
+passes `Some(x)` through to `x`. So a map keyed by `Option<u8>` serializes
+with `to_string` as `{"1":1}` and fails with `to_value`. The two key
+serializers were written separately and disagree on this one method.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0025"
+file  = "src/value/ser.rs"
+lines = "649-695"
+title = "SerializeStruct for SerializeMap — fields, or a token payload"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "cfg", "pattern-matching"]
+body = """
+An ordinary struct field is a map entry, through `serialize_entry`.
+
+In `Number` mode the single expected field carries the number as text. It is
+serialized with `NumberValueEmitter`, which returns a `Value`, and the result
+is stored in `out_value`. `end` then returns that stored value. The struct
+with the reserved name never becomes an object. It is replaced by the number
+it was carrying.
+
+`RawValue` mode is the same with a different emitter. Both `end` arms
+`expect` that the field arrived.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0026"
+file  = "src/value/ser.rs"
+lines = "696-716"
+title = "SerializeStructVariant"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "collections"]
+body = """
+Each field is inserted with its name. `end` wraps the map in a one-entry
+object keyed by the variant name.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0027"
+file  = "src/value/ser.rs"
+lines = "717-737"
+title = "NumberValueEmitter — the tree's counterpart of NumberStrEmitter"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "associated-types", "marker-types"]
+body = """
+Compiled with `arbitrary_precision`. A unit struct whose `Ok` is `Value`, an
+error constructor, and `Impossible` for the compounds.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0028"
+file  = "src/value/ser.rs"
+lines = "738-785"
+title = "NumberValueEmitter rejects the scalars"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "custom-errors"]
+body = """
+Twelve refusals.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0029"
+file  = "src/value/ser.rs"
+lines = "786-790"
+title = "NumberValueEmitter::serialize_str — text parsed into a Number"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "strings"]
+body = """
+The number's text is parsed with `str::parse`, which uses `Number`'s
+`FromStr` impl from `de.rs`, and wrapped in `Value::Number`.
+
+The text serializer's emitter wrote the string out. This one has to turn it
+back into a `Number`, because a tree holds numbers and not digits.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0030"
+file  = "src/value/ser.rs"
+lines = "791-887"
+title = "NumberValueEmitter rejects everything else"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "custom-errors"]
+body = """
+The remaining refusals.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0031"
+file  = "src/value/ser.rs"
+lines = "888-908"
+title = "RawValueEmitter"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "associated-types", "marker-types"]
+body = """
+Compiled with `raw_value`. The same structure again.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0032"
+file  = "src/value/ser.rs"
+lines = "909-956"
+title = "RawValueEmitter rejects the scalars"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "custom-errors"]
+body = """
+Twelve refusals with the "expected value" error.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0033"
+file  = "src/value/ser.rs"
+lines = "957-960"
+title = "RawValueEmitter::serialize_str — the raw text is parsed"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "strings"]
+body = """
+`crate::from_str(value)` parses the raw JSON text into a `Value`.
+
+A `RawValue` exists to avoid parsing. Converting a structure that contains
+one into a `Value` parses it after all, since a tree has no way to hold
+unparsed text.
+"""
+
+[[annotation]]
+id    = "json-value-ser-0034"
+file  = "src/value/ser.rs"
+lines = "961-1063"
+title = "RawValueEmitter rejects everything else"
+kind  = "cfg-gate"
+tracks = ["reference"]
+rust_features = ["cfg", "custom-errors"]
+body = """
+The remaining refusals, and a `collect_str` that formats to a string and
+calls `serialize_str`.
+"""

@@ -1,0 +1,455 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-raw-0001"
+file  = "src/raw.rs"
+lines = "1-14"
+title = "Imports — no cfg here, because the whole file is gated"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["modules"]
+body = """
+This file has no `#[cfg(feature = "raw_value")]` on its items. The gate is
+on the `mod raw;` declaration in `lib.rs`, so without the feature none of
+this is compiled.
+
+`BorrowedStrDeserializer` is one of `serde_core`'s single-value
+deserializers, the one that calls `visit_borrowed_str`. `mem` is here for
+`transmute`, which is how this file creates its central type.
+"""
+
+[[annotation]]
+id    = "json-raw-0002"
+file  = "src/raw.rs"
+lines = "15-34"
+title = "RawValue — a piece of JSON, kept as text"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["strings"]
+body = """
+The first paragraph defines it by what it avoids. A `RawValue` is a
+reference to the bytes of one JSON value. Deserializing into it checks that
+the bytes are a value and does not build anything from them.
+
+Two uses are named. Parsing can be deferred until the program knows what
+type the payload is. Or it can be skipped entirely, when the payload is only
+being copied from one document to another.
+
+The second paragraph is a guarantee about output. A raw value is written
+exactly as it was read. It is not compacted and not re-indented, which you
+saw in `write_raw_fragment`.
+"""
+
+[[annotation]]
+id    = "json-raw-0003"
+file  = "src/raw.rs"
+lines = "35-78"
+title = "The example — moving a payload without parsing it"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["lifetimes", "borrowing"]
+body = """
+The example reads `{"code": 200, "payload": {}}` and writes
+`{"info":[200,{}]}`.
+
+`Input` holds `&'a RawValue` with `#[serde(borrow)]`, the attribute that
+tells `serde_derive` the field borrows from the input. `Output` holds the
+same reference inside a tuple. The payload is never allocated, never
+parsed into a tree, and never re-serialized. The comment in the example
+makes the comparison with `Value` explicit.
+"""
+
+[[annotation]]
+id    = "json-raw-0004"
+file  = "src/raw.rs"
+lines = "79-114"
+title = "Ownership — borrowed from a slice, boxed from a reader"
+kind  = "doc-contract"
+tracks = ["reference"]
+rust_features = ["ownership", "smart-pointers"]
+body = """
+Two forms, and the documentation says when each applies.
+
+`&'a RawValue` works with `from_str` and `from_slice`, which can lend out
+parts of their input. With `from_reader` there is nothing to borrow from,
+so the field must be `Box<RawValue>`, and the bytes are buffered as they are
+read. You saw both sides of this in `read.rs`, in the two versions of
+`end_raw_buffering`.
+"""
+
+[[annotation]]
+id    = "json-raw-0005"
+file  = "src/raw.rs"
+lines = "115-120"
+title = "struct RawValue { json: str } — an unsized newtype"
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["sized-bound", "unsafe"]
+body = """
+A struct whose only field is a `str`. Since `str` has no fixed size, neither
+does `RawValue`. A value of this type cannot be held directly. It is always
+behind a pointer: `&RawValue` or `Box<RawValue>`.
+
+`#[repr(transparent)]` guarantees the struct has the same layout as its
+field. That guarantee is what the three conversion functions below depend
+on.
+
+The design mirrors `str` and `Path` in the standard library: a type that
+is a view of bytes with an invariant attached. For `str` the invariant is
+valid UTF-8. For `RawValue` it is one well-formed JSON value.
+"""
+
+[[annotation]]
+id    = "json-raw-0006"
+file  = "src/raw.rs"
+lines = "121-134"
+title = "Three transmutes"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["unsafe", "smart-pointers"]
+body = """
+`from_borrowed` turns a `&str` into a `&RawValue`. `from_owned` and
+`into_owned` convert between `Box<str>` and `Box<RawValue>`.
+
+Each is a `mem::transmute` with both types written out. They are sound in
+terms of layout because of `repr(transparent)`: a pointer to the wrapper and
+a pointer to its field are the same pointer, with the same length metadata.
+
+What the `unsafe` blocks do not check is the JSON invariant. These
+functions are private, and every caller is responsible for passing text
+that is a valid value.
+
+`from_borrowed` is a `const fn`, which the constants below need.
+"""
+
+[[annotation]]
+id    = "json-raw-0007"
+file  = "src/raw.rs"
+lines = "135-154"
+title = "Clone, ToOwned and Default — implemented for the Box"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "smart-pointers", "associated-types"]
+body = """
+An unsized type cannot implement `Clone`, whose method returns `Self` by
+value. So `Clone` is implemented for `Box<RawValue>`.
+
+`ToOwned` is the trait for "the owned form of a borrowed type", and here
+`Owned = Box<RawValue>`. Its method copies the text into a new boxed
+string and converts.
+
+`Default` for the box is a copy of the `null` constant.
+"""
+
+[[annotation]]
+id    = "json-raw-0008"
+file  = "src/raw.rs"
+lines = "155-169"
+title = "Debug and Display"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits"]
+body = """
+`Display` writes the JSON text. `Debug` writes `RawValue(...)` around it.
+
+`format_args!("{}", &self.json)` is used for the `Debug` field so that the
+text appears without the quotation marks and escapes `str`'s own `Debug`
+would add.
+"""
+
+[[annotation]]
+id    = "json-raw-0009"
+file  = "src/raw.rs"
+lines = "170-177"
+title = "NULL, TRUE, FALSE"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["zero-cost"]
+body = """
+Three associated constants of type `&'static RawValue`, built at compile
+time from string literals. They are the only raw values that can be created
+without parsing or `unsafe`.
+"""
+
+[[annotation]]
+id    = "json-raw-0010"
+file  = "src/raw.rs"
+lines = "178-193"
+title = "from_string — validate, and keep the allocation if possible"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings", "ownership"]
+body = """
+An owned `String` becomes a `Box<RawValue>`.
+
+The first line parses the string as a `&RawValue`, which validates it and
+returns a reference to the value without surrounding whitespace. If that
+reference is shorter than the input, there was whitespace to trim, and the
+trimmed text is copied to a new allocation. If the lengths match, the
+original `String` is converted in place.
+
+The doc comment adds the second condition for avoiding a copy.
+`into_boxed_str` shrinks the allocation to fit, which reallocates if the
+string had spare capacity.
+"""
+
+[[annotation]]
+id    = "json-raw-0011"
+file  = "src/raw.rs"
+lines = "194-236"
+title = "from_string_unchecked — an unsafe fn with a written contract"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["unsafe"]
+body = """
+The same conversion without the parse. It is an `unsafe fn`, and the
+`# Safety` section says exactly what the caller promises: one well-formed
+JSON value with no surrounding whitespace.
+
+The section also says why this is `unsafe` and not merely unchecked. A
+`RawValue` is pasted into output verbatim, and other code is entitled to
+rely on its contents being valid, "in the same way that unsafe code may
+rely on `str` containing valid UTF-8". Breaking the invariant here could
+make a distant piece of code misbehave.
+
+The `debug_assert!` re-parses in debug builds, and the documentation is
+honest that this makes debug builds slower than the function's stated
+purpose implies.
+"""
+
+[[annotation]]
+id    = "json-raw-0012"
+file  = "src/raw.rs"
+lines = "237-274"
+title = "get — the text"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["strings"]
+body = """
+Returns the JSON as `&str`. The example uses it to look at the first
+character and decide how to handle a payload before parsing it.
+"""
+
+[[annotation]]
+id    = "json-raw-0013"
+file  = "src/raw.rs"
+lines = "275-280"
+title = "From Box<RawValue> for Box<str>"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "smart-pointers"]
+body = """
+The reverse of `from_owned`, exposed through `From`. This direction is
+always safe, since every valid JSON value is a valid string.
+"""
+
+[[annotation]]
+id    = "json-raw-0014"
+file  = "src/raw.rs"
+lines = "281-341"
+title = "to_raw_value — serialize to text and keep it"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["generic-params", "sized-bound"]
+body = """
+Serializes any value with `to_string` and wraps the result. The output of
+this crate's serializer is a valid JSON value with no surrounding
+whitespace, so `from_owned` can be called without validation.
+
+The example shows the use case: a struct from another crate has a
+`Box<RawValue>` field for arbitrary extra data, and this function fills it
+from a local type.
+"""
+
+[[annotation]]
+id    = "json-raw-0015"
+file  = "src/raw.rs"
+lines = "342-354"
+title = "TOKEN, and Serialize for RawValue"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "strings"]
+body = """
+The reserved name for raw values, and the three lines that start the
+protocol on the serializing side. The text is sent as a struct named
+`TOKEN` with one field named `TOKEN`.
+
+This is the same shape `Number` uses under `arbitrary_precision`, with a
+different token.
+"""
+
+[[annotation]]
+id    = "json-raw-0016"
+file  = "src/raw.rs"
+lines = "355-384"
+title = "Deserialize for &RawValue — borrowing the bytes"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "lifetime-de", "lifetimes"]
+body = """
+The impl header is `impl<'de: 'a, 'a> Deserialize<'de> for &'a RawValue`.
+The bound `'de: 'a` says the input lives at least as long as the reference
+being produced.
+
+The request is `deserialize_newtype_struct(TOKEN, visitor)`. A deserializer
+that recognises the token, which means this crate's, responds by calling
+`visit_map` with a one-entry map. The visitor checks the key by
+deserializing a `RawKey` and reads the value with the seed
+`ReferenceFromString`.
+
+A deserializer that does not know the token treats this as an ordinary
+newtype and calls `visit_newtype_struct`, which this visitor does not
+implement. So `RawValue` works with `serde_json` and fails cleanly
+elsewhere.
+"""
+
+[[annotation]]
+id    = "json-raw-0017"
+file  = "src/raw.rs"
+lines = "385-414"
+title = "Deserialize for Box<RawValue> — owning the bytes"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "lifetime-de", "smart-pointers"]
+body = """
+The same exchange with a different seed, `BoxedFromString`, which accepts a
+string of any lifetime and copies it if it must.
+"""
+
+[[annotation]]
+id    = "json-raw-0018"
+file  = "src/raw.rs"
+lines = "415-447"
+title = "RawKey — the key must be the token"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits"]
+body = """
+A unit struct that deserializes successfully only from the string `TOKEN`.
+It is the counterpart of `NumberKey` in `number.rs`.
+"""
+
+[[annotation]]
+id    = "json-raw-0019"
+file  = "src/raw.rs"
+lines = "448-475"
+title = "ReferenceFromString — only a borrowed string will do"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "lifetime-de", "associated-types"]
+body = """
+A seed and a visitor in one type. As a seed it calls `deserialize_str`. As
+a visitor it implements a single method, `visit_borrowed_str`, and converts
+the `&'de str` with `from_borrowed`.
+
+There is no `visit_str`. If the deserializer can offer only a short-lived
+or owned string, `serde_core`'s default rejects it. That is what happens
+when `&RawValue` is requested from a `Deserializer` built over a reader:
+the error is "invalid type: string, expected raw value". The `from_reader`
+function does not get that far. Its `DeserializeOwned` bound refuses the
+type at compile time.
+
+The text is not validated here. It came from the parser, which has just
+skipped over exactly one value.
+"""
+
+[[annotation]]
+id    = "json-raw-0020"
+file  = "src/raw.rs"
+lines = "476-511"
+title = "BoxedFromString — any string, boxed"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "strings"]
+body = """
+The owning counterpart. `visit_str` copies. `visit_string` converts an owned
+`String` without copying, and that is the method the stream reader's
+`OwnedRawDeserializer` ends up calling.
+"""
+
+[[annotation]]
+id    = "json-raw-0021"
+file  = "src/raw.rs"
+lines = "512-530"
+title = "RawKeyDeserializer — the token, as a deserializer"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "macro-rules"]
+body = """
+A deserializer whose every method calls `visit_borrowed_str(TOKEN)`. It is
+the key half of the one-entry map.
+"""
+
+[[annotation]]
+id    = "json-raw-0022"
+file  = "src/raw.rs"
+lines = "531-555"
+title = "OwnedRawDeserializer — the one-entry map, with an owned value"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "option"]
+body = """
+A `MapAccess` over `Option<String>`. It yields the token key while the
+option is full, then the string as the value, then ends.
+
+This is what `IoRead::end_raw_buffering` constructs, and also what
+`Value`'s deserializer constructs after printing itself to a string.
+"""
+
+[[annotation]]
+id    = "json-raw-0023"
+file  = "src/raw.rs"
+lines = "556-580"
+title = "BorrowedRawDeserializer — the same map, with a borrowed value"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "option", "lifetime-de"]
+body = """
+The borrowed counterpart, holding `Option<&'de str>`. The value is
+delivered through `BorrowedStrDeserializer`, so the visitor's
+`visit_borrowed_str` is called and the reference keeps its full lifetime.
+
+`SliceRead` and `StrRead` construct this one.
+"""
+
+[[annotation]]
+id    = "json-raw-0024"
+file  = "src/raw.rs"
+lines = "581-598"
+title = "A RawValue is a Deserializer — by parsing itself"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "lifetime-de", "associated-types"]
+body = """
+`&'de RawValue` implements `Deserializer`. When the program finally wants
+the deferred value, it calls `T::deserialize(raw)`.
+
+`deserialize_any` builds a `crate::Deserializer` over the stored text and
+forwards to it. Parsing happens now. Because the text lives for `'de`, the
+result can borrow from it.
+
+There is no call to `end` afterwards. The invariant says the text is
+exactly one value with nothing after it.
+"""
+
+[[annotation]]
+id    = "json-raw-0025"
+file  = "src/raw.rs"
+lines = "599-827"
+title = "Thirty methods, each constructing a parser and forwarding"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits"]
+body = """
+Every remaining method of the trait, written out, each with the same body
+as `deserialize_any` and its own name in place of `deserialize_any`.
+
+They cannot all forward to `deserialize_any`, which is what
+`forward_to_deserialize_any!` would do. The typed methods must reach the
+parser's typed methods, so that `deserialize_option` treats `null` as
+`None` and `deserialize_enum` accepts a bare string. Forwarding by name
+preserves that.
+
+A macro could have written these 229 lines. Upstream wrote them by hand.
+"""

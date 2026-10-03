@@ -1249,7 +1249,7 @@ machines in `read.rs` and `ser.rs` refuse large spans.
 | **K1 — Three coverage sources** ✅ | The role moves; `extra_files` in the pin; the front page stops saying "both"; D14 | 0 | `cargo xtask coverage` reports the first two crates unchanged and `serde_json` at 0/18,359 without error; the json walk's crossings still read 1, 0, 2, 1, 1, 2, 3, 1, 10 |
 | **K2 — Vertical slice: `read.rs`** ✅ | The byte-level state machine, 1,089 lines, and the refusal case the scope doc named | ~47 | `read.rs` at 100%; its narrative steps retargeted; the density either confirms 23 lines per annotation or moves the estimate before 650 more are written |
 | **K3 — The rest of the engines** ✅ | `de.rs`, `ser.rs`, `io/*`, `iter.rs`, `build.rs` | ~224 | the engines at 100%; every `Deserializer` and `Serializer` method leans on its `serde_core` contract by `prereqs` rather than re-explaining it |
-| **K4 — The `Value` tree** | `value/*`, `map.rs`, `number.rs`, `raw.rs` | ~283 | the tree at 100%; `value/de.rs` and `value/ser.rs` read as the second implementation of a surface the reader has seen, not a second transcript |
+| **K4 — The `Value` tree** ✅ | `value/*`, `map.rs`, `number.rs`, `raw.rs` | ~283 | the tree at 100%; `value/de.rs` and `value/ser.rs` read as the second implementation of a surface the reader has seen, not a second transcript |
 | **K5 — `lexical/`** | The float parser, 19 files | ~106 | `lexical/` at 100%; the five constant tables are a table each |
 | **K6 — Plumbing** | `lib.rs`, `error.rs`, `macros.rs` | ~44 | **every line of `serde_json` claimed**; all 38 files in its manifest; all 104 narrative steps name a containing annotation |
 | **K7 — Course units** | 8 new units, 22 through 29 (scope §6) | — | the course track spans three crates, walkable start to finish, D8's forward-reference check enforcing across all of them |
@@ -1354,3 +1354,48 @@ and was checked first:
   with its first letter missing.
 - NaN serializes as `null`, and that `null` does not deserialize back into an
   `f64`.
+
+### What K4 shipped
+
+The `Value` tree is complete: 9 files, 7,079 lines, 224 annotations.
+`serde_json` is at 72.8%, with `lexical/` and three plumbing files left.
+
+**Under the projection again, by more.** 31.6 lines per annotation against a
+projected 25.0, and 224 against ~283. Two things did it.
+
+The first is the one the scope doc predicted. `value/de.rs` implements
+`Deserializer` for `Value` and then again for `&Value`, and the second half of
+the file is the first half with `visit_array_ref` in place of `visit_array`.
+The borrowed impl is written up as what it does differently, which is one
+thing: it can lend its strings.
+
+The second is `map.rs`, which the scope doc filed under "logic" at 27 lines.
+It is 1,181 lines of wrapper around `BTreeMap` or `IndexMap`, and the content
+is the reason for the wrapper, stated once. Seven iterator types are three
+annotations.
+
+With `lexical/` and plumbing at their projected densities the track lands near
+**~590**, just under the scope doc's stated lower bound of 600.
+
+**The two implementations do not always agree, and the annotations say
+where.** The scope doc expected `value/de.rs` and `value/ser.rs` to read as
+the second implementation of a surface the reader has seen. They do, and
+reading them side by side with the engines found five places where the tree
+and the text behave differently for the same input. Each was run before it
+was written:
+
+- A map keyed by `Option<u8>` serializes with `to_string` and fails with
+  `to_value`. The text key serializer passes `Some` through. The tree's
+  rejects it.
+- `u128::MAX` serializes as text and is out of range for `to_value`.
+- A struct variant written as an array is accepted by the parser and rejected
+  by the tree.
+- A three-element array into a two-element tuple is "trailing characters"
+  from the parser and "invalid length" from the tree.
+- A `RawValue` obtained through a `Value` is not the original bytes. The tree
+  has none to give, so it prints itself.
+
+**13 narrative steps retargeted, two narrowed.** Both narrowed steps had
+cited a closing brace or a blank line belonging to the neighbouring function.
+All 104 steps of the json walk now stand on complete files except the nine in
+`error.rs`, which is K6's.

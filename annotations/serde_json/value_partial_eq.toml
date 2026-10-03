@@ -1,0 +1,86 @@
+schema = 1
+source = "serde_json-1.0.151"
+
+[[annotation]]
+id    = "json-value-partial-eq-0001"
+file  = "src/value/partial_eq.rs"
+lines = "1-30"
+title = "Six comparison helpers — an accessor, then =="
+kind  = "plumbing"
+tracks = ["reference"]
+rust_features = ["option"]
+body = """
+`Value` derives `PartialEq` against itself. This file adds comparisons with
+plain Rust types, so that `value == 1` and `value == "x"` compile.
+
+Each helper asks the value for the corresponding primitive with an `as_*`
+accessor and compares the `Option` with `Some(other)`. A value of the wrong
+kind gives `None`, and `None == Some(x)` is false. No comparison here can
+panic.
+
+The integer helpers inherit the accessors' strictness. `as_i64` returns
+`None` for a number stored as a float, so `json!(1.0) == 1` is false even
+though the two are numerically equal.
+"""
+
+[[annotation]]
+id    = "json-value-partial-eq-0002"
+file  = "src/value/partial_eq.rs"
+lines = "31-66"
+title = "Comparisons with strings — six impls for three types"
+kind  = "impl"
+tracks = ["reference"]
+rust_features = ["traits", "strings"]
+body = """
+`PartialEq` has a type parameter for the right-hand side, and each
+combination of left and right needs its own impl. `Value == str`,
+`Value == &str` and `Value == String` are three. The reversed forms, with
+the `Value` on the right, are three more.
+
+The `&str` impls exist because a string literal has type `&str`, and
+`value == "x"` would not find the `str` impl on its own.
+"""
+
+[[annotation]]
+id    = "json-value-partial-eq-0003"
+file  = "src/value/partial_eq.rs"
+lines = "67-96"
+title = "partialeq_numeric! — four impls per type"
+kind  = "macro-def"
+tracks = ["reference"]
+rust_features = ["macro-rules", "macro-repetition"]
+body = """
+The pattern is a repetition inside a repetition:
+`$($eq:ident [$($ty:ty)*])*`. Each outer item is a helper function name
+followed by a bracketed list of types.
+
+For every type the body writes four impls. `Value == T` and `T == Value`
+are the obvious pair. `&Value == T` and `&mut Value == T` are there because
+indexing returns references, and `assert_eq!(v["a"], 1)` or a comparison on
+`v.get_mut(..)` would not otherwise type-check.
+
+`*other as _` casts the operand to whatever the helper's parameter type is.
+An `i8` becomes an `i64` for `eq_i64`. The `_` lets one macro body serve
+every helper.
+"""
+
+[[annotation]]
+id    = "json-value-partial-eq-0004"
+file  = "src/value/partial_eq.rs"
+lines = "97-103"
+title = "Thirteen types, fifty-two impls"
+kind  = "macro-use"
+tracks = ["reference"]
+rust_features = ["macro-rules"]
+macro_def = "json-value-partial-eq-0003"
+body = """
+Five signed integers, five unsigned, two floats and `bool`, each routed to
+the helper that compares at the right width.
+
+`bool` is in a macro named for numerics because the generated code has the
+same shape. The cast `*other as _` from `bool` to `bool` is a no-op.
+
+`f32` has its own helper and is not widened to `f64` for the comparison. It
+compares against `Number::as_f32`, so a value built from an `f32` compares
+equal to that same `f32`.
+"""
