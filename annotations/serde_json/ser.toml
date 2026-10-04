@@ -109,8 +109,10 @@ file  = "src/ser.rs"
 lines = "182-200"
 title = "char, str and bytes — a string, a string, and an array of numbers"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["strings", "inlining"]
+prereqs = ["ser-mod-0025", "ser-mod-0026", "ser-mod-0027"]
 body = """
 A `char` is encoded into a four-byte stack buffer and serialized as a
 one-character string. JSON has no character type.
@@ -840,7 +842,8 @@ file  = "src/ser.rs"
 lines = "1516-1538"
 title = "CharEscape — nine ways to escape a byte"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["pattern-matching"]
 body = """
 A public enum naming each kind of escape JSON has. Eight are the
@@ -953,7 +956,8 @@ file  = "src/ser.rs"
 lines = "1734-1763"
 title = "begin_string, end_string, write_string_fragment — a string in pieces"
 kind  = "trait-item"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["traits", "default-methods", "strings"]
 body = """
 A string is not written with one call. The formatter is told that a string is
@@ -975,8 +979,10 @@ file  = "src/ser.rs"
 lines = "1764-1800"
 title = "write_char_escape — two bytes, or six"
 kind  = "trait-item"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["traits", "default-methods", "pattern-matching"]
+prereqs = ["json-ser-0041"]
 body = """
 The method that turns a `CharEscape` into bytes.
 
@@ -1175,7 +1181,8 @@ file  = "src/ser.rs"
 lines = "2069-2078"
 title = "format_escaped_str — quotes around the contents"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["sized-bound", "generic-params"]
 body = """
 Three calls: begin the string, write its contents, end it. The contents
@@ -1192,8 +1199,10 @@ file  = "src/ser.rs"
 lines = "2079-2166"
 title = "format_escaped_str_contents and the escape table — runs, then one escape"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["unsafe", "strings", "pattern-matching", "zero-cost"]
+prereqs = ["json-ser-0046"]
 body = """
 This is the serializer's string scanner. It walks the bytes, and for each
 one looks up `ESCAPE[byte]`. Zero means the byte is written as it is. Most

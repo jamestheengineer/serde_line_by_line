@@ -1190,8 +1190,10 @@ file  = "src/de.rs"
 lines = "1425-1432"
 title = "The string arm — Borrowed or Copied becomes two different visitor calls"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["lifetime-de", "borrowing", "pattern-matching"]
+prereqs = ["json-read-0008", "de-mod-0050", "de-mod-0051"]
 body = """
 This is where the `Reference` enum from `read.rs` is consumed.
 
@@ -1302,8 +1304,10 @@ file  = "src/de.rs"
 lines = "1517-1559"
 title = "char, str and string — one method and two forwards"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["strings", "lifetime-de"]
+prereqs = ["de-mod-0034"]
 body = """
 `deserialize_char` and `deserialize_string` both call `deserialize_str`. JSON
 has one kind of string, and what distinguishes a `char` from a `String` is
@@ -1324,7 +1328,8 @@ file  = "src/de.rs"
 lines = "1560-1632"
 title = "deserialize_bytes — what the documentation commits to"
 kind  = "doc-contract"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["strings"]
 body = """
 Seventy lines of documentation for one method, because the behaviour is a
@@ -1352,8 +1357,10 @@ file  = "src/de.rs"
 lines = "1633-1670"
 title = "deserialize_bytes and deserialize_byte_buf — a string, or an array"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["pattern-matching", "lifetime-de"]
+prereqs = ["de-mod-0035", "de-mod-0054"]
 body = """
 For a string, this calls `parse_str_raw` where the string methods call
 `parse_str`. That is the non-validating scan, and its result goes to

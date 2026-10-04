@@ -85,8 +85,10 @@ file  = "src/read.rs"
 lines = "62-89"
 title = "The string methods — where the manual specialization lives"
 kind  = "trait-item"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["lifetime-de", "lifetimes", "borrowing", "strings"]
+prereqs = ["json-read-0002"]
 body = """
 These four are the second layer. All of them assume the opening `"` has
 already been consumed.
@@ -178,7 +180,8 @@ file  = "src/read.rs"
 lines = "124-145"
 title = "Reference — borrowed from the input, or copied into scratch"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["lifetimes", "sized-bound", "pattern-matching", "zero-cost"]
 body = """
 This enum is how a string comes out of the reader without the reader deciding
@@ -276,7 +279,8 @@ file  = "src/read.rs"
 lines = "213-251"
 title = "IoRead::parse_str_bytes — the scan when nothing can be borrowed"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["closures", "lifetimes", "pattern-matching"]
 body = """
 This is the stream reader's string loop, and every byte goes into `scratch`.
@@ -355,8 +359,10 @@ file  = "src/read.rs"
 lines = "335-378"
 title = "IoRead's string methods — always Copied"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["strings", "closures", "result"]
+prereqs = ["de-mod-0051"]
 body = """
 `parse_str` and `parse_str_raw` both finish with `.map(Reference::Copied)`.
 There is no path here that produces `Borrowed`. A type that asks for
@@ -443,7 +449,8 @@ file  = "src/read.rs"
 lines = "432-482"
 title = "skip_to_escape — eight bytes at a time, looking for three kinds of byte"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["unsafe", "cfg", "zero-cost"]
 body = """
 Most bytes of most JSON strings are ordinary. This function advances `index`
@@ -477,7 +484,8 @@ file  = "src/read.rs"
 lines = "483-490"
 title = "skip_to_escape_slow — the tail, kept out of line"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["inlining"]
 body = """
 A byte-at-a-time loop over whatever was left after the last full chunk, at
@@ -497,8 +505,10 @@ file  = "src/read.rs"
 lines = "491-540"
 title = "SliceRead::parse_str_bytes — the fast path that returns the input itself"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["hrtb", "lifetimes", "borrowing", "closures", "sized-bound"]
+prereqs = ["json-read-0008"]
 body = """
 This is the function the doc comment calls "the big optimization". If a string
 has no escapes, the result is a sub-slice of the input and nothing is copied.
@@ -611,7 +621,8 @@ file  = "src/read.rs"
 lines = "587-597"
 title = "SliceRead parse_str and parse_str_raw — two closures over one loop"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["strings", "closures"]
 body = """
 Both methods are one call to `parse_str_bytes`, differing in two arguments.
@@ -632,7 +643,8 @@ file  = "src/read.rs"
 lines = "598-619"
 title = "SliceRead::ignore_str — skipping a string with the same scanner"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["pattern-matching"]
 body = """
 The loop from `parse_str_bytes` with every use of scratch removed. It still
@@ -651,7 +663,8 @@ file  = "src/read.rs"
 lines = "620-636"
 title = "SliceRead::decode_hex_escape — four bytes by slice pattern"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["pattern-matching", "inlining"]
 body = """
 This is the reason `decode_hex_escape` is a trait method. The stream reader
@@ -851,7 +864,8 @@ file  = "src/read.rs"
 lines = "836-839"
 title = "is_escape — the three-way test, in one expression"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["strings"]
 body = """
 A byte is interesting if it is a quote, a backslash, or, when the flag is
@@ -895,7 +909,8 @@ file  = "src/read.rs"
 lines = "872-896"
 title = "parse_escape — eight letters and a delegation"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["pattern-matching", "strings"]
 body = """
 Called after a backslash. The next byte selects the escape, and for eight of
@@ -917,7 +932,8 @@ file  = "src/read.rs"
 lines = "897-923"
 title = "parse_unicode_escape — the easy case, and a misnamed error"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["strings", "inlining"]
 body = """
 `\\uXXXX` gives a 16-bit number. If it is not a surrogate, it is a code point
@@ -942,7 +958,8 @@ file  = "src/read.rs"
 lines = "924-974"
 title = "The surrogate pair — and what the non-validating path lets through"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["strings", "pattern-matching"]
 body = """
 From here `n` is a leading surrogate and a second escape must follow. The
@@ -999,7 +1016,8 @@ file  = "src/read.rs"
 lines = "1023-1049"
 title = "ignore_escape — consuming an escape without judging it"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["pattern-matching", "sized-bound"]
 body = """
 The skipping counterpart of `parse_escape`. The eight simple escapes need no
@@ -1021,7 +1039,8 @@ file  = "src/read.rs"
 lines = "1050-1074"
 title = "Two hex tables, built at compile time"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["zero-cost"]
 body = """
 `decode_hex_val_slow` is the obvious function from a byte to a hex digit.
@@ -1045,7 +1064,8 @@ file  = "src/read.rs"
 lines = "1075-1089"
 title = "decode_four_hex_digits — four lookups and one sign check"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "24-strings-escapes-and-borrowing"
 rust_features = ["zero-cost", "option"]
 body = """
 Four table lookups, widened to `i32`. `a | b` is the high byte and `c | d` the

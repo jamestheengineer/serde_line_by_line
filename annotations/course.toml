@@ -1268,3 +1268,84 @@ escape table, the float methods and what they do with NaN, the two emitter
 types that exist only behind a feature, and the unchecked conversion inside
 `to_string`.
 """
+
+[[unit]]
+id = "24-strings-escapes-and-borrowing"
+title = "Strings, escapes, and borrowing from the input"
+supplement = "none"
+status = "written"
+prereqs = ["07-lifetimes-basics", "08-lifetimes-de-and-zero-copy", "22-implementing-a-deserializer", "23-writing-a-serializer"]
+rust_features = ["strings", "lifetime-de", "lifetimes", "borrowing", "hrtb", "closures", "zero-cost"]
+examples = ["json_document"]
+summary = """
+Unit 8 said a visitor may be offered a string that lives as long as the
+input. This unit reads the code that decides whether to make that offer, one
+string at a time, and the code on the other side that writes a string back
+out. The decision is an enum with two variants and two lifetimes.
+"""
+body = """
+Unit 8 taught `'de` from the receiving end. `visit_borrowed_str` hands the
+visitor a `&'de str` it may keep, `visit_str` hands it one it may not, and
+`serde_core` leaves it to the format to know which it has. Unit 22 walked past
+the string arm of the parser and said the machinery was worth reading on its
+own. This is that machinery.
+
+**The answer is a value, not a type.** `Reference<'b, 'c, T>` has two
+variants, `Borrowed(&'b T)` and `Copied(&'c T)`. They hold the same kind of
+pointer and differ only in what it points into: the input, or a scratch
+buffer the parser owns. `parse_str` returns one, and the string arm of
+`deserialize_any` matches on it. `Borrowed` becomes `visit_borrowed_str`.
+`Copied` becomes `visit_str`. That `match` is all of zero-copy
+deserialization in `serde_json`, and it is decided per string at run time.
+
+**What decides it is a backslash.** Read `SliceRead::parse_str_bytes`. It
+skips to the next quote, backslash or control character. If the first thing
+it reaches is the closing quote and nothing has been copied, the string is a
+sub-slice of the input and comes back `Borrowed`. If it reaches a backslash,
+the run before it goes into scratch, the escape is decoded into scratch, and
+from there the string is `Copied`. So `"x"` can be borrowed and `"\\u0078"`
+cannot, though they are the same string. This unit's example reads both
+into a `&str` field, and the second is an error.
+
+**And which reader you chose.** `IoRead` has no stable buffer to point into.
+Its string methods end in `.map(Reference::Copied)` on every path, so a type
+holding `&'de str` cannot be read with `from_reader` at all. That is the
+run-time face of the bound unit 22 pointed at, `DeserializeOwned` on
+`from_reader`.
+
+**The line that needed a higher-ranked bound.** `parse_str_bytes` takes a
+closure that converts the finished bytes into the result type, and it calls
+that closure with input bytes in one branch and scratch bytes in the other.
+The two have different lifetimes. `for<'f> FnOnce(&'s Self, &'f [u8]) ->
+Result<&'f T>` says the closure works for any lifetime it is given. Unit 8
+met `for<'de>` inside `DeserializeOwned`. Here it is doing ordinary work:
+one function body, two callers' worth of lifetimes.
+
+**Skipping is done a word at a time.** Most bytes of most strings are
+ordinary, and `skip_to_escape` tests a machine word of them per step. Read
+the annotation for the arithmetic. The point for this unit is where the cost
+went: the common case of a string with no escapes is a scan and a slice, with
+no allocation and no copy.
+
+**Escapes are where JSON's history shows.** Eight of the nine are one byte.
+`\\u` is four hex digits, validated by two lookup tables and a single sign
+check, and a code point above `U+FFFF` is two of them in a row because JSON
+inherited UTF-16's surrogate pairs. `parse_unicode_escape` handles a pair, a
+lone half, and a half followed by an unrelated escape. Text must be
+well-formed. `deserialize_bytes` asks for the non-validating scan, and a lone
+surrogate is let through as bytes that are not UTF-8.
+
+**Writing is the same scan, backwards.** `format_escaped_str_contents` walks
+the string with a 256-entry table. A zero entry means the byte is written as
+it is. Runs of those are written as one fragment each, so a string with
+nothing to escape is one call. The table marks the same three classes of
+byte the reader stops at: the quote, the backslash, and everything below
+`0x20`. Bytes from `0x80` up are zero, so non-ASCII text goes out as UTF-8
+and is never `\\u`-escaped. The reader accepts `\\/` and the writer never
+produces it.
+
+Four `unsafe` blocks sit in the code this unit covers: a pointer subtraction
+in `skip_to_escape`, and in the writer two unchecked conversions and an
+`unreachable_unchecked`. Each annotation gives the argument for its own. A
+later unit reads those arguments side by side with the rest of the crate's.
+"""
