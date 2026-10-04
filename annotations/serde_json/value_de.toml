@@ -31,8 +31,10 @@ file  = "src/value/de.rs"
 lines = "22-35"
 title = "Deserialize for Value — a visitor that accepts anything"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["traits", "lifetime-de", "associated-types"]
+prereqs = ["de-mod-0043", "de-mod-0044"]
 body = """
 `Value` implements `Deserialize` the way every type does: define a visitor
 and hand it to the deserializer.
@@ -140,8 +142,10 @@ file  = "src/value/de.rs"
 lines = "120-148"
 title = "visit_map — the first key decides what kind of map this is"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["cfg", "collections", "pattern-matching"]
+prereqs = ["de-mod-0064"]
 body = """
 An object is built by reading entries. The first key is read differently
 from the rest.
@@ -304,8 +308,10 @@ file  = "src/value/de.rs"
 lines = "282-302"
 title = "Deserializer for Value — the tree describes itself"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["traits", "pattern-matching", "cfg"]
+prereqs = ["de-mod-0029", "json-de-0049"]
 body = """
 The second full implementation of `serde_core`'s `Deserializer` in this
 crate. The parser's version reads bytes. This one reads an enum.
@@ -686,8 +692,10 @@ file  = "src/value/de.rs"
 lines = "817-833"
 title = "Deserializer for &Value — where a tree can lend its strings"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["traits", "lifetime-de", "borrowing"]
+prereqs = ["json-value-de-0015", "de-mod-0051"]
 body = """
 Implementing `Deserializer<'de>` for `&'de Value` ties the trait's lifetime
 to the borrow of the tree. That one line of the header is what makes the

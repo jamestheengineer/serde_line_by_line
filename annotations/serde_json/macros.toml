@@ -7,7 +7,8 @@ file  = "src/macros.rs"
 lines = "1-52"
 title = "json! — what the macro promises"
 kind  = "doc-contract"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["macro-rules"]
 body = """
 Three examples and three rules.
@@ -29,7 +30,8 @@ file  = "src/macros.rs"
 lines = "53-59"
 title = "json! — one rule that forwards"
 kind  = "macro-def"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["macro-rules", "macro-repetition"]
 body = """
 The public macro accepts any non-empty sequence of token trees and passes
@@ -49,7 +51,8 @@ file  = "src/macros.rs"
 lines = "60-70"
 title = "A comment addressed to another project"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["macro-rules", "visibility"]
 body = """
 `json_internal!` is hidden and exported, and the comment explains that it
@@ -67,8 +70,10 @@ file  = "src/macros.rs"
 lines = "71-131"
 title = "json_internal! @array — a token muncher with an accumulator"
 kind  = "macro-def"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["macro-rules", "macro-repetition", "macro-hygiene"]
+prereqs = ["json-macros-0002"]
 body = """
 The first of three groups of rules. It parses the inside of `[ ... ]` one
 element at a time.
@@ -96,8 +101,10 @@ file  = "src/macros.rs"
 lines = "132-160"
 title = "@object — the end states"
 kind  = "macro-def"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["macro-rules", "macro-repetition"]
+prereqs = ["json-macros-0004"]
 body = """
 The second group parses the inside of `{ ... }`. Its calling convention is
 `@object map (key so far) (remaining) (remaining again)`, and the header
@@ -120,8 +127,10 @@ file  = "src/macros.rs"
 lines = "161-195"
 title = "@object values — after the colon"
 kind  = "macro-def"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["macro-rules", "macro-repetition"]
+prereqs = ["json-macros-0005"]
 body = """
 Seven rules that fire once the remaining tokens begin with a colon. They
 mirror the array rules: `null`, `true`, `false`, an array, a map, an
@@ -137,8 +146,10 @@ file  = "src/macros.rs"
 lines = "196-236"
 title = "@object keys — one token at a time, and five error rules"
 kind  = "macro-def"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["macro-rules", "macro-repetition"]
+prereqs = ["json-macros-0006"]
 body = """
 The key is accumulated by the last rule here, which moves one token from
 the remaining input into the key list and recurses. That continues until a
@@ -162,8 +173,10 @@ file  = "src/macros.rs"
 lines = "237-281"
 title = "The main rules — seven cases, and the catch-all"
 kind  = "macro-def"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["macro-rules", "macro-hygiene"]
+prereqs = ["json-macros-0007"]
 body = """
 The entry point. `null`, `true` and `false` become the matching variants.
 Empty brackets and braces are handled without invoking the munchers.
@@ -189,7 +202,8 @@ file  = "src/macros.rs"
 lines = "282-303"
 title = "Three helper macros"
 kind  = "macro-def"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["macro-rules", "visibility"]
 body = """
 `json_internal_vec!` is unused. Its comment says so, names the Rocket

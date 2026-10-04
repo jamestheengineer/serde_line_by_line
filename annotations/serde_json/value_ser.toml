@@ -50,8 +50,10 @@ file  = "src/value/ser.rs"
 lines = "38-71"
 title = "value::Serializer — the same trait, with Ok = Value"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["traits", "associated-types"]
+prereqs = ["ser-mod-0017", "ser-mod-0018", "json-ser-0002"]
 body = """
 A second implementation of `serde_core`'s `Serializer`. The doc comment
 shows `to_value` written in terms of it.
@@ -199,8 +201,10 @@ file  = "src/value/ser.rs"
 lines = "233-263"
 title = "Sequences and tuple variants — a Vec to fill"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["collections", "option"]
+prereqs = ["ser-mod-0033"]
 body = """
 `serialize_seq` returns a `SerializeVec` holding an empty vector with the
 hinted capacity. Tuples and tuple structs forward to it.
@@ -312,8 +316,10 @@ file  = "src/value/ser.rs"
 lines = "397-447"
 title = "SerializeMap — a key held until its value arrives"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["traits", "option", "pattern-matching"]
+prereqs = ["ser-mod-0045"]
 body = """
 `serialize_key` serializes the key with `MapKeySerializer`, whose output is
 a `String`, and stores it in `next_key`.

@@ -43,7 +43,8 @@ file  = "src/value/index.rs"
 lines = "37-53"
 title = "Three methods — look, look mutably, or create"
 kind  = "trait-item"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["sealed-traits", "lifetimes", "option"]
 body = """
 `index_into` and `index_into_mut` return an `Option` and never modify the
@@ -83,7 +84,8 @@ file  = "src/value/index.rs"
 lines = "83-106"
 title = "Index for str — objects, and null promoted to an object"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["pattern-matching", "collections"]
 body = """
 A string indexes an object.
@@ -135,8 +137,10 @@ file  = "src/value/index.rs"
 lines = "134-142"
 title = "The seal"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["sealed-traits", "modules", "blanket-impls"]
+prereqs = ["json-read-0010"]
 body = """
 A private module with a public trait, implemented for exactly the four
 families of types that implement `Index`.
@@ -167,7 +171,8 @@ file  = "src/value/index.rs"
 lines = "159-216"
 title = "ops::Index for Value — and an argument for not panicking"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["traits", "associated-types", "where-clauses"]
 body = """
 The comment above this impl is a design argument, and it is unusually
@@ -195,8 +200,10 @@ file  = "src/value/index.rs"
 lines = "217-258"
 title = "ops::IndexMut for Value — the half that does panic"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["traits", "where-clauses"]
+prereqs = ["json-value-index-0010"]
 body = """
 Writing through brackets goes to `index_or_insert`, with the behaviour its
 doc comment lists. A string index creates the key, and a `Null` becomes an

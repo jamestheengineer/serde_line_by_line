@@ -181,7 +181,8 @@ file  = "src/map.rs"
 lines = "272-288"
 title = "entry — wrapping the backing map's Entry"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["cfg", "generic-params"]
 body = """
 The entry API, for inserting or updating with a single lookup. The key
@@ -272,7 +273,8 @@ file  = "src/map.rs"
 lines = "418-433"
 title = "Hash — sorted first, so that it agrees with equality"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["traits", "cfg", "closures", "collections"]
 body = """
 `Hash` and `Eq` must agree: equal values must hash equally.
@@ -368,7 +370,8 @@ file  = "src/map.rs"
 lines = "569-600"
 title = "delegate_iterator! — four iterator traits for a wrapper"
 kind  = "macro-def"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["macro-rules", "macro-repetition", "iterators"]
 body = """
 Each iterator wrapper at the bottom of the file needs the same four impls,

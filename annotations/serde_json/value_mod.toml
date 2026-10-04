@@ -91,7 +91,8 @@ file  = "src/value/mod.rs"
 lines = "112-177"
 title = "Value — six variants for six kinds of JSON"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["pattern-matching", "collections", "strings"]
 body = """
 The whole type. `Null`, `Bool`, `Number`, `String`, `Array` and `Object`
@@ -362,7 +363,8 @@ file  = "src/value/mod.rs"
 lines = "753-796"
 title = "pointer — a path through the tree, as a fold"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["iterators", "closures", "option", "strings"]
 body = """
 JSON Pointer, from RFC 6901, addresses a value with a string such as
@@ -387,8 +389,10 @@ file  = "src/value/mod.rs"
 lines = "797-851"
 title = "pointer_mut — the same fold, with a move"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["iterators", "closures", "borrowing"]
+prereqs = ["json-value-mod-0019"]
 body = """
 The mutable version has the same structure. The difference worth noticing is
 `and_then(move |x| list.get_mut(x))`.
@@ -410,7 +414,8 @@ file  = "src/value/mod.rs"
 lines = "852-864"
 title = "take — replace with Null"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["ownership"]
 body = """
 `mem::replace(self, Value::Null)` moves the current value out through a
@@ -486,8 +491,10 @@ file  = "src/value/mod.rs"
 lines = "940-1001"
 title = "to_value — serializing into a tree"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["generic-params", "where-clauses", "traits"]
+prereqs = ["ser-mod-0017", "json-value-ser-0003"]
 body = """
 `to_value` converts any `Serialize` type into a `Value`. The body is one
 line: `value.serialize(Serializer)`.
@@ -512,8 +519,10 @@ file  = "src/value/mod.rs"
 lines = "1002-1042"
 title = "from_value — a Value is its own Deserializer"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "26-the-value-tree-and-json-macro"
 rust_features = ["generic-params", "where-clauses", "lifetime-de"]
+prereqs = ["de-mod-0022", "json-value-de-0015"]
 body = """
 The reverse conversion, and again one line: `T::deserialize(value)`.
 

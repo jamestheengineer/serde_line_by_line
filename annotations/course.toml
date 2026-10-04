@@ -90,6 +90,15 @@ reading_order = [
     "serde_json:src/lexical/parse.rs",
     "serde_json:src/lexical/algorithm.rs",
     "serde_json:src/ser.rs",
+
+    # The tree: the type, the two traits implemented a second time over it,
+    # then its conveniences, and the macro that builds one last.
+    "serde_json:src/value/mod.rs",
+    "serde_json:src/value/ser.rs",
+    "serde_json:src/value/de.rs",
+    "serde_json:src/map.rs",
+    "serde_json:src/value/index.rs",
+    "serde_json:src/macros.rs",
 ]
 
 [[unit]]
@@ -1439,4 +1448,88 @@ That is two functions with one name under opposite `#[cfg]`s, and it is the
 first of many in this crate. What the feature buys is a parse that is right
 in the last bit. What it costs is nineteen files that a default build never
 compiles.
+"""
+
+[[unit]]
+id = "26-the-value-tree-and-json-macro"
+title = "The `Value` tree, and the `json!` muncher"
+supplement = "none"
+status = "written"
+prereqs = ["03-associated-types", "11-macro-rules", "22-implementing-a-deserializer", "23-writing-a-serializer"]
+rust_features = ["associated-types", "traits", "macro-rules", "macro-repetition", "macro-hygiene", "collections", "sealed-traits", "closures"]
+examples = ["json_value"]
+summary = """
+A format does not have to be bytes. `Value` is an enum with six variants,
+and `serde_json` implements `Serializer` and `Deserializer` over it a second
+time. Then the macro that writes one from a literal, which is unit 11's
+`macro_rules!` used as a parser.
+"""
+body = """
+Unit 3 said the format chooses `type Ok`, and gave the example that a
+serializer writing into a string might choose `()`. Unit 23 read that
+serializer. This unit reads the one that chose something else.
+
+**The same trait, with `Ok = Value`.** `value::Serializer` is a unit struct.
+It has no writer and no state, so it is implemented by value and not for a
+`&mut`. What it returns from each method is the output. `to_value` is one
+line, `value.serialize(Serializer)`, and the example runs one struct through
+it and through `to_string`. The struct's `Serialize` impl is the same code
+both times and does not know which it was given.
+
+The compound types differ too, and for a reason you can now state. The text
+serializer used one `Compound` for all seven because a bracket is a bracket.
+A tree builder has to remember different things: a vector, a vector and a
+variant name, a map and a key waiting for its value. So there are four types.
+
+**A tree is a format.** `from_value` is also one line, `T::deserialize(value)`,
+which compiles because `Value` implements `Deserializer`. Its
+`deserialize_any` is a `match` on six variants where the parser's was a
+`match` on seven byte patterns, and both feed the same visitor methods.
+
+It is implemented twice, and the difference is unit 24's subject again. For
+`Value` by value, deserializing consumes the tree and a string is handed
+over as an owned `String`. For `&'de Value` the trait's lifetime is tied to
+the borrow, and a string is delivered with `visit_borrowed_str`. The example
+reads a struct with a `&str` field out of `&tree` and checks that the field
+points into the tree. The `for &'de Value` in that impl's header is the
+whole reason that works.
+
+**`Value` itself is a `Deserialize` type**, with a visitor that accepts
+anything. That is how `from_str::<Value>` works: the parser from unit 22
+drives it like any other type. Nothing in `de.rs` knows `Value` exists.
+
+**Indexing that does not panic.** `value["a"][0]` returns `Null` for a
+missing key, an index out of range, or the wrong kind of value. The impl
+needs somewhere for that reference to point, and it is a `static NULL`.
+Read the comment above it, which argues for the choice. Writing through
+brackets is the other half and is not symmetric: a string index creates the
+key, turns a `Null` into an object on the way, and panics where it can do
+neither. The trait behind both is sealed, the way `Read` was in unit 22.
+
+**`pointer_mut` and one `move`.** The two pointer methods are the same
+iterator chain with `try_fold`. The mutable one needs `move` on a closure
+that the shared one does not, because a `&mut` cannot be copied into a
+closure and the returned reference has to outlive it. Unit 14 taught closure
+captures from written examples. This is one in the crate.
+
+**Then the macro.** Unit 11 read macros that stamp out impls: a list of
+types in, one impl per type out. `json!` is a different kind of thing. It
+parses. Its input is not Rust, and `macro_rules!` has no loop, so
+`json_internal!` consumes one element, appends the result to an accumulator
+written into its own arguments, and calls itself on what is left. That is a
+token-tree muncher.
+
+Three things in it are worth the time. The order of the rules is the
+design: `null`, `[...]` and `{...}` are matched before the general
+`$next:expr` rule, because `[1, 2]` is also a Rust expression, and once the
+`expr` matcher has captured something it is opaque and cannot be matched
+again. The object rules carry the remaining tokens twice, so that an error
+can be reported at the token the user wrote. And the last rule, for any Rust
+expression, expands to `to_value(&expr).unwrap()`. A macro cannot return an
+error to its caller, so `json!` on a value whose `Serialize` impl fails is a
+panic at run time, and the documentation says so.
+
+The example's `json!` line was written with its keys in the order `z`, `a`,
+`computed`, and they print sorted. `Map` is a `BTreeMap` in this build. It
+does not have to be, and that is the next unit but one.
 """

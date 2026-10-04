@@ -1,0 +1,18 @@
+to_string  {"name":"origin","at":[0,0]}
+to_value   Object {"at": Array [Number(0), Number(0)], "name": String("origin")}
+
+from &Value  Point { name: "origin", at: (0, 0) }
+name points into the tree: true
+from Value   ("origin", (0, 0))
+
+json!      {"a":[1,2.5,"three",[true]],"computed":{"at":[0,0],"name":"origin"},"z":null}
+key order  ["a", "computed", "z"]
+
+made["a"][2]       "three"
+made["missing"]    null
+made["a"][99]      null
+made["a"]["x"][0]  null
+
+after data["a"]["b"]["c"] = 1   {"a":{"b":{"c":1}}}
+pointer_mut("/a/b") taken       Some(Object {"c": Number(1)})
+what is left                    {"a":{"b":null}}
