@@ -1252,7 +1252,7 @@ machines in `read.rs` and `ser.rs` refuse large spans.
 | **K4 — The `Value` tree** ✅ | `value/*`, `map.rs`, `number.rs`, `raw.rs` | ~283 | the tree at 100%; `value/de.rs` and `value/ser.rs` read as the second implementation of a surface the reader has seen, not a second transcript |
 | **K5 — `lexical/`** ✅ | The float parser, 19 files | ~106 | `lexical/` at 100%; the five constant tables are a table each |
 | **K6 — Plumbing** ✅ | `lib.rs`, `error.rs`, `macros.rs` | ~44 | **every line of `serde_json` claimed**; all 38 files in its manifest; all 104 narrative steps name a containing annotation |
-| **K7 — Course units** (1 of 8) | 8 new units, 22 through 29 (scope §6) | — | the course track spans three crates, walkable start to finish, D8's forward-reference check enforcing across all of them |
+| **K7 — Course units** (2 of 8) | 8 new units, 22 through 29 (scope §6) | — | the course track spans three crates, walkable start to finish, D8's forward-reference check enforcing across all of them |
 | **K8 — Ship** | Three reference file-trees, the restated promise, `README` | — | three figures, no total, and each track honest about what it claims |
 
 K2 is a vertical slice for the reason phase 1 and R2 were. `read.rs` is the

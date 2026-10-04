@@ -30,8 +30,10 @@ file  = "src/ser.rs"
 lines = "15-78"
 title = "Serializer — a writer, a formatter, and seven names for one type"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["generic-params", "associated-types", "traits", "where-clauses", "lifetimes"]
+prereqs = ["ser-mod-0016", "ser-mod-0018", "json-de-0049"]
 body = """
 The serializer is two fields. `writer` is where bytes go. `formatter` decides
 what the punctuation between values looks like.
@@ -61,8 +63,10 @@ file  = "src/ser.rs"
 lines = "79-153"
 title = "bool and ten integer widths — the serializer writes nothing itself"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["inlining", "result"]
+prereqs = ["ser-mod-0019", "ser-mod-0020", "ser-mod-0022"]
 body = """
 Eleven methods with one body. Each calls the matching `write_*` method on the
 formatter, passing the writer, and converts an I/O error into the crate's
@@ -126,8 +130,10 @@ file  = "src/ser.rs"
 lines = "201-231"
 title = "unit, unit struct, unit variant, newtype struct"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["strings", "sized-bound"]
+prereqs = ["ser-mod-0029", "ser-mod-0030", "ser-mod-0031"]
 body = """
 Four methods that settle how the "empty" and "transparent" parts of the data
 model look in JSON.
@@ -147,8 +153,10 @@ file  = "src/ser.rs"
 lines = "232-269"
 title = "newtype variant — the externally tagged form, spelled out in formatter calls"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["sized-bound", "result"]
+prereqs = ["ser-mod-0032"]
 body = """
 `E::V(x)` becomes `{"V": x}`. This method writes that one piece at a time,
 and it is worth reading once slowly because every compound method below is
@@ -172,8 +180,10 @@ file  = "src/ser.rs"
 lines = "270-282"
 title = "none and some — null, or the value"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["option", "sized-bound"]
+prereqs = ["ser-mod-0028", "json-de-0060"]
 body = """
 `None` is `null`. `Some(x)` is `x`, with no wrapper.
 
@@ -188,8 +198,10 @@ file  = "src/ser.rs"
 lines = "283-319"
 title = "seq, tuple, tuple struct — and why an empty array is closed immediately"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["option", "pattern-matching"]
+prereqs = ["ser-mod-0033", "ser-mod-0034"]
 body = """
 `serialize_seq` writes the opening bracket and returns a `Compound` through
 which the elements will be written.
@@ -212,8 +224,10 @@ file  = "src/ser.rs"
 lines = "320-347"
 title = "tuple variant — an object opened here and closed somewhere else"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["result"]
+prereqs = ["ser-mod-0035"]
 body = """
 `E::V(a, b)` becomes `{"V": [a, b]}`. This method writes `{"V":` and then
 calls `serialize_seq` for the array.
@@ -230,8 +244,10 @@ file  = "src/ser.rs"
 lines = "348-370"
 title = "serialize_map — the same shape with braces"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["option"]
+prereqs = ["ser-mod-0035"]
 body = """
 Identical to `serialize_seq` with `begin_object` and `end_object`. An empty
 map is closed immediately for the same reason an empty array is.
@@ -269,8 +285,10 @@ file  = "src/ser.rs"
 lines = "382-409"
 title = "struct variant — an object inside an object"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["result"]
+prereqs = ["ser-mod-0037"]
 body = """
 `E::V { a, b }` becomes `{"V": {"a": ..., "b": ...}}`. The method writes the
 outer `{"V":` with the same five calls as the other variant forms and then
@@ -285,8 +303,10 @@ file  = "src/ser.rs"
 lines = "410-459"
 title = "collect_str — writing a Display value without building a String"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["traits", "closures", "option", "custom-errors"]
+prereqs = ["ser-mod-0040"]
 body = """
 `collect_str` serializes anything that implements `Display` as a JSON string.
 `serde_core`'s default does it by formatting into a temporary `String`. This
@@ -313,7 +333,8 @@ file  = "src/ser.rs"
 lines = "460-481"
 title = "State and Compound — public by necessity"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["visibility", "cfg", "lifetimes"]
 body = """
 Both types carry the same comment: not public API, should be `pub(crate)`.
@@ -338,8 +359,10 @@ file  = "src/ser.rs"
 lines = "482-528"
 title = "SerializeSeq for Compound — one element"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["traits", "pattern-matching", "sized-bound"]
+prereqs = ["ser-mod-0042"]
 body = """
 `serialize_element` tells the formatter an array value is beginning and
 whether it is the first. The compact formatter writes a comma when it is
@@ -363,8 +386,10 @@ file  = "src/ser.rs"
 lines = "529-572"
 title = "SerializeTuple and SerializeTupleStruct — forwarding to the sequence impl"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["traits"]
+prereqs = ["ser-mod-0043"]
 body = """
 Two traits, each with two methods, each forwarding to `SerializeSeq`.
 
@@ -382,8 +407,10 @@ file  = "src/ser.rs"
 lines = "573-610"
 title = "SerializeTupleVariant — the end that closes two containers"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["traits", "pattern-matching"]
+prereqs = ["ser-mod-0044"]
 body = """
 Elements are written as for any sequence. `end` is where this trait differs.
 
@@ -402,8 +429,10 @@ file  = "src/ser.rs"
 lines = "611-644"
 title = "SerializeMap::serialize_key — a key goes through its own serializer"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["traits", "pattern-matching"]
+prereqs = ["ser-mod-0045"]
 body = """
 A key is announced to the formatter with the first-or-not flag, which is
 where the comma between entries comes from. The state moves to `Rest`.
@@ -424,8 +453,10 @@ file  = "src/ser.rs"
 lines = "645-682"
 title = "serialize_value and end — a colon, a value, a closing brace"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["traits", "pattern-matching"]
+prereqs = ["ser-mod-0045"]
 body = """
 `begin_object_value` is where the colon is written. The value is serialized
 with the main serializer, and `end_object_value` follows.
@@ -466,8 +497,10 @@ file  = "src/ser.rs"
 lines = "729-772"
 title = "SerializeStructVariant — fields as for a struct, and a double close"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["traits", "pattern-matching"]
+prereqs = ["ser-mod-0047"]
 body = """
 `serialize_field` forwards to the struct impl. `end` mirrors the tuple
 variant's: close the inner object unless it was empty, end the object value,
@@ -483,7 +516,8 @@ file  = "src/ser.rs"
 lines = "773-786"
 title = "MapKeySerializer, and two errors for the token protocol"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["lifetimes", "cfg", "custom-errors"]
 body = """
 `MapKeySerializer` wraps the borrowed serializer. It is a distinct type so
@@ -502,8 +536,10 @@ file  = "src/ser.rs"
 lines = "787-833"
 title = "Serializer for MapKeySerializer — strings pass, compounds are impossible"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["traits", "associated-types", "marker-types"]
+prereqs = ["ser-impossible-0003"]
 body = """
 Two more error constructors first, for the two things a key serializer
 refuses.
@@ -526,7 +562,8 @@ file  = "src/ser.rs"
 lines = "834-1020"
 title = "bool and integer keys — the same value, inside quotation marks"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["result"]
 body = """
 Eleven methods and 187 lines, and one sentence describes all of them. Each
@@ -587,7 +624,8 @@ file  = "src/ser.rs"
 lines = "1067-1095"
 title = "Five things that cannot be a key"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["custom-errors"]
 body = """
 Bytes, unit, unit struct, newtype variant and `None` each return
@@ -608,7 +646,8 @@ file  = "src/ser.rs"
 lines = "1096-1102"
 title = "Some as a key — transparent"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["option", "sized-bound"]
 body = """
 `Some(x)` is serialized as `x`, still in key position. A map keyed by
@@ -622,7 +661,8 @@ file  = "src/ser.rs"
 lines = "1103-1146"
 title = "Seven compound keys — every one an error"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["custom-errors", "associated-types"]
 body = """
 The seven methods that would begin a sequence, map or struct. Each returns
@@ -639,7 +679,8 @@ file  = "src/ser.rs"
 lines = "1147-1154"
 title = "collect_str for a key — delegate"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["traits"]
 body = """
 A `Display` value used as a key is written by the main serializer's
@@ -821,7 +862,8 @@ file  = "src/ser.rs"
 lines = "1539-1575"
 title = "Formatter — every byte of output goes through here"
 kind  = "trait-item"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["traits", "default-methods", "sized-bound", "generic-params"]
 body = """
 The trait that separates what JSON means from what it looks like. The doc
@@ -973,7 +1015,8 @@ file  = "src/ser.rs"
 lines = "1819-1838"
 title = "begin_array and end_array"
 kind  = "trait-item"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["traits", "default-methods"]
 body = """
 One byte each. The interesting versions are the pretty formatter's
@@ -986,7 +1029,8 @@ file  = "src/ser.rs"
 lines = "1839-1861"
 title = "begin_array_value and end_array_value — where the comma is"
 kind  = "trait-item"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["traits", "default-methods"]
 body = """
 The comma between array elements is written before every element except the
@@ -1006,7 +1050,8 @@ file  = "src/ser.rs"
 lines = "1862-1881"
 title = "begin_object and end_object"
 kind  = "trait-item"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["traits", "default-methods"]
 body = """
 The brace counterparts of the array pair.
@@ -1018,7 +1063,8 @@ file  = "src/ser.rs"
 lines = "1882-1925"
 title = "The four key and value hooks — and where the colon goes"
 kind  = "trait-item"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["traits", "default-methods"]
 body = """
 `begin_object_key` writes the comma between entries, by the same rule as for
@@ -1058,7 +1104,8 @@ file  = "src/ser.rs"
 lines = "1937-1983"
 title = "CompactFormatter and PrettyFormatter — no state, and three fields"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["traits", "lifetimes", "default-methods"]
 body = """
 `CompactFormatter` is a unit struct, and its impl is an empty pair of braces.
@@ -1084,7 +1131,8 @@ file  = "src/ser.rs"
 lines = "1984-2016"
 title = "Pretty arrays — a newline before each value, and one before the bracket if needed"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["traits", "inlining"]
 body = """
 `begin_array_value` writes a newline, or a comma and a newline, and then
@@ -1106,7 +1154,8 @@ file  = "src/ser.rs"
 lines = "2017-2068"
 title = "Pretty objects — the same logic, and a space after the colon"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["traits", "inlining"]
 body = """
 The object methods repeat the array methods with braces.
@@ -1180,8 +1229,10 @@ file  = "src/ser.rs"
 lines = "2167-2185"
 title = "to_writer — a serializer, and one call"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["generic-params", "sized-bound", "where-clauses"]
+prereqs = ["ser-mod-0012"]
 body = """
 The base of the six public serialization functions. It builds a compact
 `Serializer` over the writer and calls `value.serialize(&mut ser)`.
@@ -1202,7 +1253,8 @@ file  = "src/ser.rs"
 lines = "2186-2205"
 title = "to_writer_pretty — the same, with the other constructor"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "23-writing-a-serializer"
 rust_features = ["generic-params", "sized-bound"]
 body = """
 Identical except for `Serializer::pretty`. The formatter is a type parameter

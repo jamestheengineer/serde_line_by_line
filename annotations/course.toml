@@ -19,9 +19,9 @@
 # `src/lib.rs` and a bare path means the first source (D12).
 #
 # Units from 22 draw from `serde_json` (PLAN.md §14, K7), qualified the same
-# way. Unit 22 is the first of eight the scope doc lists; the other seven are
-# not registered until they are written, because a planned unit with nothing
-# tagged to it would have to claim a `supplement` nobody has checked.
+# way. The scope doc lists eight; a unit is registered when it is written,
+# because a planned unit with nothing tagged to it would have to claim a
+# `supplement` nobody has checked.
 #
 # `status` is "written" once the unit's framing and its supplementary material
 # both exist; "planned" until then. The coverage gate warns on planned units so
@@ -85,6 +85,7 @@ reading_order = [
     # serde_json, bottom up: where bytes come from, then what they mean.
     "serde_json:src/read.rs",
     "serde_json:src/de.rs",
+    "serde_json:src/ser.rs",
 ]
 
 [[unit]]
@@ -1192,4 +1193,78 @@ handles them is in this unit, and the machinery behind each is not: a string
 may or may not be borrowed from the input, and a number may or may not fit in
 an integer, and each of those questions has enough in it to be read on its
 own.
+"""
+
+[[unit]]
+id = "23-writing-a-serializer"
+title = "Writing a Serializer: what to write, and what it looks like"
+supplement = "none"
+status = "written"
+prereqs = ["03-associated-types", "05-default-methods", "22-implementing-a-deserializer"]
+rust_features = ["traits", "associated-types", "default-methods", "borrow-splitting", "generic-params", "marker-types"]
+examples = ["json_document"]
+summary = """
+Units 2 to 5 read `Serializer` as a contract with thirty methods and almost
+no default bodies. This unit reads one format answering all thirty, and the
+second trait it invents so that it only has to answer once.
+"""
+body = """
+Unit 22 was the reading half of a format. This is the writing half, and it is
+the shorter story, because a serializer makes no decisions about its input.
+The type being serialized calls `serialize_bool` or `serialize_struct`, and
+the format's only question is which bytes that means.
+
+**The same first line.** `serde_core`'s `Serializer` is implemented for
+`&'a mut Serializer<W, F>`, for the reason unit 22 gave on the other side:
+the trait's methods take `self` by value, and one serializer has to write
+many values. Every nested value is `value.serialize(&mut *self)`.
+
+**Seven associated types, one answer.** Unit 3 counted the seven compound
+types and said a format may use seven different ones. JSON has two kinds of
+bracket, and all seven are `Compound`, an enum holding the borrowed
+serializer and a three-valued `State`. What tells a tuple variant from a
+plain sequence is not a field. It is which trait's `end` the caller invokes:
+`SerializeSeq::end` writes one bracket and `SerializeTupleVariant::end`
+writes a bracket and a brace. The outer object that `serialize_tuple_variant`
+left open is recorded nowhere but in the type the caller is holding.
+
+**Two traits, split on purpose.** No method of the `Serializer` impl writes a
+byte. Each one calls a method of `Formatter`, a second trait this crate
+declares, and passes it the writer. `Serializer` says what is being written in
+terms of the data model. `Formatter` says what that looks like. Read
+`serialize_newtype_variant` once slowly for the shape: eight calls, seven of
+which only tell the formatter where it is.
+
+**Unit 5, the other way round.** Unit 5 was about `serde_core` giving
+`Serializer` almost no default methods, so that silence from a format is a
+compile error. `Formatter` is the opposite design in the same file. Every one
+of its methods has a body, the bodies together are compact JSON, and
+`CompactFormatter` is a unit struct with an empty impl. `PrettyFormatter`
+overrides nine of them and keeps three fields. The difference follows from who
+implements each trait: a format that forgot `serialize_u64` would be broken,
+and a formatter that forgot `end_array_value` wants the default.
+
+**Commas go before, not after.** `State::First` and `State::Rest` are the
+whole of the separator logic. A serializer cannot know an element is the last
+one until `end` is called, so the comma is written in front of every element
+but the first. It is the same single flag `SeqAccess` kept in unit 22, on the
+side that produces the punctuation instead of checking it.
+
+**A second serializer, for keys.** JSON object keys are strings and Rust map
+keys are not. `SerializeMap::serialize_key` does not pass the key to the
+serializer you have been reading. It wraps the borrow in `MapKeySerializer`,
+a different type with its own impl of all thirty methods: integers and
+booleans are written between quotation marks, and the seven compound methods
+return errors. Their associated types are `serde_core`'s `Impossible`, the
+uninhabited type from unit 9, so the signatures already say that `Err` is the
+only thing those methods can return.
+
+End on `to_writer`. It builds a `Serializer` and calls
+`value.serialize(&mut ser)`, and that one call is the handover, as
+`T::deserialize(&mut de)` was in `from_trait`.
+
+Four things in this file are left for later units: the string scanner and its
+escape table, the float methods and what they do with NaN, the two emitter
+types that exist only behind a feature, and the unchecked conversion inside
+`to_string`.
 """
