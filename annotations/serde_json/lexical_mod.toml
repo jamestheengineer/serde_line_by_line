@@ -7,7 +7,8 @@ file  = "src/lexical/mod.rs"
 lines = "1-12"
 title = "lexical — somebody else's float parser, and why it is here"
 kind  = "doc-contract"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "25-numbers-and-round-tripping"
 rust_features = ["modules"]
 body = """
 The header comment is a statement of origin and of intent. This module is a

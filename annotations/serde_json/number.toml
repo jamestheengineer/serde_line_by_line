@@ -30,7 +30,8 @@ file  = "src/number.rs"
 lines = "20-71"
 title = "Number and N — three variants with one representation per value"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "25-numbers-and-round-tripping"
 rust_features = ["pattern-matching", "traits", "cfg", "visibility"]
 body = """
 `Number` is a public struct with one private field. Nothing outside this
@@ -100,7 +101,8 @@ file  = "src/number.rs"
 lines = "130-172"
 title = "as_i64, as_u64, as_f64"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "25-numbers-and-round-tripping"
 rust_features = ["cfg", "option", "pattern-matching"]
 body = """
 `as_i64` and `as_u64` return the integer when the stored value is an integer
@@ -117,7 +119,8 @@ file  = "src/number.rs"
 lines = "173-200"
 title = "from_f64 — the gate that keeps NaN out"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "25-numbers-and-round-tripping"
 rust_features = ["option", "cfg"]
 body = """
 The constructor for a float, returning `None` for NaN and infinity.
@@ -412,8 +415,10 @@ file  = "src/number.rs"
 lines = "700-739"
 title = "From ParserNumber — the parser's result becomes a Number"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "25-numbers-and-round-tripping"
 rust_features = ["traits", "cfg", "pattern-matching"]
+prereqs = ["json-de-0006"]
 body = """
 The bridge from `de.rs`. Each of the parser's variants maps to the matching
 variant of `N`, or to formatted text under `arbitrary_precision`.

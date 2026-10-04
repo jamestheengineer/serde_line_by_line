@@ -86,8 +86,10 @@ file  = "src/ser.rs"
 lines = "154-181"
 title = "f32 and f64 — NaN and infinity become null"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "25-numbers-and-round-tripping"
 rust_features = ["pattern-matching"]
+prereqs = ["ser-mod-0024"]
 body = """
 JSON numbers cannot express NaN or infinity. The grammar has no spelling for
 them.
@@ -915,7 +917,8 @@ file  = "src/ser.rs"
 lines = "1675-1724"
 title = "write_f32 and write_f64 — and a precondition in the doc comment"
 kind  = "trait-item"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "25-numbers-and-round-tripping"
 rust_features = ["traits", "default-methods"]
 body = """
 Floats are formatted by `zmij`, a crate that does for floats what `itoa` does

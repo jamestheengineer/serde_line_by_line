@@ -1,0 +1,46 @@
+text -> Value
+  1                      PosInt   prints as 1
+  -1                     NegInt   prints as -1
+  1.0                    Float    prints as 1.0
+  1e2                    Float    prints as 100.0
+  -0                     Float    prints as -0.0
+  18446744073709551615   PosInt   prints as 18446744073709551615
+  18446744073709551616   Float    prints as 1.8446744073709552e+19
+  -9223372036854775808   NegInt   prints as -9223372036854775808
+  -9223372036854775809   Float    prints as -9.223372036854776e+18
+
+text -> u8
+  255   ok     255
+  256   error  invalid value: integer `256`, expected u8 at line 1 column 3
+  -1    error  invalid value: integer `-1`, expected u8 at line 1 column 2
+  1.0   error  invalid type: floating point `1.0`, expected u8 at line 1 column 3
+
+text -> f64
+  1      ok     1.0
+  0.1    ok     0.1
+  1e400  error  number out of range at line 1 column 5
+
+f64 -> text
+  0.1                      0.1
+  1.0                      1.0
+  1e21                     1e+21
+  1.7976931348623157e308   1.7976931348623157e+308
+  -0.0                     -0.0
+  NaN                      null
+  inf                      null
+  0.1f32                   0.1
+  0.1f32 as f64            0.10000000149011612
+
+NaN -> null -> error: invalid type: null, expected f64 at line 1 column 4
+NaN -> null -> as Option<f64>: None
+
+text         2.2250738585072011e-308
+serde_json   0x0010000000000000  2.2250738585072014e-308
+str::parse   0x000fffffffffffff  2.225073858507201e-308
+same float   false
+
+0.1                      back to the same bits: true
+0.3333333333333333       back to the same bits: true
+1.7976931348623157e+308  back to the same bits: true
+2.2250738585072014e-308  back to the same bits: true
+5e-324                   back to the same bits: true

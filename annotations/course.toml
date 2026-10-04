@@ -85,6 +85,10 @@ reading_order = [
     # serde_json, bottom up: where bytes come from, then what they mean.
     "serde_json:src/read.rs",
     "serde_json:src/de.rs",
+    "serde_json:src/number.rs",
+    "serde_json:src/lexical/mod.rs",
+    "serde_json:src/lexical/parse.rs",
+    "serde_json:src/lexical/algorithm.rs",
     "serde_json:src/ser.rs",
 ]
 
@@ -1348,4 +1352,91 @@ Four `unsafe` blocks sit in the code this unit covers: a pointer subtraction
 in `skip_to_escape`, and in the writer two unchecked conversions and an
 `unreachable_unchecked`. Each annotation gives the argument for its own. A
 later unit reads those arguments side by side with the rest of the crate's.
+"""
+
+[[unit]]
+id = "25-numbers-and-round-tripping"
+title = "Numbers, and what survives a round trip"
+supplement = "none"
+status = "written"
+prereqs = ["04-generic-bounds", "22-implementing-a-deserializer", "23-writing-a-serializer"]
+rust_features = ["pattern-matching", "option", "result", "macro-rules", "cfg", "traits"]
+examples = ["json_numbers"]
+summary = """
+JSON has one number type and the data model has a dozen. This unit reads the
+parser deciding which one a run of digits is, the arithmetic it does so
+without overflowing, and the two places where a number written out does not
+come back as it went in.
+"""
+body = """
+Unit 4 read `visit_i8` through `visit_i64` and found serde's widening policy
+in their default bodies: a visitor that only implements `visit_i64` still
+accepts an `i8`. That was the receiving side of a negotiation. This unit is
+the sending side, in a format whose numbers carry no type at all.
+
+**Three shapes, chosen from the text.** `ParserNumber` is `U64`, `I64` or
+`F64`, and those are the only three calls the parser ever makes into a
+visitor. A `.` or an `e` after the integer digits makes a float. Otherwise the
+sign decides between the other two. The typed methods do not change this:
+`deserialize_u8` and `deserialize_i64` are one macro invocation each and run
+the same function, and neither uses the width in its name. The example's
+second block shows whose check it is. `256` into a `u8` is an error that says
+"expected u8", and that sentence was written by `serde_core`'s visitor, not by
+the parser.
+
+**Overflow is tested before it happens.** `parse_integer` accumulates digits
+with `significand * 10 + digit`. In a debug build that expression panics when
+it overflows, and in a release build it wraps, and neither is acceptable in a
+parser. `overflow!` asks the question without doing the multiplication, by
+comparing against `u64::MAX / 10`. The macro's matcher contains the literal
+tokens `* 10 +`, so the call site reads as the arithmetic it guards.
+
+**When the digits do not fit, the answer is a float, not an error.**
+`18446744073709551615` is `u64::MAX` and comes back an integer. Add one and
+it comes back `1.8446744073709552e+19`. The same happens one past the bottom
+of `i64`. A JSON integer may have any number of digits, and upstream chose
+the nearest `f64` over a refusal.
+
+**Negative zero is the careful case.** `parse_number` negates with
+`wrapping_neg` and then tests whether the result is negative. That one test
+catches a magnitude too large for `i64`, where the cast wrapped, and a
+magnitude of zero. Both become floats. `-0` is the `f64` negative zero
+because an integer would have thrown the sign away.
+
+**`checked`, `wrapping`, `saturating`.** Rust makes you say what you want
+from arithmetic that might not fit, and the code in this unit uses all three
+on purpose.
+`wrapping_neg` where the wrapped value is itself the signal.
+`saturating_add` on exponents, where a clamped exponent gives the same
+answer as the true one. `checked_mul` in the float fast path, where failure
+means "take the slower path". Read each as a decision, because each is one.
+
+**Out is the easy direction.** `write_f64` asks `zmij` for the shortest
+decimal text that reads back as the same float, so `0.1` is written `0.1`.
+`f32` has its own method for the reason the example's two `0.1f32` lines
+show: the shortest text depends on the width.
+
+**Two things do not round trip, and the example runs both.** NaN and the
+infinities serialize as `null`, without an error, and `null` does not read
+back as an `f64`. That is `serialize_f64`'s `match` on `classify()`.
+
+The other is subtler and is the reason a fifth of this crate exists. The
+default conversion in `f64_from_parts` turns the significand into a float
+and then multiplies or divides by a power of ten from a table. Those are two
+roundings, and two roundings can land one float away from the nearest one.
+The example parses `2.2250738585072011e-308` and prints the bits beside the
+standard library's answer for the same text. They differ in the last place.
+
+With the `float_roundtrip` feature the same function has a different body,
+and calls `lexical::parse_concise_float`. Read that function as an outline:
+a fast path where one floating-point operation is provably exact, a moderate
+path that tracks its own error, and a slow path in big-integer arithmetic.
+The module's header says what it is for. Every float the serializer writes
+must read back to the same bits, and parsing arbitrary digit strings
+perfectly is explicitly not the goal.
+
+That is two functions with one name under opposite `#[cfg]`s, and it is the
+first of many in this crate. What the feature buys is a parse that is right
+in the last bit. What it costs is nineteen files that a default build never
+compiles.
 """

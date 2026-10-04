@@ -21,7 +21,8 @@ file  = "src/lexical/algorithm.rs"
 lines = "12-70"
 title = "fast_path — when one floating-point operation is exact"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "25-numbers-and-round-tripping"
 rust_features = ["generic-params", "option"]
 body = """
 IEEE arithmetic guarantees that a single multiplication or division of two

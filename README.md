@@ -37,11 +37,11 @@ the way through and running the expansion in your browser.
 >
 > `serde_json` is the third `coverage` source as of PLAN.md §14. Every line of
 > it is claimed — 18,359 of 18,359, in 566 annotations — and all 38 of its
-> files are named complete. Three of its eight course units are written:
-> unit 22, on implementing a `Deserializer`, unit 23, on writing a
-> `Serializer`, and unit 24, on strings and borrowing from the input. The
-> other five are not, and until they are this file leaves the first two
-> crates' sections as they stood.
+> files are named complete. Four of its eight course units are written:
+> implementing a `Deserializer` (22), writing a `Serializer` (23), strings
+> and borrowing from the input (24), and numbers (25). The other four are
+> not, and until they are this file leaves the first two crates' sections as
+> they stood.
 >
 > **Reference** — every line of both annotated crates: `serde_core`'s 19 files
 > and `serde_derive`'s 28, all at 100% and all listed in their
@@ -102,7 +102,7 @@ the way through and running the expansion in your browser.
 > serde_derive-1.0.229        coverage        28     8975  every line claimed
 > serde_json-1.0.151          coverage        38    18359  every line claimed
 > …
-> course track: 24/24 units written
+> course track: 25/25 units written
 > narrative track derive: 9 units, 85 steps, 1649 of serde_derive-1.0.229's 8975 lines cited
 > narrative track json: 9 units, 104 steps, 2258 of serde_json-1.0.151's 18359 lines cited
 > ```

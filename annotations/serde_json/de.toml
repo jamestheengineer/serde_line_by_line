@@ -111,7 +111,8 @@ file  = "src/de.rs"
 lines = "101-108"
 title = "overflow! — would a times ten plus b exceed c?"
 kind  = "macro-def"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "25-numbers-and-round-tripping"
 rust_features = ["macro-rules", "macro-hygiene"]
 body = """
 A macro that answers one question without performing the multiplication that
@@ -138,8 +139,10 @@ file  = "src/de.rs"
 lines = "109-141"
 title = "ParserNumber — the three shapes a JSON number can take"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "25-numbers-and-round-tripping"
 rust_features = ["pattern-matching", "cfg", "trait-objects"]
+prereqs = ["de-mod-0046", "de-mod-0048"]
 body = """
 JSON has one number type. Serde's data model has many. This enum is the
 parser's decision about which one a given run of digits is: an unsigned
@@ -327,8 +330,10 @@ file  = "src/de.rs"
 lines = "318-344"
 title = "deserialize_number — the shared body of twelve methods"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "25-numbers-and-round-tripping"
 rust_features = ["generic-params", "lifetimes", "result"]
+prereqs = ["de-mod-0030", "json-de-0006"]
 body = """
 Every integer and float method of the `Deserializer` impl funnels into this
 function through a macro you will meet further down.
@@ -462,8 +467,10 @@ file  = "src/de.rs"
 lines = "462-508"
 title = "parse_integer — digits into a u64, until they do not fit"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "25-numbers-and-round-tripping"
 rust_features = ["pattern-matching", "macro-rules"]
+prereqs = ["json-de-0005"]
 body = """
 The caller has dealt with any minus sign. This reads the integer part.
 
@@ -487,8 +494,10 @@ file  = "src/de.rs"
 lines = "509-529"
 title = "parse_number — integer, or float, or negative zero"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "25-numbers-and-round-tripping"
 rust_features = ["pattern-matching"]
+prereqs = ["json-de-0020"]
 body = """
 After the integer digits, one byte decides the type. A `.` or an `e` makes it
 a float. Anything else ends the number as an integer.
@@ -509,8 +518,10 @@ file  = "src/de.rs"
 lines = "530-566"
 title = "parse_decimal — fraction digits, counted as a negative exponent"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "25-numbers-and-round-tripping"
 rust_features = ["pattern-matching"]
+prereqs = ["json-de-0021"]
 body = """
 The fraction is folded into the same integer significand. Each digit after
 the point multiplies the significand by ten and decrements an exponent, so
@@ -534,8 +545,10 @@ file  = "src/de.rs"
 lines = "567-622"
 title = "parse_exponent — a sign, at least one digit, and saturation"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "25-numbers-and-round-tripping"
 rust_features = ["pattern-matching"]
+prereqs = ["json-de-0022"]
 body = """
 The `e` is consumed, then an optional sign, then a required digit. `1e` and
 `1e+` are both errors, with a different code depending on whether input ran
@@ -558,8 +571,10 @@ file  = "src/de.rs"
 lines = "623-637"
 title = "f64_from_parts with float_roundtrip — delegate to lexical"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "25-numbers-and-round-tripping"
 rust_features = ["cfg", "generic-params"]
+prereqs = ["json-de-0023"]
 body = """
 The first of two functions with this name. This one is compiled when the
 `float_roundtrip` feature is on.
@@ -579,8 +594,10 @@ file  = "src/de.rs"
 lines = "638-673"
 title = "f64_from_parts by default — one multiplication or one division"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "25-numbers-and-round-tripping"
 rust_features = ["cfg", "option"]
+prereqs = ["json-de-0024"]
 body = """
 The default conversion. It turns the significand into an `f64` and scales it
 by a power of ten from the `POW10` table.
@@ -605,7 +622,8 @@ file  = "src/de.rs"
 lines = "674-713"
 title = "parse_long_integer with float_roundtrip — keep every digit, as text"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "25-numbers-and-round-tripping"
 rust_features = ["cfg", "inlining", "collections"]
 body = """
 Reached when the integer part has more digits than a `u64` can hold. With
@@ -631,8 +649,10 @@ file  = "src/de.rs"
 lines = "714-739"
 title = "parse_long_integer by default — count the digits and drop them"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "25-numbers-and-round-tripping"
 rust_features = ["cfg", "inlining"]
+prereqs = ["json-de-0026"]
 body = """
 The default build's answer to the same situation, and it is much shorter. The
 significand stays as it is. Each further digit is consumed and discarded, and
@@ -725,7 +745,8 @@ file  = "src/de.rs"
 lines = "834-854"
 title = "parse_decimal_overflow by default — ignore the rest"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "25-numbers-and-round-tripping"
 rust_features = ["cfg", "inlining"]
 body = """
 Without `float_roundtrip`, further fraction digits are skipped. The comment
@@ -745,7 +766,8 @@ file  = "src/de.rs"
 lines = "855-875"
 title = "parse_exponent_overflow — when the exponent itself does not fit"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "25-numbers-and-round-tripping"
 rust_features = ["inlining"]
 body = """
 An exponent beyond `i32::MAX` in magnitude leaves only two possible answers,
@@ -1053,7 +1075,8 @@ file  = "src/de.rs"
 lines = "1341-1355"
 title = "deserialize_number! — one method per invocation"
 kind  = "macro-def"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "25-numbers-and-round-tripping"
 rust_features = ["macro-rules"]
 body = """
 A macro that writes a `Deserializer` trait method whose whole body is a call
@@ -1173,8 +1196,10 @@ file  = "src/de.rs"
 lines = "1420-1424"
 title = "The number arms — a sign, or a digit"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "25-numbers-and-round-tripping"
 rust_features = ["pattern-matching"]
+prereqs = ["json-de-0006"]
 body = """
 A `-` is consumed and the number parsed as negative. A digit is left in place
 and the number parsed as positive.
@@ -1281,7 +1306,8 @@ file  = "src/de.rs"
 lines = "1500-1516"
 title = "Twelve numeric methods from one macro"
 kind  = "macro-use"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "25-numbers-and-round-tripping"
 rust_features = ["macro-rules", "cfg"]
 macro_def = "json-de-0046"
 body = """

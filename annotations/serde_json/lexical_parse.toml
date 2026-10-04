@@ -21,8 +21,10 @@ file  = "src/lexical/parse.rs"
 lines = "12-40"
 title = "parse_concise_float — three paths, tried in order"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "25-numbers-and-round-tripping"
 rust_features = ["generic-params", "where-clauses", "option"]
+prereqs = ["json-de-0024"]
 body = """
 The entry point when every digit of the number fitted in a `u64`. It is
 generic over `F: Float`, which is `f32` or `f64`.
