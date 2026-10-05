@@ -7,7 +7,8 @@ file  = "src/iter.rs"
 lines = "1-21"
 title = "LineColIterator — three counters around a byte iterator"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "27-errors-that-carry-a-position"
 rust_features = ["generic-params", "iterators"]
 body = """
 This is the stream reader's position tracker. It wraps any iterator of bytes
@@ -47,7 +48,8 @@ file  = "src/iter.rs"
 lines = "48-70"
 title = "Iterator for LineColIterator — counting on the way through"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "27-errors-that-carry-a-position"
 rust_features = ["iterators", "pattern-matching", "associated-types"]
 body = """
 Every item is passed through unchanged. The match exists to update counters.

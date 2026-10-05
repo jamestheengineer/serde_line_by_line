@@ -239,8 +239,10 @@ file  = "src/lib.rs"
 lines = "408-418"
 title = "tri! — the question mark, without the conversion"
 kind  = "macro-def"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "27-errors-that-carry-a-position"
 rust_features = ["macro-rules", "result", "zero-cost"]
+prereqs = ["crate-root-0006"]
 body = """
 The macro you have seen on nearly every fallible line of this crate. It
 matches a `Result`, yields the value on `Ok`, and returns the error on

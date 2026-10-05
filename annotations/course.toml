@@ -82,7 +82,11 @@ reading_order = [
     "serde_derive:src/de/enum_adjacently.rs",
     "serde_derive:src/de/enum_untagged.rs",
 
-    # serde_json, bottom up: where bytes come from, then what they mean.
+    # serde_json, bottom up: the crate root and the error every function
+    # returns, where bytes come from, then what they mean.
+    "serde_json:src/lib.rs",
+    "serde_json:src/error.rs",
+    "serde_json:src/iter.rs",
     "serde_json:src/read.rs",
     "serde_json:src/de.rs",
     "serde_json:src/number.rs",
@@ -1532,4 +1536,92 @@ panic at run time, and the documentation says so.
 The example's `json!` line was written with its keys in the order `z`, `a`,
 `computed`, and they print sorted. `Map` is a `BTreeMap` in this build. It
 does not have to be, and that is the next unit but one.
+"""
+
+[[unit]]
+id = "27-errors-that-carry-a-position"
+title = "Errors that carry a position"
+supplement = "none"
+status = "written"
+prereqs = ["13-errors-and-control-flow", "22-implementing-a-deserializer"]
+rust_features = ["custom-errors", "result", "smart-pointers", "closures", "pattern-matching", "traits"]
+examples = ["json_errors"]
+summary = """
+Unit 13 ended on a constraint: `Error::custom` cannot see the input, so a
+position has to be attached by the format afterwards. This unit reads a
+format doing it, and the three places where "afterwards" turns out to be
+approximate.
+"""
+body = """
+Unit 13 studied `de::Error` as a trait a format must implement and observed
+that its constructors take no `self`. Whoever calls `custom` has a message
+and nothing else. `serde_json`'s errors say "at line 3 column 14" anyway.
+This unit is how.
+
+**One pointer wide.** `Error` is a struct around a `Box`. The comment on the
+field is a measurement: a wider error made the crate substantially slower.
+Nearly every function in the parser returns `Result<T, Error>`, a `Result`
+is as wide as its wider variant, and so the size of the error is paid on
+every successful return. Boxing moves the cost to the path that fails. What
+is in the box is a code, a line and a column, and the code is `pub(crate)`.
+A caller gets `classify` and the message text, and upstream stays free to
+add codes.
+
+**Where is "here"? Two readers, two answers.** The slice reader keeps no line
+counter at all. `position_of_index` searches backwards for the last newline
+and counts the ones before it, when asked and not before, on the stated
+ground that positions are only wanted for errors. A stream cannot be searched
+after the fact, so `LineColIterator` counts as bytes go past. The example
+parses the same three-line input both ways and the positions agree.
+
+**Consumed, or only looked at.** The parser has one byte of lookahead, and
+an error may be about the byte just consumed or the byte just peeked. Those
+are one column apart. So there are two position methods on `Read`, and two
+error constructors in `de.rs`, and nothing in the types says which a call
+site needs. Each one was chosen by hand.
+
+**Errors from somewhere else.** A visitor that rejects a value, or a
+`Deserialize` impl that calls `custom`, builds an error with line 0, which
+this crate uses to mean "no position". `fix_position` is the repair. It
+takes such an error apart and rebuilds it at the parser's current position,
+through a closure, and leaves alone an error that already has one. It is
+called at the tail of most `Deserializer` methods, on whatever came back
+from the visitor.
+
+That is the mechanism unit 13 said a format would need. Running it shows
+where it is approximate, and the example has all three cases.
+
+*The position is the parser's, not the value's.* The example's first custom
+error is raised for a string on line 2 of an array and is reported at line 3
+column 1, which is the closing bracket. `deserialize_seq` calls `end_seq`
+before it looks at what the visitor returned, so by the time the error is
+stamped the parser has moved on.
+
+*An error can miss the parser entirely.* The same impl at the top level
+reports line 0 column 0. It read its string successfully, the parser method
+returned `Ok`, and the error was made afterwards and handed straight to
+`from_str`. No `Deserializer` method was on the way out to stamp it.
+
+*A position can come from the message.* Some crates pass errors through
+`custom` by formatting them to a string, which would lose the numbers.
+`make_error` gets them back by parsing " at line L column C" off the end of
+any custom message. The example's third case is a message that merely ends
+that way. Its input has one line, and the error says line 3.
+
+**`classify`, and an exhaustive match.** Four public categories from
+twenty-five private codes, in a `match` with no wildcard arm, so adding a
+code without filing it is a compile error. The filing is coarse. A map key
+that is not a string is a serialization failure with no input at all, and
+the example shows it classified as `Syntax` at line 0.
+
+**`tri!`, again.** Unit 13 read `serde_core`'s reason for writing `tri!`
+where you would write `?`. `serde_json` defines its own, for the same reason
+with its own measurement: `?` passes the error through `From::from`, a crate
+with one error type never needs that conversion, and leaving it out was four
+percent fewer lines of LLVM IR.
+
+What this crate does not show is still what unit 13 said was missing: an
+application's error enum with `From` impls and `?`. The one `From` here goes
+the other way, turning a `serde_json::Error` into an `io::Error` for callers
+who have one.
 """

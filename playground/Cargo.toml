@@ -22,6 +22,7 @@ default_methods = { path = "../examples/default_methods" }
 error_custom = { path = "../examples/error_custom" }
 iterator_by_hand = { path = "../examples/iterator_by_hand" }
 json_document = { path = "../examples/json_document" }
+json_errors = { path = "../examples/json_errors" }
 json_numbers = { path = "../examples/json_numbers" }
 json_value = { path = "../examples/json_value" }
 lifetime_basics = { path = "../examples/lifetime_basics" }

@@ -1,0 +1,40 @@
+Error is one pointer wide: true
+
+a stray comma: [1,,2]
+  display   expected value at line 1 column 4
+  debug     Error("expected value", line: 1, column: 4)
+  category  Syntax
+
+input that stops: [1,
+  display   EOF while parsing a value at line 1 column 3
+  debug     Error("EOF while parsing a value", line: 1, column: 3)
+  category  Eof
+
+the wrong type: [1,"two"]
+  display   invalid type: string "two", expected u8 at line 1 column 8
+  debug     Error("invalid type: string \"two\", expected u8", line: 1, column: 8)
+  category  Data
+
+three lines, from a slice    expected value at line 3 column 3
+three lines, from a reader   expected value at line 3 column 3
+
+custom("not today"), as an array element
+  display   not today at line 3 column 1
+  position  line 3 column 1
+  category  Data
+
+custom("not today"), at the top level
+  display   not today
+  position  line 0 column 0
+  category  Data
+
+custom("lost at line 3 column 4"), as an array element
+  display   lost at line 3 column 4
+  position  line 3 column 4
+  category  Data
+
+a map keyed by Vec<i32>, serialized
+  display   key must be a string
+  position  line 0 column 0
+  category  Syntax
+

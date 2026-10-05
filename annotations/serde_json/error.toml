@@ -26,7 +26,8 @@ file  = "src/error.rs"
 lines = "15-26"
 title = "Error — one pointer wide"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "27-errors-that-carry-a-position"
 rust_features = ["smart-pointers", "custom-errors", "result"]
 body = """
 The public error type is a struct holding a `Box`. The doc comment on the
@@ -50,7 +51,8 @@ file  = "src/error.rs"
 lines = "27-47"
 title = "line and column — one-based, except when they are zero"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "27-errors-that-carry-a-position"
 rust_features = ["custom-errors"]
 body = """
 Two accessors with careful doc comments. Lines and columns are counted from
@@ -71,7 +73,8 @@ file  = "src/error.rs"
 lines = "48-113"
 title = "classify — four categories from twenty-five codes"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "27-errors-that-carry-a-position"
 rust_features = ["pattern-matching", "custom-errors"]
 body = """
 `classify` maps the private error code to a public category. The match is
@@ -115,7 +118,8 @@ file  = "src/error.rs"
 lines = "164-186"
 title = "Category"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "27-errors-that-carry-a-position"
 rust_features = ["traits"]
 body = """
 The public enum `classify` returns. It derives `Copy`, `PartialEq` and
@@ -131,7 +135,8 @@ file  = "src/error.rs"
 lines = "187-229"
 title = "From Error for io::Error — unwrap it, or wrap it"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "27-errors-that-carry-a-position"
 rust_features = ["cfg", "traits", "pattern-matching"]
 body = """
 A `serde_json::Error` can be converted into an `io::Error`. If it was
@@ -153,8 +158,10 @@ file  = "src/error.rs"
 lines = "230-312"
 title = "ErrorImpl and ErrorCode — what is inside the box"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "27-errors-that-carry-a-position"
 rust_features = ["custom-errors", "visibility", "smart-pointers"]
+prereqs = ["json-error-0002"]
 body = """
 `ErrorImpl` is the boxed payload: a code, a line and a column.
 
@@ -180,8 +187,10 @@ file  = "src/error.rs"
 lines = "313-348"
 title = "syntax, io, fix_position — three constructors"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "27-errors-that-carry-a-position"
 rust_features = ["custom-errors", "closures", "inlining"]
+prereqs = ["json-error-0008"]
 body = """
 `syntax` builds an error with a code and a position. It is the constructor
 `read.rs` and `de.rs` call. Serializers call it too, with zeros.
@@ -204,7 +213,8 @@ file  = "src/error.rs"
 lines = "349-388"
 title = "Display for ErrorCode — the message text"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "27-errors-that-carry-a-position"
 rust_features = ["traits", "pattern-matching"]
 body = """
 One string per code. These are the messages users see, and several are
@@ -238,7 +248,8 @@ file  = "src/error.rs"
 lines = "399-418"
 title = "Display for Error — the position is a suffix"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "27-errors-that-carry-a-position"
 rust_features = ["traits"]
 body = """
 `Error`'s `Display` forwards to `ErrorImpl`'s. That impl prints the code,
@@ -254,7 +265,8 @@ file  = "src/error.rs"
 lines = "419-432"
 title = "Debug for Error — written for unwrap"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "27-errors-that-carry-a-position"
 rust_features = ["traits"]
 body = """
 The comment explains the audience. `unwrap()` on an `Err` prints the
@@ -271,8 +283,10 @@ file  = "src/error.rs"
 lines = "433-480"
 title = "de::Error and ser::Error — custom messages, and JSON's own words"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "27-errors-that-carry-a-position"
 rust_features = ["traits", "custom-errors", "trait-objects"]
+prereqs = ["de-mod-0008", "de-mod-0009"]
 body = """
 Both of `serde_core`'s `Error` traits require `custom`, which takes any
 `Display` value. Both impls format it to a string and call `make_error`.
@@ -294,8 +308,10 @@ file  = "src/error.rs"
 lines = "481-541"
 title = "make_error — parsing a position back out of a message"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "27-errors-that-carry-a-position"
 rust_features = ["strings", "option"]
+prereqs = ["json-error-0012"]
 body = """
 The comment states the problem. Some crates, `erased-serde` among them,
 pass errors through `de::Error::custom` by formatting them and rebuilding

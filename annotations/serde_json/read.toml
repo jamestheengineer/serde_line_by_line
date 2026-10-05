@@ -61,8 +61,10 @@ file  = "src/read.rs"
 lines = "37-61"
 title = "position, peek_position and byte_offset — three answers to \"where?\""
 kind  = "trait-item"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "27-errors-that-carry-a-position"
 rust_features = ["traits", "custom-errors"]
+prereqs = ["json-read-0002"]
 body = """
 Two of these exist for error messages and say so: "only called in case of an
 error, so performance is not important". That sentence is a design decision.
@@ -163,7 +165,8 @@ file  = "src/read.rs"
 lines = "118-123"
 title = "Position — a line and a column, and nothing else"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "27-errors-that-carry-a-position"
 rust_features = ["visibility"]
 body = """
 Two `usize` fields. `Position` is `pub` with `pub` fields because it crosses
@@ -425,7 +428,8 @@ file  = "src/read.rs"
 lines = "421-431"
 title = "position_of_index — a line and column computed only when asked"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "27-errors-that-carry-a-position"
 rust_features = ["strings", "iterators"]
 body = """
 This function is the reason the slice reader keeps no line counter. It turns a
@@ -600,8 +604,10 @@ file  = "src/read.rs"
 lines = "573-586"
 title = "SliceRead positions — why peek_position adds one"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "27-errors-that-carry-a-position"
 rust_features = ["custom-errors"]
+prereqs = ["json-read-0018"]
 body = """
 `position` asks for the position of `self.index`, which after a `next` is one
 past the byte just consumed. `position_of_index` turns that into a one-based
@@ -883,7 +889,8 @@ file  = "src/read.rs"
 lines = "840-871"
 title = "Four helpers — end of input as an error, and where errors are built"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "27-errors-that-carry-a-position"
 rust_features = ["generic-params", "sized-bound", "result", "closures"]
 body = """
 `next` and `peek` return `Ok(None)` at end of input. Inside a string that is

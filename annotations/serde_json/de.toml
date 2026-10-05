@@ -258,8 +258,10 @@ file  = "src/de.rs"
 lines = "239-252"
 title = "error and peek_error — the same error at two positions"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "27-errors-that-carry-a-position"
 rust_features = ["custom-errors", "inlining"]
+prereqs = ["json-read-0003"]
 body = """
 Both build `Error::syntax` from a code and a position. They differ in which
 position method they call, and the doc comments say when to use each: `error`
@@ -300,8 +302,10 @@ file  = "src/de.rs"
 lines = "268-317"
 title = "peek_invalid_type — parsing a value in order to complain about it"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "27-errors-that-carry-a-position"
 rust_features = ["custom-errors", "pattern-matching", "trait-objects"]
+prereqs = ["de-mod-0009"]
 body = """
 This runs when a typed method finds the wrong kind of value, such as
 `deserialize_bool` meeting a string. The error should say what was found, and
@@ -426,8 +430,10 @@ file  = "src/de.rs"
 lines = "440-444"
 title = "fix_position — adding a line and column after the fact"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "27-errors-that-carry-a-position"
 rust_features = ["closures", "custom-errors"]
+prereqs = ["json-error-0009"]
 body = """
 Errors raised by a visitor or by a `Deserialize` impl come from
 `de::Error::custom` and its relatives. They are created by code that has no
