@@ -211,7 +211,8 @@ file  = "src/de.rs"
 lines = "169-218"
 title = "disable_recursion_limit — a switch with a long warning attached"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["cfg"]
 body = """
 One line of code under forty-three lines of documentation, and the ratio is
@@ -853,8 +854,10 @@ file  = "src/de.rs"
 lines = "937-955"
 title = "parse_any_number with arbitrary_precision — text first, integers if they fit"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["cfg", "strings"]
+prereqs = ["json-de-0006"]
 body = """
 With `arbitrary_precision` the number is scanned into a `String` exactly as
 written. Nothing is rounded because nothing is converted.
@@ -1105,7 +1108,8 @@ file  = "src/de.rs"
 lines = "1356-1371"
 title = "if_checking_recursion_limit! — a macro defined twice"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["macro-rules", "macro-repetition", "cfg"]
 body = """
 Two definitions with the same name under opposite `#[cfg]`s, so exactly one
@@ -1452,8 +1456,10 @@ file  = "src/de.rs"
 lines = "1720-1736"
 title = "deserialize_newtype_struct — transparent, with one reserved name"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["cfg", "strings"]
+prereqs = ["de-mod-0037"]
 body = """
 A newtype struct is deserialized as its inner value. `struct Meters(f64)`
 reads from `1.5`, with no wrapping in the JSON.

@@ -268,8 +268,10 @@ file  = "src/raw.rs"
 lines = "342-354"
 title = "TOKEN, and Serialize for RawValue"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["traits", "strings"]
+prereqs = ["json-number-0012"]
 body = """
 The reserved name for raw values, and the three lines that start the
 protocol on the serializing side. The text is sent as a struct named

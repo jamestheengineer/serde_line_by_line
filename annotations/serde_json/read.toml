@@ -7,7 +7,8 @@ file  = "src/read.rs"
 lines = "1-21"
 title = "Imports, and three features visible before any code"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["cfg", "no-std", "modules"]
 body = """
 The import list tells you what this file can do without the standard library,
@@ -116,8 +117,10 @@ file  = "src/read.rs"
 lines = "90-104"
 title = "Raw buffering — two methods that exist only with raw_value"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["cfg", "generic-params"]
+prereqs = ["json-read-0002"]
 body = """
 `RawValue` holds a piece of JSON as unparsed text. To produce one, the
 deserializer needs the exact bytes a value occupied, and only the reader has
@@ -140,7 +143,8 @@ file  = "src/read.rs"
 lines = "105-117"
 title = "should_early_return_if_failed — a constant so a check can compile away"
 kind  = "trait-item"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["associated-types", "zero-cost", "monomorphization"]
 body = """
 These two serve `StreamDeserializer`, the iterator over several JSON values

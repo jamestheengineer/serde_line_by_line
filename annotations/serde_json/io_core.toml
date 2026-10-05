@@ -23,7 +23,8 @@ file  = "src/io/core.rs"
 lines = "8-29"
 title = "An Error that cannot occur"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["no-std", "custom-errors"]
 body = """
 `Error` is a unit struct and `ErrorKind` has one variant. They exist so that

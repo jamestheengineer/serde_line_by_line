@@ -7,7 +7,8 @@ file  = "build.rs"
 lines = "1-6"
 title = "A build script that declares the cfg it is about to set"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["cfg"]
 body = """
 This file is not under `src/`. It is compiled and run by Cargo before the
@@ -27,8 +28,10 @@ file  = "build.rs"
 lines = "7-30"
 title = "fast_arithmetic — choosing a limb width the target does well"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["cfg"]
+prereqs = ["json-build-0001"]
 body = """
 The script answers one question: is 64-bit arithmetic cheap on this target?
 It prints `fast_arithmetic="64"` or `"32"`, and code under `src/` picks a type

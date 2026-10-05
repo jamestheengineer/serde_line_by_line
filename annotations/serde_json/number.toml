@@ -7,7 +7,8 @@ file  = "src/number.rs"
 lines = "1-19"
 title = "Imports, and the reserved token"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["cfg", "modules", "visibility"]
 body = """
 Count the `#[cfg(feature = "arbitrary_precision")]` attributes in this
@@ -61,8 +62,10 @@ file  = "src/number.rs"
 lines = "72-74"
 title = "N with arbitrary_precision — a String"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["cfg", "strings"]
+prereqs = ["json-number-0002"]
 body = """
 With the feature on, `N` is a type alias for `String`, and a number is its
 decimal text.
@@ -172,7 +175,8 @@ file  = "src/number.rs"
 lines = "282-311"
 title = "as_str — the original text, with one caveat"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["cfg", "strings"]
 body = """
 Available only with `arbitrary_precision`, where it returns the stored
@@ -224,8 +228,10 @@ file  = "src/number.rs"
 lines = "372-397"
 title = "Serialize for Number — and where the token protocol starts"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["traits", "cfg"]
+prereqs = ["ser-mod-0036"]
 body = """
 In the default build a number serializes as the `u64`, `i64` or `f64` it
 holds.
@@ -267,7 +273,8 @@ file  = "src/number.rs"
 lines = "462-496"
 title = "NumberKey — a key that must be the token"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["cfg", "traits"]
 body = """
 A type whose `Deserialize` impl succeeds only if the string it reads is
@@ -384,8 +391,10 @@ file  = "src/number.rs"
 lines = "652-678"
 title = "NumberDeserializer — a map with one entry"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["cfg", "traits", "option"]
+prereqs = ["de-mod-0064"]
 body = """
 The sending side of the protocol on the deserializing path. It is a
 `MapAccess` over an `Option<String>`.

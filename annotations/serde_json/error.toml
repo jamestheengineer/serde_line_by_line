@@ -230,8 +230,10 @@ file  = "src/error.rs"
 lines = "389-398"
 title = "The standard Error trait — through serde_core's alias"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["traits", "cfg", "no-std"]
+prereqs = ["std-error-0001"]
 body = """
 `serde::de::StdError` is `std::error::Error` when `std` is available, and
 `serde_core`'s own minimal substitute when it is not. You read that

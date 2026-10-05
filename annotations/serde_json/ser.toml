@@ -267,8 +267,10 @@ file  = "src/ser.rs"
 lines = "371-381"
 title = "serialize_struct — an object, unless the name is a secret token"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["pattern-matching", "cfg", "strings"]
+prereqs = ["ser-mod-0036", "json-number-0012"]
 body = """
 A struct is serialized as an object, by forwarding to `serialize_map`.
 
@@ -478,8 +480,10 @@ file  = "src/ser.rs"
 lines = "683-728"
 title = "SerializeStruct — entries, or a verbatim payload"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["traits", "cfg", "pattern-matching"]
+prereqs = ["ser-mod-0046", "json-ser-0012"]
 body = """
 For an ordinary struct, a field is a map entry whose key is the field's name.
 `serialize_field` forwards to `SerializeMap::serialize_entry`.
@@ -702,8 +706,10 @@ file  = "src/ser.rs"
 lines = "1155-1170"
 title = "NumberStrEmitter — a serializer that accepts one thing"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["cfg", "associated-types", "marker-types"]
+prereqs = ["json-ser-0024"]
 body = """
 Compiled only with `arbitrary_precision`. This is the type `Compound::Number`
 hands the number's text to.
@@ -719,7 +725,8 @@ file  = "src/ser.rs"
 lines = "1171-1226"
 title = "NumberStrEmitter rejects every scalar but a string"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["cfg", "custom-errors"]
 body = """
 Fourteen methods, each returning `invalid_number()`.
@@ -735,8 +742,10 @@ file  = "src/ser.rs"
 lines = "1227-1234"
 title = "NumberStrEmitter::serialize_str — the text, without quotes"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["cfg", "pattern-matching"]
+prereqs = ["json-ser-0032"]
 body = """
 The one method that does something. It destructures `self` to get the
 serializer and calls `write_number_str`, which writes the string to the

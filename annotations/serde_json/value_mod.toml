@@ -431,7 +431,8 @@ file  = "src/value/mod.rs"
 lines = "865-891"
 title = "sort_all_objects — a method whose body is one cfg block"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["cfg", "closures", "iterators"]
 body = """
 The signature always exists. The body is entirely inside

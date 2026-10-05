@@ -84,7 +84,10 @@ reading_order = [
 
     # serde_json, bottom up: the crate root and the error every function
     # returns, where bytes come from, then what they mean.
+    "serde_json:build.rs",
     "serde_json:src/lib.rs",
+    "serde_json:src/io/mod.rs",
+    "serde_json:src/io/core.rs",
     "serde_json:src/error.rs",
     "serde_json:src/iter.rs",
     "serde_json:src/read.rs",
@@ -103,6 +106,7 @@ reading_order = [
     "serde_json:src/map.rs",
     "serde_json:src/value/index.rs",
     "serde_json:src/macros.rs",
+    "serde_json:src/raw.rs",
 ]
 
 [[unit]]
@@ -1624,4 +1628,106 @@ What this crate does not show is still what unit 13 said was missing: an
 application's error enum with `From` impls and `?`. The one `From` here goes
 the other way, turning a `serde_json::Error` into an `io::Error` for callers
 who have one.
+"""
+
+[[unit]]
+id = "28-feature-gated-engineering"
+title = "Feature-gated engineering: one API, several crates underneath"
+supplement = "none"
+status = "written"
+prereqs = ["12-no-std-and-cfg", "23-writing-a-serializer", "25-numbers-and-round-tripping", "26-the-value-tree-and-json-macro"]
+rust_features = ["cfg", "feature-unification", "no-std", "modules", "visibility", "macro-rules", "zero-cost"]
+examples = ["json_value"]
+summary = """
+Unit 12 read `serde_core` gating code on `std` and `alloc`. `serde_json` has
+seven features, and three of them are less about adding something than about
+replacing what is underneath a public type while its API stays put. This unit
+reads the techniques for that, and the one place where the data model had no
+room and a private protocol was smuggled through it.
+"""
+body = """
+Unit 12's gates were about what exists: no `std`, no `HashMap` impl.
+`serde_json` has those too, and reads them first because they are the
+familiar kind. Then it has another kind. `preserve_order` changes the map
+inside `Value`. `arbitrary_precision` changes what a `Number` is.
+`float_roundtrip` changes how a float is parsed. `raw_value` adds a type and
+threads support for it through every reader. In this crate's source, 123
+`#[cfg]` lines name `arbitrary_precision` alone.
+
+The constraint on all of it is one sentence, and unit 12 only touched it.
+**Cargo unifies features across the whole build.** If any crate in a
+dependency graph turns `preserve_order` on, every crate in that graph gets
+the `IndexMap`-backed `Map`, including ones written and tested against a
+`BTreeMap`. A feature is therefore not a private choice, and code that
+compiles with it off must still compile with it on. This repo meets the rule
+itself: the examples on this site share one build of `serde_json`, so none of
+them can turn `float_roundtrip` on without changing what all the others run.
+
+Read the techniques in order of how much they hide.
+
+**A facade: one name, two sources.** `crate::io` is `std::io` with `std`,
+and a small substitute without. Every other file writes `io::Write` and
+carries no `#[cfg]` for it. The substitute's `Error` cannot occur, and its
+`Display` impl is `unreachable!()`. `lib.rs` gates three whole modules at
+the `mod` line, so the nineteen files of `lexical/` never mention the
+feature that decides whether they exist. And if neither `std` nor `alloc` is on,
+`compile_error!` says so in a sentence before the compiler can say it in
+hundreds.
+
+**A wrapper, so the backing type is not your API.** `Map` is a struct with
+one private field, and the field's type is an alias chosen by `#[cfg]`. If
+`Map` were the alias, every `BTreeMap` method would be public API, and a
+caller using one would stop compiling when somebody else enabled
+`preserve_order`. The wrapper exposes only methods written to work on both.
+It has to be done for every type the map hands out, so `Entry`,
+`VacantEntry`, `OccupiedEntry` and seven iterators are wrappers too.
+
+**A method that exists in both builds and does nothing in one.**
+`sort_all_objects` has a body that is entirely one gated block. With a
+`BTreeMap` there is nothing to sort. Keeping the empty method means a call
+to it compiles whichever way the graph resolved. Compare `swap_remove`,
+which exists only with the feature. That is additive in the ordinary sense
+and safe for the same reason: code that needs it had to ask for it.
+
+**The same name, two bodies.** `N` is an enum of three variants, or it is
+`String`. Every method of `Number` has two bodies under opposite gates, and
+the derives on `Number` compile either way. Their meaning does not survive
+the switch: with text underneath, equality is equality of text, and `1.0`
+and `1.00` are different numbers. This is the cost of a feature that
+replaces instead of adds. Unification can change the answer to `==` in a
+crate that never asked.
+
+**A macro defined twice.** `if_checking_recursion_limit!` is the identity
+in a default build and wraps its argument in a runtime `if` under
+`unbounded_depth`. The code that uses it is written once. Where the limit
+cannot be switched off there is no flag and no branch.
+
+**A cfg that is not a feature.** `build.rs` prints `fast_arithmetic="64"`
+or `"32"` after looking at the target, and declares the name first so the
+compiler's lint for unknown cfgs accepts it. It reads an environment
+variable and not `#[cfg(target_arch)]`, because a `#[cfg]` in a build
+script describes the machine doing the building.
+
+**And a choice made by type, with no cfg.**
+`should_early_return_if_failed` is an associated constant on `Read`. It is
+decided per reader type at monomorphization, and for slices the branch it
+guards is not in the compiled code. Where a decision follows from a type you
+already have, this is the tool, and no feature is needed.
+
+**Then the protocol.** With `arbitrary_precision` a `Number` is text that
+may fit no integer or float type, and it has to reach the output with every
+digit. `Serializer` has thirty methods and none of them means "write this
+text unquoted". So `Number` serializes itself as a struct whose name is
+`$serde_json::private::Number`, a string no Rust identifier can be, with one
+field of the same name holding the text. `serialize_struct` in `ser.rs`
+recognises the name and returns a special `Compound`. `serialize_field`
+passes the text to `NumberStrEmitter`, a third `Serializer` impl, which
+refuses everything but a string and writes that string without quotes.
+`RawValue` does the same with its own token, and the deserializing side
+mirrors it through `deserialize_newtype_struct` and a one-entry map.
+
+It works, and you should see what it is. The data model had no room, so a
+request was encoded as a magic name and both ends agreed to recognise it.
+A serializer from any other crate does not know the token. It writes an
+object with one strange key.
 """

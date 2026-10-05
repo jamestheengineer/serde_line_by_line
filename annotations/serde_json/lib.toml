@@ -100,7 +100,8 @@ file  = "src/lib.rs"
 lines = "278-301"
 title = "no_std — an allocator is the requirement"
 kind  = "doc-contract"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["no-std", "feature-unification"]
 body = """
 The crate works without the standard library as long as there is an
@@ -181,8 +182,10 @@ file  = "src/lib.rs"
 lines = "371-383"
 title = "A compile error for an impossible configuration, and three extern crates"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["cfg", "no-std"]
+prereqs = ["lib-0002"]
 body = """
 If neither `std` nor `alloc` is enabled, `compile_error!` stops the build
 with a sentence explaining what to do. Without it, the user would get
@@ -219,7 +222,8 @@ file  = "src/lib.rs"
 lines = "391-407"
 title = "The public API — six re-exports"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["modules", "visibility", "cfg"]
 body = """
 Everything a user calls as `serde_json::something`. The functions, the two
@@ -267,8 +271,10 @@ file  = "src/lib.rs"
 lines = "419-441"
 title = "Twelve modules — which are public, and which exist at all"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["modules", "visibility", "cfg"]
+prereqs = ["json-lib-0010"]
 body = """
 The module tree. `#[macro_use]` on `macros` makes the `json!` family
 available to the modules declared after it.

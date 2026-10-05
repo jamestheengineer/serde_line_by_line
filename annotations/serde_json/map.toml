@@ -7,7 +7,8 @@ file  = "src/map.rs"
 lines = "1-8"
 title = "A map with two possible implementations"
 kind  = "doc-contract"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["feature-unification"]
 body = """
 The module comment states the arrangement in two sentences. `Map` is a
@@ -28,7 +29,8 @@ file  = "src/map.rs"
 lines = "9-27"
 title = "Imports — one backing map or the other"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["cfg", "modules"]
 body = """
 The last four lines are the switch. Without the feature, `BTreeMap` and its
@@ -45,8 +47,10 @@ file  = "src/map.rs"
 lines = "28-37"
 title = "Map and MapImpl — a wrapper so the backing type is not public"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["cfg", "visibility", "generic-params"]
+prereqs = ["json-map-0001"]
 body = """
 `Map` is a struct with one private field of type `MapImpl<K, V>`, and
 `MapImpl` is a type alias chosen by `#[cfg]`.
@@ -150,7 +154,8 @@ file  = "src/map.rs"
 lines = "190-261"
 title = "swap_remove and shift_remove — the two removals an ordered map offers"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["cfg"]
 body = """
 Four methods available only with `preserve_order`, each forwarding to
@@ -233,7 +238,8 @@ file  = "src/map.rs"
 lines = "361-384"
 title = "sort_keys — does nothing unless order is preserved"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["cfg"]
 body = """
 The body is one gated statement. In a default build the method is empty,
@@ -406,8 +412,10 @@ file  = "src/map.rs"
 lines = "619-649"
 title = "Entry, VacantEntry, OccupiedEntry — wrappers again"
 kind  = "cfg-gate"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "28-feature-gated-engineering"
 rust_features = ["cfg", "lifetimes", "visibility"]
+prereqs = ["json-map-0003"]
 body = """
 The public entry types. `Entry` is an enum over the two cases, and each
 case is a struct with one private field holding the backing map's entry.
