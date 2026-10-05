@@ -25,7 +25,8 @@ file  = "src/raw.rs"
 lines = "15-34"
 title = "RawValue — a piece of JSON, kept as text"
 kind  = "doc-contract"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "29-unsafe-and-written-invariants"
 rust_features = ["strings"]
 body = """
 The first paragraph defines it by what it avoids. A `RawValue` is a
@@ -66,8 +67,10 @@ file  = "src/raw.rs"
 lines = "79-114"
 title = "Ownership — borrowed from a slice, boxed from a reader"
 kind  = "doc-contract"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "29-unsafe-and-written-invariants"
 rust_features = ["ownership", "smart-pointers"]
+prereqs = ["json-raw-0002"]
 body = """
 Two forms, and the documentation says when each applies.
 
@@ -84,8 +87,10 @@ file  = "src/raw.rs"
 lines = "115-120"
 title = "struct RawValue { json: str } — an unsized newtype"
 kind  = "plumbing"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "29-unsafe-and-written-invariants"
 rust_features = ["sized-bound", "unsafe"]
+prereqs = ["json-raw-0002"]
 body = """
 A struct whose only field is a `str`. Since `str` has no fixed size, neither
 does `RawValue`. A value of this type cannot be held directly. It is always
@@ -106,8 +111,10 @@ file  = "src/raw.rs"
 lines = "121-134"
 title = "Three transmutes"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "29-unsafe-and-written-invariants"
 rust_features = ["unsafe", "smart-pointers"]
+prereqs = ["json-raw-0005"]
 body = """
 `from_borrowed` turns a `&str` into a `&RawValue`. `from_owned` and
 `into_owned` convert between `Box<str>` and `Box<RawValue>`.
@@ -129,7 +136,8 @@ file  = "src/raw.rs"
 lines = "135-154"
 title = "Clone, ToOwned and Default — implemented for the Box"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "29-unsafe-and-written-invariants"
 rust_features = ["traits", "smart-pointers", "associated-types"]
 body = """
 An unsized type cannot implement `Clone`, whose method returns `Self` by
@@ -178,8 +186,10 @@ file  = "src/raw.rs"
 lines = "178-193"
 title = "from_string — validate, and keep the allocation if possible"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "29-unsafe-and-written-invariants"
 rust_features = ["strings", "ownership"]
+prereqs = ["json-raw-0006"]
 body = """
 An owned `String` becomes a `Box<RawValue>`.
 
@@ -200,8 +210,10 @@ file  = "src/raw.rs"
 lines = "194-236"
 title = "from_string_unchecked — an unsafe fn with a written contract"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "29-unsafe-and-written-invariants"
 rust_features = ["unsafe"]
+prereqs = ["json-raw-0010"]
 body = """
 The same conversion without the parse. It is an `unsafe fn`, and the
 `# Safety` section says exactly what the caller promises: one well-formed
@@ -237,7 +249,8 @@ file  = "src/raw.rs"
 lines = "275-280"
 title = "From Box<RawValue> for Box<str>"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "29-unsafe-and-written-invariants"
 rust_features = ["traits", "smart-pointers"]
 body = """
 The reverse of `from_owned`, exposed through `From`. This direction is

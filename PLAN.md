@@ -1252,7 +1252,7 @@ machines in `read.rs` and `ser.rs` refuse large spans.
 | **K4 — The `Value` tree** ✅ | `value/*`, `map.rs`, `number.rs`, `raw.rs` | ~283 | the tree at 100%; `value/de.rs` and `value/ser.rs` read as the second implementation of a surface the reader has seen, not a second transcript |
 | **K5 — `lexical/`** ✅ | The float parser, 19 files | ~106 | `lexical/` at 100%; the five constant tables are a table each |
 | **K6 — Plumbing** ✅ | `lib.rs`, `error.rs`, `macros.rs` | ~44 | **every line of `serde_json` claimed**; all 38 files in its manifest; all 104 narrative steps name a containing annotation |
-| **K7 — Course units** (7 of 8) | 8 new units, 22 through 29 (scope §6) | — | the course track spans three crates, walkable start to finish, D8's forward-reference check enforcing across all of them |
+| **K7 — Course units** ✅ | 8 new units, 22 through 29 (scope §6) | — | the course track spans three crates, walkable start to finish, D8's forward-reference check enforcing across all of them |
 | **K8 — Ship** | Three reference file-trees, the restated promise, `README` | — | three figures, no total, and each track honest about what it claims |
 
 K2 is a vertical slice for the reason phase 1 and R2 were. `read.rs` is the
@@ -1488,46 +1488,92 @@ of its own `Display` output. A custom error whose message ends in
 " at line 3 column 4" reports `line() == 3`. The json walk's unit 08 is
 titled for this. The reference track now has the annotation that says why.
 
-### What K7 has shipped so far: unit 22
+### What K7 shipped
 
-One unit of the eight, and the work stops here by instruction rather than by
-exhaustion. **Unit 22, "Implementing a Deserializer: bytes in, visitor calls
-out"**, is written, with 37 `serde_json` annotations tagged to it from
-`read.rs` and `de.rs`. The course track is 22 units and 377 annotations.
+Eight units, 22 through 29, and the course track runs 29 units across three
+annotated crates. 228 of `serde_json`'s 566 annotations are tagged onto
+them, and the track's figures move from 340 course annotations to 568.
 
-**What it teaches, and why it is first.** Units 1–14 read `Deserializer` as a
-contract and units 15–21 generate calls into it. Nothing in the course until
-now implements it. The unit is built on one line of `de.rs`: the trait is
-implemented for `&mut Deserializer<R>`, because its methods take `self` by
-value and a parser has to survive its first value. §2 said `serde_core`
-teaches almost nothing about ownership in ordinary imperative code and unit 6
-was written from scratch for that reason. This unit is the first to supply it
-from an annotated crate, which is what the scope doc's §6 table promised.
+| unit | topic | annots | declare prereqs | cross a crate |
+|---|---|---:|---:|---:|
+| 22 | Implementing a `Deserializer` | 37 | 12 | 11 |
+| 23 | Writing a `Serializer` | 34 | 18 | 18 |
+| 24 | Strings, escapes, and borrowing from the input | 27 | 9 | 5 |
+| 25 | Numbers, and what survives a round trip | 25 | 13 | 3 |
+| 26 | The `Value` tree, and the `json!` muncher | 30 | 17 | 9 |
+| 27 | Errors that carry a position | 23 | 10 | 3 |
+| 28 | Feature-gated engineering | 36 | 18 | 8 |
+| 29 | `unsafe`, with its invariants written down | 16 | 11 | 1 |
+| | | **228** | **108** | **58** |
 
-**The cross-crate DAG gained a third crate.** Twelve of the tagged
-annotations declare prereqs, eleven of them pointing into `serde_core`: the
-`Deserializer` impl leans on the trait's declaration, the literal arms on
-`Visitor`, the access types on `SeqAccess` and `MapAccess`, `from_trait` on
-`Deserialize::deserialize`, and `from_reader` on `DeserializeOwned`.
-`reading_order` gained two qualified entries. D8's check passed without
-change.
+All eight are `supplement = "none"`. That is the scope doc's §6 table holding:
+ownership in imperative code, error handling and `unsafe` are three of the
+things §2 said `serde_core` teaches almost nothing about, and each now has a
+unit read out of an annotated crate.
 
-**K3's exit criterion is met for these 37 and not for the rest.** It asked
-that every `Deserializer` and `Serializer` method lean on its `serde_core`
-contract by `prereqs` rather than re-explaining it. The annotations written in
-K2–K6 name those contracts in prose and carry no `prereqs`. The edges are
-being added as each unit tags its annotations, which is how R6 did it, and
-that leaves the engines' untagged annotations without them until units 23–29
-reach them.
+**Each unit answers one the reader has already finished.** That was not the
+plan and it is how they came out. Unit 22 implements the trait units 3 and 8
+declared. Unit 23 is unit 5 the other way round: `serde_core` gives
+`Serializer` almost no default methods so that silence is a compile error,
+and `Formatter`, in the same file, gives every method one. Unit 24 is unit
+8's `'de` from the side that decides whether to lend. Unit 25 is the sending
+end of unit 4's widening. Unit 26 is unit 3's `type Ok` chosen differently,
+and unit 11's `macro_rules!` used as a parser. Unit 27 keeps the promise
+unit 13 could only state, that a format attaches the position afterwards.
+Unit 28 is unit 12's additive-features rule under real strain. Unit 29
+starts from the `unsafe` block unit 13 found with no argument written beside
+it.
 
-**The other seven units are not registered.** A planned unit needs a
-`supplement` value, and the gate checks `none` and `partial` against what is
-tagged. Registering seven placeholders would mean claiming seven labels
-nobody has checked. From the scope doc, in order: writing a `Serializer`;
-strings, escapes and borrowing from the input; numbers and round-tripping;
-the `Value` tree and the `json!` muncher; errors that carry a position;
-feature-gated engineering; and `unsafe` with its invariants written down.
-Unit 22 deliberately leaves the string and number arms' machinery untagged
-for the two units that will want them.
+**Three examples, and what running them found.** Units 22 to 24 use
+`json_document`. Units 25, 26 and 27 make claims a reader should be able to
+run, and each got an example: `json_numbers`, `json_value` and `json_errors`.
+The site runs 16 examples now, up from 13.
 
-**Still to do in §14:** units 23–29, and K8.
+`json_errors` found two things no annotation said. A `custom` error raised
+for an array element is reported at the closing bracket, because
+`deserialize_seq` calls `end_seq` before it looks at what the visitor
+returned. And a `custom` error from a top-level `Deserialize` impl reports
+line 0 column 0: the parser method had already returned `Ok`, and no
+`Deserializer` method was on the way out to call `fix_position`. Unit 27
+states both. `json-de-0018` and `json-de-0054` describe `fix_position`
+without saying where it does not reach, and are still correct as far as
+they go.
+
+`json_numbers` runs the scope doc's one-ULP measurement in the default
+build, beside `str::parse` on the same text.
+
+**Units 28 and 29 have no example of their own, for different reasons.** A
+feature cannot be turned on for one example without turning it on for every
+example the site runs, since they share a build. That is unit 28's subject,
+and the unit says so. Unit 29 has none because an `unsafe` block that is
+sound has nothing to show.
+
+**An annotation belongs to one unit, and three units wanted the same
+ones.** The escape scanner in `ser.rs` is strings, and it is three `unsafe`
+blocks. It went to unit 24, with `skip_to_escape`, and unit 29 counts those
+four blocks and points back. The token protocol is the serializer, the
+`Value` tree and the feature gates at once. Unit 23 and unit 26 step around
+it and unit 28 has it whole.
+
+**K3's exit criterion is met for what is tagged.** It asked that every
+`Deserializer` and `Serializer` method lean on its `serde_core` contract by
+`prereqs` rather than re-explaining it. 108 tagged annotations declare
+prereqs and 58 of those cross into another crate. The 338 `serde_json`
+annotations no unit tags still name their contracts in prose only. That is
+what R6 left behind in `serde_derive` too, and it is the honest state: the
+edges exist where a reader following the course needs them.
+
+**The reading order grew to 20 `serde_json` entries**, bottom up: `build.rs`
+and the crate root, the error every function returns, the readers, the
+parser, numbers and the float parser, the serializer, then the tree and the
+macro that builds one. D8's forward-reference check passed at every unit
+without an annotation having to move.
+
+**Four counts in this phase's commit messages are wrong**, and a commit
+message cannot be edited once pushed. Unit 24's says seven of its prereq
+edges cross into `serde_core`; five do. Unit 26's says sixteen annotations
+declare prereqs and eleven cross; seventeen and nine. Unit 28's says its 36
+annotations come from eleven files; twelve. The table above is counted from
+the store.
+
+**Still to do in §14:** K8.

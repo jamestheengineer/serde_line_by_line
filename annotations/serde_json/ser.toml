@@ -1289,8 +1289,10 @@ file  = "src/ser.rs"
 lines = "2206-2256"
 title = "to_vec, to_vec_pretty and to_string — a Vec, then a String without a check"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "29-unsafe-and-written-invariants"
 rust_features = ["unsafe", "collections", "strings"]
+prereqs = ["json-ser-0058", "json-ser-0059"]
 body = """
 `to_vec` allocates a `Vec<u8>` with room for 128 bytes and passes `&mut
 writer` to `to_writer`. That works because `&mut W` is a writer when `W` is.
@@ -1315,8 +1317,10 @@ file  = "src/ser.rs"
 lines = "2257-2275"
 title = "to_string_pretty"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "29-unsafe-and-written-invariants"
 rust_features = ["unsafe", "strings"]
+prereqs = ["json-ser-0061"]
 body = """
 The pretty version of `to_string`, with the same unchecked conversion and
 the same comment.

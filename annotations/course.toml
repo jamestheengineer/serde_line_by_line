@@ -1731,3 +1731,100 @@ request was encoded as a magic name and both ends agreed to recognise it.
 A serializer from any other crate does not know the token. It writes an
 object with one strange key.
 """
+
+[[unit]]
+id = "29-unsafe-and-written-invariants"
+title = "`unsafe`, with its invariants written down"
+supplement = "none"
+status = "written"
+prereqs = ["13-errors-and-control-flow", "24-strings-escapes-and-borrowing", "28-feature-gated-engineering"]
+rust_features = ["unsafe", "strings", "sized-bound", "smart-pointers", "visibility", "zero-cost"]
+examples = []
+summary = """
+`serde_core` has two `unsafe` blocks in twelve thousand lines. `serde_json`
+has twelve and one `unsafe fn`, which is still very few, and few enough to
+read every one. They make four kinds of claim. This unit sorts them, and
+asks of each where the argument is written and how far from the block the
+code is that could break it.
+"""
+body = """
+`unsafe` does not turn the rules off. It marks a place where the compiler
+stops checking one of them and the author takes over. A block is a claim:
+*this is true here, for a reason I know*. Reading unsafe code is reading for
+that reason, and then asking what else in the program has to stay the way it
+is for the reason to hold.
+
+Unit 13 met the first one in `serde_core`, a `from_utf8_unchecked` whose
+argument was sound and written nowhere. `serde_json` writes most of its
+arguments down. Unit 24 read four of its blocks in passing, inside the
+scanners they belong to. Here are the rest, and all thirteen sites sorted by
+what they claim.
+
+**"These bytes are UTF-8."** Six blocks. A `&str` must be valid UTF-8, and
+`from_utf8_unchecked` builds one without looking.
+
+Three of the six have an argument you can check without leaving the
+function. `StrRead::parse_str` and the two conversions in the serializer's
+escape scanner all rest on the same fact: the bytes came from a `&str`, and
+they were only ever cut immediately before or after an ASCII byte, which
+cannot fall inside a multi-byte character.
+
+The other three are `to_string`, `to_string_pretty` and `Display` for
+`Value`. In the first two the comment is five words: "We do not emit invalid
+UTF-8." The argument is not in the function. It is the whole serializer:
+every byte written is punctuation, a digit, an escape, or a fragment of a
+`&str` cut at an ASCII boundary. It also depends on the formatter being one
+of the two this crate ships, and the comment in `Display` is the one that
+says so. That holds because these three functions construct the formatter
+themselves. A `Serializer` built with `with_formatter` makes no such claim,
+and nothing unchecked is done with its output.
+
+**"These pointers are in bounds."** Two blocks. `skip_to_escape` subtracts
+two pointers into the same slice. `push_wtf8_codepoint` reserves four bytes
+in a `Vec`, writes through a raw pointer past its length, and then calls
+`set_len`. Its `SAFETY` comment is the model for the genre. It states three
+facts, one per thing that could go wrong: the capacity exists, every arm
+writes exactly the number of bytes it reports, and that number is at most
+four.
+
+**"This cannot happen."** One block. `unreachable_unchecked` in the escape
+scanner tells the compiler that the escape table holds only the eight
+letters the `match` lists. The table is a few lines below it. The claim
+would become undefined behaviour the day someone added a ninth letter to one
+and not the other, and nothing but the comment would say so.
+
+**"These two types have the same layout."** Three blocks, all in `raw.rs`.
+`RawValue` is a struct with one field of type `str`, marked
+`#[repr(transparent)]`, and three `transmute`s convert `&str` and `Box<str>`
+to and from it. The attribute is the whole argument, and it is one line
+above the struct. The standard library's `str` and `Path` have the same
+shape: an unsized type that is a view of bytes with a promise attached.
+
+**And one `unsafe fn`.** `from_string_unchecked` makes a `RawValue` from a
+`String` without parsing it. What it does to memory is what the checked
+`from_string` does. It is `unsafe` because of what it skips, and its
+`# Safety` section says why that matters: a `RawValue` is pasted
+into output verbatim, and other code is entitled to rely on it being
+well-formed JSON "in the same way that unsafe code may rely on `str`
+containing valid UTF-8". An `unsafe fn` moves the obligation to the caller,
+and the doc comment is where the caller finds out what it is.
+
+**What to take from the sort.** The blocks are small. What each depends on
+is not. `StrRead::parse_str` is sound only while it passes `validate = true`,
+because the non-validating scan can push a lone surrogate, and that flag is
+an argument in a call to a function in another impl. The three `transmute`s
+do not check that the text is JSON at all. They are private, and every
+caller in the file is trusted to have checked. So the boundary that makes
+`unsafe` safe is not the block. It is the module, and the privacy of the
+fields and functions the block relies on. That is why `RawValue`'s field is
+private, and why `StrRead` reaching into `SliceRead`'s fields works only
+because they share a file.
+
+One last thing to notice is an invariant with no `unsafe` on it. The
+`no_std` `Write` trait's `write_all` calls `write` once and trusts it to
+have taken everything. Two `debug_assert!` lines check that in debug builds
+and vanish in release. If it were wrong the result would be truncated
+output, not undefined behaviour, so the language does not ask for the
+keyword. The discipline is the same one: say what you are assuming, next to
+the line that assumes it.
+"""

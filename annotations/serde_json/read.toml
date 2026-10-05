@@ -733,7 +733,8 @@ file  = "src/read.rs"
 lines = "668-680"
 title = "StrRead::new — keeping the str only when it is needed"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "29-unsafe-and-written-invariants"
 rust_features = ["cfg", "strings"]
 body = """
 `StrRead` is built from a `SliceRead` over the string's bytes. The `&str`
@@ -768,8 +769,10 @@ file  = "src/read.rs"
 lines = "709-717"
 title = "StrRead::parse_str — the one check a str lets you skip"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "29-unsafe-and-written-invariants"
 rust_features = ["unsafe", "strings", "closures"]
+prereqs = ["json-read-0021", "format-0001"]
 body = """
 This is why `StrRead` exists. It calls the slice reader's `parse_str_bytes`
 with a closure that converts bytes to `&str` using `from_utf8_unchecked`.
@@ -806,8 +809,10 @@ file  = "src/read.rs"
 lines = "733-759"
 title = "StrRead raw buffering — slicing the str, with no check"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "29-unsafe-and-written-invariants"
 rust_features = ["cfg", "strings"]
+prereqs = ["json-read-0031"]
 body = """
 Here is the use of the `data` field. The slice reader's version of this
 method slices bytes and validates them. This one slices the original `&str`
@@ -999,8 +1004,10 @@ file  = "src/read.rs"
 lines = "975-1022"
 title = "push_wtf8_codepoint — writing UTF-8 into spare capacity"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "29-unsafe-and-written-invariants"
 rust_features = ["unsafe", "collections", "pattern-matching"]
+prereqs = ["json-read-0041"]
 body = """
 This encodes one code point as one to four bytes at the end of a `Vec<u8>`.
 "WTF-8" is UTF-8 with the rule against surrogates removed, which the

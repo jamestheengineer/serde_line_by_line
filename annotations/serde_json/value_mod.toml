@@ -159,8 +159,10 @@ file  = "src/value/mod.rs"
 lines = "222-258"
 title = "Display::fmt — an io::Write built on a fmt::Formatter"
 kind  = "impl"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "29-unsafe-and-written-invariants"
 rust_features = ["unsafe", "traits", "closures"]
+prereqs = ["json-ser-0061"]
 body = """
 The serializer writes bytes to an `io::Write`. `Display` provides a
 `fmt::Formatter`, which accepts `&str`. The local `WriterFormatter` type

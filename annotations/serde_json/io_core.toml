@@ -48,7 +48,8 @@ file  = "src/io/core.rs"
 lines = "30-44"
 title = "Write — three methods, one of them trusting"
 kind  = "trait-item"
-tracks = ["reference"]
+tracks = ["reference", "course"]
+course_unit = "29-unsafe-and-written-invariants"
 rust_features = ["traits", "default-methods", "no-std"]
 body = """
 The same three method names as `std::io::Write`, with the same signatures in
