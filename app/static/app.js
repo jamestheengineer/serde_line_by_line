@@ -23,6 +23,18 @@
     });
   }
 
+  // ---- sidebar -------------------------------------------------------------
+  // Three crates is 85 files, and the page for one near the end would open
+  // with its own entry far below the fold of a sidebar that scrolls on its
+  // own. Set the sidebar's scroll rather than calling scrollIntoView, which
+  // would move the page as well.
+  var here = document.querySelector(".nav li.here");
+  var side = document.querySelector(".nav");
+  if (here && side && side.scrollHeight > side.clientHeight) {
+    var top = here.getBoundingClientRect().top - side.getBoundingClientRect().top;
+    side.scrollTop += top - side.clientHeight / 2;
+  }
+
   // ---- macro-use rows -----------------------------------------------------
   // A macro-use group shows one row per invocation against a shared code pane,
   // so a row is the only prose in the reader not sitting opposite its own

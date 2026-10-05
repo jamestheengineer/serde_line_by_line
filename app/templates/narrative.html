@@ -99,9 +99,9 @@
   </p>
   <p>
     <a href="{{ root }}index.html">The reference track</a>
-    &mdash; back inside <code>serde_core</code>, where the
+    &mdash; every line of all three crates. In <code>serde_core</code> the
     <code>impl</code> this track emits has to satisfy a trait that is claimed
-    line by line.
+    line by line, and each file this walk went through has a page there.
   </p>
   {%- else %}
   <p>
@@ -112,8 +112,10 @@
   </p>
   <p>
     <a href="{{ root }}index.html">The reference track</a>
-    &mdash; every line of <code>serde_core</code>, where each visitor this
-    walk&rsquo;s parser calls into is claimed line by line.
+    &mdash; every line of all three crates: the rest of
+    <code>{{ walk.crate_name }}</code>, which this walk passed through without
+    stopping, and <code>serde_core</code>, where each visitor its parser calls
+    into is claimed line by line.
   </p>
   {%- endif %}
 </section>

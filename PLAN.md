@@ -337,6 +337,12 @@ counts above are `serde_core`'s alone; the project's are 21,012 lines of two
 annotated crates claimed by 871 annotations, 21 course units, and the same
 9-unit walk.
 
+**§14** is complete as well, and did to `serde_json` what §12 did to
+`serde_derive`: a third source promising every line, with §13's walk an
+ordering over it. The project's counts are now 39,371 lines of three
+annotated crates claimed by 1,437 annotations, 29 course units, and two
+walks of 9 units each. There is still no percentage over the three.
+
 Two more gates went in during phase 8, and the last one arrived after §12,
 when a generated file was caught having drifted from the pin it is generated
 from. Listed beside the coverage gate from phase 0, they are what makes the
@@ -464,8 +470,8 @@ measurements behind each:
 
 **Still open: `serde_core`'s `build.rs`**, which is the same shape as the file
 D14 named and has been outside the walk since phase 0 (decisions.md). §9's
-eight phases, §11's five, §12's seven and §13's four have all shipped; §14 is
-in progress. The gates listed in §9 are what keep their promises checkable
+eight phases, §11's five, §12's seven, §13's four and §14's eight have all
+shipped. The gates listed in §9 are what keep their promises checkable
 rather than stated.
 
 **Measured, and decided — the smaller way.** `serde_json` is the next crate and
@@ -1253,7 +1259,7 @@ machines in `read.rs` and `ser.rs` refuse large spans.
 | **K5 — `lexical/`** ✅ | The float parser, 19 files | ~106 | `lexical/` at 100%; the five constant tables are a table each |
 | **K6 — Plumbing** ✅ | `lib.rs`, `error.rs`, `macros.rs` | ~44 | **every line of `serde_json` claimed**; all 38 files in its manifest; all 104 narrative steps name a containing annotation |
 | **K7 — Course units** ✅ | 8 new units, 22 through 29 (scope §6) | — | the course track spans three crates, walkable start to finish, D8's forward-reference check enforcing across all of them |
-| **K8 — Ship** | Three reference file-trees, the restated promise, `README` | — | three figures, no total, and each track honest about what it claims |
+| **K8 — Ship** ✅ | Three reference file-trees, the restated promise, `README` | — | three figures, no total, and each track honest about what it claims |
 
 K2 is a vertical slice for the reason phase 1 and R2 were. `read.rs` is the
 right file because it is where the scope doc's upper bound lives: if a
@@ -1576,4 +1582,65 @@ declare prereqs and eleven cross; seventeen and nine. Unit 28's says its 36
 annotations come from eleven files; twelve. The table above is counted from
 the store.
 
-**Still to do in §14:** K8.
+### What K8 shipped, and what §14 came to
+
+Most of the front page had already been rewritten by the store. Its figures,
+its "all 3 crates above are at 100%" and its paragraph on each walk are
+counted during the build, and K6 and K7 moved them. What K8 changed is the
+part a person typed.
+
+**The page was titled for two crates.** It read "Every line of `serde_core`
+and `serde_derive`", above three progress bars, and described `serde_json` as
+the crate a document is followed through. The heading, the lede and the page
+description name three now. The course sentence stopped at "writing the
+procedural macro that generates one", which was where the course ended eight
+units ago.
+
+**Three file-trees are 85 files, and the sidebar had been built for 19.** A
+reference page for `value/ser.rs` opened with its own sidebar entry last of
+85 rows, in a list that scrolls separately from the page. The sidebar
+now opens scrolled to the current file. Each group's heading links to that
+crate's table on the front page, and each progress block at the top of the
+front page links down to it.
+
+**The json walk's own claim had dropped off the front page.** When
+`serde_json` took the coverage role, the walk moved to the paragraph written
+for a walk over an annotated crate, and that paragraph had no sentence about
+outputs, because the derive walk has none. The 21 statements located in a
+real run (D13) are the one thing that walk does claim. The sentence is back,
+and it is keyed on the walk having such claims and not on the role of its
+crate.
+
+The promise as the front page now states it:
+
+> Every line of every *annotated* crate is claimed by exactly one annotation,
+> and the coverage gate fails the build over one unclaimed line, one overlap,
+> or one range left behind by a version bump. All 3 crates above are at 100%
+> and every one of their 85 files is named as complete, so from here a gap is
+> a build failure rather than a warning.
+>
+> There are 3 figures above and there is deliberately not one more combining
+> them.
+
+**The `README` had two stale figures besides the status.** It said the json
+walk cites 2,258 lines and the gate reports 2,254. K2–K6 narrowed three steps
+by a line or two, and the `README` was not recounted. And its list of the four tracks still described the course as 14
+units, which R6 should have changed. Both are fixed, a third badge is added,
+and the cost table has its third row.
+
+**§14 is complete.** Three annotated crates at 100%: 12,037, 8,975 and 18,359
+lines in 468, 403 and 566 annotations, 85 files, 1,437 annotations, and no
+figure spanning them. A 29-unit course track across all three with prereq
+edges crossing between them. Two walks, 85 and 104 steps, each an ordering
+over the store. 16 examples run on the site. 62 glossary entries are still
+quoted and never claimed.
+
+Against the scope doc: **566 annotations against a projected ~700**, under
+its lower bound of 600, and 8 course units against 8. K6 has the table by
+group. The one standing cost it named is unchanged and unpaid: `serde_json`
+releases in about ten months of twenty, and each release is a `cargo xtask
+bump` over 566 ranges. `1.0.151` was still the newest when K8 shipped.
+
+**Left open, on purpose:** `serde_core`'s `build.rs` (D14), and the 338
+`serde_json` annotations no course unit tags, which name their `serde_core`
+contracts in prose and not by `prereqs`.

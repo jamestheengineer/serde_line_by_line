@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="hero">
-  <h1>Every line of <code>serde_core</code> and <code>serde_derive</code></h1>
+  <h1>Every line of <code>serde_core</code>, <code>serde_derive</code> and <code>serde_json</code></h1>
   <p class="lede">
-    A guided walkthrough of the crate that holds Serde&rsquo;s trait definitions
-    and the crate that generates the code calling into it &mdash; explanations
-    beside the source, runnable micro-examples, the derive macro expanding
-    live in your browser, and one JSON document followed through
-    <code>serde_json</code> to show all three crates working at once.
+    A guided walkthrough of the crate that holds Serde&rsquo;s trait
+    definitions, the crate that generates the code calling into it, and the
+    format that code is run against &mdash; explanations beside the source,
+    runnable micro-examples, the derive macro expanding live in your browser,
+    and one JSON document followed through all three crates at once.
   </p>
 
   {# One block per annotated crate, never a combined figure. The crates
@@ -16,7 +16,7 @@
   <div class="sources">
   {% for s in sources %}
     <div class="progress">
-      <div class="srchead"><code>{{ s.name }}</code> {{ s.version }}</div>
+      <div class="srchead"><a href="#tree-{{ s.name }}"><code>{{ s.name }}</code></a> {{ s.version }}</div>
       <div class="bar"><i style="width:{{ s.percent }}%"></i></div>
       <div class="figures">
         <span><b>{{ s.percent_label }}%</b> annotated</span>
@@ -36,7 +36,8 @@
     claims every line of them. The
     <a href="{{ root }}course/index.html"><b>course track</b></a> is the same
     annotations in teaching order &mdash; {{ course_units }} units, from why a
-    data model exists to writing the procedural macro that generates one.
+    data model exists, through writing the procedural macro that generates
+    one, to the parser and printer of a format that implements it.
     {%- for w in walks %}
     <a href="{{ root }}{{ w.id }}/index.html"><b>{{ w.title }}</b></a>
     follows one route through <code>{{ w.crate_name }}</code> {{ w.version }}
@@ -99,6 +100,12 @@
     {% if w.crossings == w.steps %}all {{ w.crossings }}{% else %}{{ w.crossings }}{% endif %}
     of them land inside an annotation and link there. The percentage belongs to
     the track underneath it.
+    {%- if w.produced > 0 %}
+    What it does claim is its outputs: each of its {{ w.produced }} statements
+    about what the crate produces is located in a real run of the pinned
+    version, which the build checks against both the host and the browser
+    (<a href="https://github.com/jamestheengineer/serde_line_by_line/blob/main/docs/decisions.md">D13</a>).
+    {%- endif %}
     {%- else %}
     <code>{{ w.crate_name }}</code> is walked, not claimed.
     <a href="{{ root }}{{ w.id }}/index.html">{{ w.title }}</a> cites
@@ -129,7 +136,7 @@
 </section>
 
 {% for g in nav %}
-<section class="filelist">
+<section class="filelist" id="tree-{{ g.name }}">
   <h2>{{ g.name }}</h2>
   <p class="filemeta">
     {{ g.claimed_lines }} of {{ g.total_lines }} lines claimed &mdash;

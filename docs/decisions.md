@@ -539,7 +539,9 @@ produces. It is answered below.
 
 D14 is PLAN.md §14's: what "every line" means for a third crate that carries
 somebody else's float parser inside it and thirty load-bearing lines outside
-`src/`. It is answered below, and it leaves one thing open on purpose.
+`src/`. It is answered below, and it leaves one thing open on purpose. §14
+itself is complete: three annotated crates at 100%, a course track spanning
+all three, and a second walk that became an ordering over the store.
 
 **Still open: `serde_core`'s `build.rs`.** D14 names `serde_json`'s as part of
 the promise and does not name `serde_core`'s 113 lines, which are the same

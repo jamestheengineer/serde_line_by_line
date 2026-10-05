@@ -272,6 +272,33 @@ can do by construction and the course track does not attempt. It is PLAN.md
 exhaustive — and PLAN.md §10 records the answer anyway, which is this
 document's: claim it.
 
+**Done, 2026-10-05.** Both were built, in that order: §8 as PLAN.md §13 and
+§6 as PLAN.md §14. The measurements this document made, against what
+happened:
+
+| | projected | actual |
+|---|---:|---:|
+| annotations | ~700 (600–780) | **566** |
+| lines per annotation | 26.1 | 32.4 |
+| the engines | ~270 at 23.2 | 219 at 28.7 |
+| the `Value` tree | ~283 at 25.0 | 224 at 31.6 |
+| `lexical/` | ~106 at 35.1 | 85 at 43.6 |
+| plumbing | ~44 at 29.4 | 38 at 33.8 |
+| course units | 8 | 8 |
+| phases | ~8 | 8 |
+
+Every group came in under, and under §2's stated lower bound. §2 measured the
+shared function names between the two deserializers and predicted that the
+second implementation of a surface would cost less than the first. It did not
+carry that far enough. The crate implements `Serializer` eight times and
+`Deserializer` thirteen, and wraps its map and its iterators in second ones.
+The engines row is counted over 6,287 lines and not 6,257, because D14 named
+`build.rs`.
+
+§3 was decided as this document argued: `lexical/` is claimed. The release
+cadence risk below is unchanged. It has not been charged yet, because
+`1.0.151` is still the newest.
+
 The rest of this section stands as the argument for the other shape.
 
 **Reference track, and settle §3 before starting it.**

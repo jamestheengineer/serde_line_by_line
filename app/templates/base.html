@@ -40,7 +40,7 @@
        still listed — the zero is the progress — but it is not a link, because
        there is no page behind it yet. #}
     {% for g in nav %}
-    <div class="nav-head">{{ g.name }} <span class="nav-pct">{{ g.percent_label }}%</span></div>
+    <div class="nav-head"><a href="{{ root }}index.html#tree-{{ g.name }}">{{ g.name }}</a> <span class="nav-pct">{{ g.percent_label }}%</span></div>
     <ul>
     {% for f in g.files %}
       <li{% if f.href == current %} class="here"{% endif %}{% if !f.annotated %} class="unwritten"{% endif %}>

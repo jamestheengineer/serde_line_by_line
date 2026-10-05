@@ -114,9 +114,9 @@ struct NavFile {
 
 /// One annotated crate's files in the sidebar.
 ///
-/// The sidebar is grouped since there are two of them (D12): a flat list of 47
-/// files across two crates, three of which are called `lib.rs`, tells the
-/// reader nothing about where they are.
+/// The sidebar is grouped since there is more than one of them (D12): a flat
+/// list of 85 files across three crates, three of which are called `lib.rs`,
+/// tells the reader nothing about where they are.
 struct NavGroup {
     name: String,
     version: String,
@@ -628,15 +628,16 @@ fn main() -> Result<()> {
     let index = IndexPage {
         page_title: "serde line by line".to_string(),
         description: one_line(&format!(
-            "Every line of serde_core and serde_derive annotated, a {}-unit Rust course, and \
-             walks from #[derive(Serialize)] to its impl and from JSON bytes into a struct.",
+            "Every line of serde_core, serde_derive and serde_json annotated, a {}-unit Rust \
+             course, and walks from #[derive(Serialize)] to its impl and from JSON bytes into \
+             a struct.",
             store.course.len(),
         )),
         nav: build_nav(&store, &pages),
         // One row per annotated crate, each with its own figure. There is no
         // combined percentage anywhere on the site and this is the reason
-        // (D12): the two crates promise the same thing about different amounts
-        // of code, and 12,037 of 21,012 would be a number about neither.
+        // (D12): the crates promise the same thing about different amounts of
+        // code, and 12,037 of 39,371 would be a number about none of them.
         sources: store
             .sources
             .iter()

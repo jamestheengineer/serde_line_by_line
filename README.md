@@ -4,65 +4,64 @@
 [![pages](https://github.com/jamestheengineer/serde_line_by_line/actions/workflows/pages.yml/badge.svg)](https://github.com/jamestheengineer/serde_line_by_line/actions/workflows/pages.yml)
 [![serde_core annotated](https://img.shields.io/endpoint?url=https%3A%2F%2Fjamestheengineer.github.io%2Fserde_line_by_line%2Fbadge.json)](https://jamestheengineer.github.io/serde_line_by_line/)
 [![serde_derive annotated](https://img.shields.io/endpoint?url=https%3A%2F%2Fjamestheengineer.github.io%2Fserde_line_by_line%2Fbadge-serde_derive.json)](https://jamestheengineer.github.io/serde_line_by_line/)
+[![serde_json annotated](https://img.shields.io/endpoint?url=https%3A%2F%2Fjamestheengineer.github.io%2Fserde_line_by_line%2Fbadge-serde_json.json)](https://jamestheengineer.github.io/serde_line_by_line/)
 
 **Read it: <https://jamestheengineer.github.io/serde_line_by_line/>**
 
-A guided walkthrough of **every line** of
-[`serde_core`](https://crates.io/crates/serde_core) — the crate that holds
-Serde's actual trait definitions — and of
-[`serde_derive`](https://crates.io/crates/serde_derive), the crate that
-generates the code calling into it. Explanations side-by-side with the source,
-runnable micro-examples, the derive macro expanding live in the browser, and
-one JSON document followed through
-[`serde_json`](https://crates.io/crates/serde_json), so all three crates can be
-seen working on the same bytes. `serde_json` is the third crate being claimed
-line by line, and that work is in progress.
+A guided walkthrough of **every line** of three crates:
+[`serde_core`](https://crates.io/crates/serde_core), which holds Serde's
+actual trait definitions; [`serde_derive`](https://crates.io/crates/serde_derive),
+which generates the code calling into them; and
+[`serde_json`](https://crates.io/crates/serde_json), the format that code is
+run against. Explanations side-by-side with the source, runnable
+micro-examples, the derive macro expanding live in the browser, and one JSON
+document followed through all three crates, so they can be seen working on
+the same bytes.
 
-Along the way it teaches Rust twice over: lifetimes, trait design, associated
-types, generic bounds, `macro_rules!` and `no_std` engineering from
-`serde_core`; and then spans, an AST of your own, an attribute language and the
-bound inference behind a generated impl from `serde_derive`. Two of the most
-carefully written crates in the ecosystem as the worked examples. And it answers
-the question most readers actually arrive with — **what does
-`#[derive(Serialize)]` turn into?** — by following one struct and one enum all
-the way through and running the expansion in your browser.
+Along the way it teaches Rust three times over: lifetimes, trait design,
+associated types, generic bounds, `macro_rules!` and `no_std` engineering from
+`serde_core`; spans, an AST of your own, an attribute language and the bound
+inference behind a generated impl from `serde_derive`; and from `serde_json`
+the things neither of those shows, a hand-written parser that owns a scratch
+buffer, errors that carry a position, feature gates under strain, and
+`unsafe` with its invariants written down. And it answers the question most
+readers actually arrive with — **what does `#[derive(Serialize)]` turn
+into?** — by following one struct and one enum all the way through and
+running the expansion in your browser.
 
-> **Status: live, with four tracks, and a third crate being claimed.** Two
-> crates are claimed line by line — `serde_core` at 12,037 of 12,037 and
-> `serde_derive` at 8,975 of 8,975, two hard gates and no number that spans
-> them (PLAN.md §12, [D12](docs/decisions.md)). The course track spans both at
-> 21 units, and units from 22 on are read out of `serde_json`. Two walks
-> follow a path rather than claiming ground: one through
-> `serde_derive`, and one through `serde_json` (PLAN.md §13).
+> **Status: live, with four tracks over three claimed crates.** `serde_core`
+> is at 12,037 of 12,037 lines, `serde_derive` at 8,975 of 8,975 and
+> `serde_json` at 18,359 of 18,359. That is three hard gates and no number
+> that spans them (PLAN.md §12 and §14, [D12](docs/decisions.md),
+> [D14](docs/decisions.md)). The course track spans all three at 29 units.
+> Two walks follow a path rather than claiming ground: one through
+> `serde_derive` and one through `serde_json`.
 >
-> `serde_json` is the third `coverage` source as of PLAN.md §14. Every line of
-> it is claimed — 18,359 of 18,359, in 566 annotations — and all 38 of its
-> files are named complete. All eight of its course units are written, 22
-> through 29: implementing a `Deserializer`, writing a `Serializer`, strings
-> and borrowing from the input, numbers, the `Value` tree and `json!`, errors
-> that carry a position, feature-gated engineering, and `unsafe`. What is
-> left of §14 is K8, and until it ships this file leaves the first two
-> crates' sections as they stood.
+> **Reference** — every line of the three annotated crates: `serde_core`'s 19
+> files, `serde_derive`'s 28 and `serde_json`'s 38, all at 100% and all listed
+> in their `annotations/<crate>/manifest.toml`, so the gate hard-fails on any
+> gap or overlap. 1,437 annotations between them: 468, 403 and 566. The site
+> rebuilds and deploys to the URL above on every push to `main`.
 >
-> **Reference** — every line of both annotated crates: `serde_core`'s 19 files
-> and `serde_derive`'s 28, all at 100% and all listed in their
-> `annotations/<crate>/manifest.toml`, so the gate hard-fails on any gap or
-> overlap. 871 annotations between them. The site rebuilds and deploys to the
-> URL above on every push to `main`.
->
-> **Course** — all 21 units are written and the track is walkable start to
-> finish. Units 1&ndash;14 are read out of `serde_core`; units 15&ndash;21 out
-> of `serde_derive`, and they are about writing a procedural macro — spans, an
-> AST of your own, an attribute language, inferring the bounds of an impl you
-> are generating, and what the four enum representations cost to read. Five of
-> the first fourteen are supplementary in whole or in part: ownership and
-> lifetime basics entirely, since serde_core exercises lifetimes only in their
-> advanced forms and ordinary ownership not at all, and `PhantomData`, errors
-> and iterators-and-closures in part — the crate writes thirteen closures in
+> **Course** — all 29 units are written and the track is walkable start to
+> finish. Units 1&ndash;14 are read out of `serde_core`. Units 15&ndash;21
+> are read out of `serde_derive` and are about writing a procedural macro:
+> spans, an AST of your own, an attribute language, inferring the bounds of
+> an impl you are generating, and what the four enum representations cost to
+> read. Units 22&ndash;29 are read out of `serde_json`: implementing a
+> `Deserializer`, writing a `Serializer`, strings and borrowing from the
+> input, numbers, the `Value` tree and `json!`, errors that carry a position,
+> feature-gated engineering, and `unsafe`. Five of the first fourteen are
+> supplementary in whole or in part: ownership and lifetime basics entirely,
+> since serde_core exercises lifetimes only in their advanced forms and
+> ordinary ownership not at all, and `PhantomData`, errors and
+> iterators-and-closures in part — the crate writes thirteen closures in
 > twelve thousand lines and declares no `Fn` bound at all. That material is
 > written from scratch, with runnable examples and twelve committed
-> compile-fail cases, and every unit labels which of it came from the crate and
-> which did not.
+> compile-fail cases, and every unit labels which of it came from the crate
+> and which did not. None of the last eight is supplementary: ownership in
+> imperative code, error handling and `unsafe` each have a unit read out of
+> an annotated crate now.
 >
 > **Derive** — 9 units and 85 steps follow one struct and one enum from a
 > `syn::DeriveInput` to an emitted `impl`, citing 1,649 lines of pinned
@@ -71,19 +70,17 @@ the way through and running the expansion in your browser.
 > than stored, so the page does not build if the crate stops emitting them.
 > The walk makes no coverage claim of its own — it is a path, and the
 > percentage belongs to the reference track underneath it. Every one of its 85
-> steps now lands inside an annotation and links there, which is what happened
-> when `serde_derive` stopped being walked-not-claimed and became the second
-> crate the reference track claims.
+> steps lands inside an annotation and links there.
 >
 > **Json** — 9 units and 104 steps follow one document,
 > `{"a":[1,true],"b":"x"}`, from bytes through `serde_json`'s parser into a
 > `Value`, back out to the same twenty-two bytes, through an error and its
 > position, and finally into a struct through the impl the derive walk
-> emitted. It cites 2,258 of `serde_json`'s lines and claims none of them
-> itself: the claiming is the reference track's, which has started on
-> `serde_json` (PLAN.md §14). Where the walk crosses into `serde_core` or
-> `serde_derive` — 21 of its stops — it lands inside an annotation and links
-> there, and its other stops will as each file they stand on is finished. Its 21 claims about what the crate *produces*
+> emitted. It cites 2,254 of `serde_json`'s lines. Like the derive walk it
+> makes no coverage claim of its own, and every one of its 104 steps lands
+> inside an annotation and links there. `serde_json` was walked and not
+> claimed when this track was written (PLAN.md §13), and §14 put the
+> annotations underneath it. Its 21 claims about what the crate *produces*
 > are located in the output of a real run of the pinned version, checked
 > against both the host and the browser ([D13](docs/decisions.md)).
 >
@@ -105,7 +102,7 @@ the way through and running the expansion in your browser.
 > …
 > course track: 29/29 units written
 > narrative track derive: 9 units, 85 steps, 1649 of serde_derive-1.0.229's 8975 lines cited
-> narrative track json: 9 units, 104 steps, 2258 of serde_json-1.0.151's 18359 lines cited
+> narrative track json: 9 units, 104 steps, 2254 of serde_json-1.0.151's 18359 lines cited
 > ```
 
 ---
@@ -124,7 +121,8 @@ the tree to understand something.
 
 `serde_json` is here for the opposite reason. It is the format the other two
 crates exist to serve, and the one place on the site where a byte is actually
-read: the walk through it is how the trait definitions get called.
+read: it is where the trait definitions get called. It is also the largest of
+the three, at 38 files and 18,359 lines.
 
 ## What "every line" means here
 
@@ -134,7 +132,7 @@ the gates ask of it:
 
 | role | crate | what is promised |
 |---|---|---|
-| `coverage` | `serde_core`, `serde_derive`, `serde_json` | every line claimed by exactly one annotation; `cargo xtask coverage` fails on a gap, an overlap, or a dangling reference. `serde_json` took this role in PLAN.md §14 and is being claimed file by file |
+| `coverage` | `serde_core`, `serde_derive`, `serde_json` | every line claimed by exactly one annotation; `cargo xtask coverage` fails on a gap, an overlap, or a dangling reference |
 | `narrative` | none today | **walked, not claimed** — a walk cites line ranges that resolve in the pinned tree and makes no coverage promise, so it gets no percentage. `serde_derive` held this role until §12 and `serde_json` until §14 |
 | `glossary` | `syn`, `quote`, `proc-macro2` | **quoted, not annotated** — a definition is pinned to a line range, and the gate fails if the quotation drifts from the tree |
 
@@ -142,29 +140,33 @@ A role the gates do not know is a build failure, which is what keeps the
 promise from quietly widening. The reasoning is D9 in
 [`docs/decisions.md`](docs/decisions.md).
 
-`serde_derive` carries the `coverage` role as of PLAN.md §12 and is claimed
-file by file; it was `narrative` while the derive walk was the only thing
-citing it. Two coverage sources means **two figures and never a combined one**
-— the two crates promise the same thing about different amounts of code, so a
-percentage spanning them would describe neither ([D12](docs/decisions.md)).
-The third state the gate needs for this is *not started*: a file no annotation
-claims is counted, not warned about, because it is the roadmap rather than a
-defect.
+`serde_derive` took the `coverage` role in PLAN.md §12 and `serde_json` in
+§14. Each was `narrative` first, while a walk was the only thing citing it.
+Three coverage sources means **three figures and never a combined one**: the
+crates promise the same thing about different amounts of code, so a
+percentage spanning them would describe none of them
+([D12](docs/decisions.md)). The third state the gate needed while each was
+being claimed is *not started*: a file no annotation claims is counted, not
+warned about, because it is the roadmap rather than a defect.
 
-The first two crates are claimed in full, and what "every line" cost in each is
-worth stating side by side, because the two numbers are different for a reason:
+All three are claimed in full, and what "every line" cost in each is worth
+stating side by side, because the numbers are different for a reason:
 
 | | lines | annotations | lines each |
 |---|---:|---:|---:|
 | `serde_core` | 12,037 | 468 | 25.7 |
 | `serde_derive` | 8,975 | 403 | 22.3 |
+| `serde_json` | 18,359 | 566 | 32.4 |
 
 `serde_core` compresses because 45 `macro_rules!` definitions generate 288
 invocations and a `macro-use` annotation costs a line of reference rather than a
 paragraph. `serde_derive` has 2 `macro_rules!` and 271 `quote!` blocks, every
 one emitting something different — so it is 25% smaller and costs nearly as
 much. What compression it does have is sharing: three of the four enum
-representations read their payload through one function.
+representations read their payload through one function. `serde_json`
+compresses most, because it repeats itself most. It implements `Serializer`
+eight times and `Deserializer` thirteen, and an annotation can say "the same,
+except" about a hundred lines at once.
 
 ## Shape of the app
 
@@ -190,17 +192,17 @@ example's output is asserted in CI, so explanations cannot drift from behavior.
 
 Four ways to read it:
 
-- **Reference track** — file by file, 100% coverage, the spine.
-- **Course track** — the same annotations reordered as a Rust curriculum: 14
-  units, sequenced by the prereq graph rather than by file. Units serde_core
-  cannot supply — ownership in imperative code, lifetime basics, iterators and
-  closures — are written from scratch and labelled **supplementary** in the UI,
-  rather than pretending the crate demonstrates them.
+- **Reference track** — file by file through three source trees, 100%
+  coverage of each, the spine.
+- **Course track** — the same annotations reordered as a Rust curriculum: 29
+  units across the three crates, sequenced by the prereq graph rather than by
+  file. Units no crate can supply — ownership and lifetime basics — are
+  written from scratch and labelled **supplementary** in the UI, rather than
+  pretending a crate demonstrates them.
 - **Derive track** — one struct and one enum followed out of `serde_core` and
   through `serde_derive`, from the `TokenStream` the compiler hands over to the
-  `impl` it gets back. 9 units, 85 steps, and where the path crosses back into
-  `serde_core` it links to the annotation rather than explaining the same lines
-  twice.
+  `impl` it gets back. 9 units, 85 steps, each linking to the annotation it
+  lands in rather than explaining the same lines twice.
 - **Json track** — one document followed through `serde_json`, from bytes to a
   `Value` and back, then into a struct through the impl the derive track
   watched being emitted. 9 units, 104 steps, and every output it quotes is
